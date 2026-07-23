@@ -225,14 +225,15 @@ regardless of what the UI would have allowed.
 
 ## 3. Workflow state machine
 
-> **Note (domain-model milestone, see §7.1 item 8):** the diagram below is the
-> original illustrative design. The persistence-layer milestone implemented a
-> more granular, 17-stage version of this same pipeline, with a broader set of
-> immutable-approval-gated human review stages — see `docs/domain-model.md`
-> §4 for the current, implemented state machine and
-> `packages/domain/src/workflow/transition-rules.ts` for its exhaustive
-> transition table. The stages below map roughly 1:1 conceptually but not
-> name-for-name.
+> **Note (domain-model milestone, see §7.1 item 8 and
+> `docs/adr/0002-campaign-lifecycle-alignment.md`):** the diagram below is the
+> original illustrative design and is retained for historical context only.
+> The canonical, implemented state machine is the 20-stage lifecycle in
+> `docs/domain-model.md` §4 and `packages/domain/src/workflow/transition-rules.ts`.
+> An interim revision of this work briefly implemented a 17-stage machine that
+> folded performance analysis into the linear campaign pipeline — this was
+> identified as a deviation from the decision below (§7.1 item 8) and
+> corrected; see ADR-0002 for the full account.
 
 ### 3.1 Top-level stages
 
@@ -683,22 +684,41 @@ architecture change, not a correction of this document.
    `apps/dashboard`, and is the only app (besides the narrowly-scoped
    `apps/webhook-receiver`) that holds a Temporal client or enforces RBAC. See
    §2.1.
-8. **Campaign state machine granularity and gate count (domain-model
-   milestone, narrows §3.1).** The illustrative 3.1 diagram's coarser stages
-   (`CONCEPT`, `SCRIPTING`, `PROMPTING`, `GENERATION`, …) and "three human
-   gates" framing are superseded by a 17-stage pipeline (`DRAFT` through
-   `ITERATION_PLANNING`) implemented in `packages/domain/src/workflow` and
-   `packages/database`'s transition service — see `docs/domain-model.md` for
-   the full state diagram, transition table, and worked examples.
-   `STRATEGY_REVIEW`, `CONCEPT_REVIEW`, and `SCRIPT_REVIEW` are now also
-   treated as immutable-approval-gated human review stages, in addition to
-   the original three (concept, shot selection, final master) — five gates
-   total. The underlying principle (human gates require immutable approval
-   records, enforced server-side, structurally unbypassable by
-   workflow/activity code) is unchanged; only the count of gated stages grew.
-   No live migration has been applied in this environment (no Docker, no
-   local Postgres) — see `docs/domain-model.md` §8 for what was verified
-   without a database connection and what remains to be run.
+8. **Campaign state machine granularity (domain-model milestone, narrows
+   §3.1; see `docs/adr/0002-campaign-lifecycle-alignment.md` for the full
+   history).** The illustrative §3.1 diagram's coarser stage names are
+   superseded by a **20-stage** pipeline (`DRAFT` through `DISTRIBUTED`)
+   implemented in `packages/domain/src/workflow` and `packages/database`'s
+   transition service — see `docs/domain-model.md` §4 for the full state
+   diagram, transition table, and worked examples. This corrects an interim
+   revision of this work that had implemented a 17-stage version folding
+   `PERFORMANCE_COLLECTION`/`ITERATION_PLANNING` into the linear pipeline —
+   that was identified as a direct reversal of this item's own guiding
+   principle (below) and was removed; see ADR-0002. The corrected, canonical
+   design:
+   - **Human gates stay at exactly three**: `CONCEPT_REVIEW -> SCRIPT_REVIEW`
+     (gate `CONCEPT`), `HUMAN_SHOT_SELECTION -> COMPOSITING` (gate
+     `SHOT_SELECTION`), and `FINAL_APPROVAL -> VARIANT_GENERATION` (gate
+     `FINAL`) — matching this document's original three-gate framing exactly.
+     `STRATEGY_REVIEW` and `SCRIPT_REVIEW` are checkpoint stages (gated on
+     artifact existence, not a `HumanApproval` record) — they do not add a
+     fourth/fifth gate.
+   - **Performance analysis remains fully decoupled.** `PERFORMANCE_COLLECTION`
+     and `ITERATION_PLANNING` are not campaign-production stages; the
+     `PerformanceAnalysisWorkflow` design in this section's prose (a separate,
+     independently-triggered workflow over completed campaign/distribution
+     records) stands as originally decided. `PerformanceMetrics` and related
+     entities remain in the schema for that future, separate workflow.
+   - **VISUAL_QA/CONTINUITY_QA, SOUND_DESIGN, and VARIANT_GENERATION/VARIANT_QA
+     are distinct stages** (not collapsed), each with typed, failure-category-
+     driven revision routing for stages with more than one valid repair
+     target — see `packages/domain/src/workflow/quality-failure-routing.ts`.
+   - The underlying principle (human gates require immutable approval
+     records, enforced server-side, structurally unbypassable by
+     workflow/activity code) is unchanged throughout both revisions.
+     No live migration has been applied in this environment (no Docker, no
+     local Postgres) — see `docs/domain-model.md` §8 for what was verified
+     without a database connection and what remains to be run.
 
 ### 7.2 Remaining open questions
 

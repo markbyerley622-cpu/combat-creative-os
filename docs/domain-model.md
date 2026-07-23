@@ -6,21 +6,29 @@ or dashboard UI is implemented here — see `packages/agents/README.md` and
 `docs/architecture.md` §7.1/§8. Live migrations have **not** been applied —
 see "Known limitations" at the end of this document.
 
+**This document describes the corrected, canonical 20-stage state machine.**
+An interim revision briefly implemented a 17-stage machine that folded
+performance analysis into the linear campaign pipeline and dropped several
+distinct stages/gates — that was identified as a deviation from
+`docs/architecture.md` §3.1's decoupled-performance-analysis decision and has
+been corrected; see `docs/adr/0002-campaign-lifecycle-alignment.md` for the
+full history.
+
 ---
 
 ## 1. Where things live
 
-| Concern | Location |
-| --- | --- |
-| Zod schemas (source of truth; TS types are inferred, never hand-duplicated) | `packages/domain/src/schemas/*.ts` |
-| Campaign stage enum, transition table, typed errors, pure evaluator | `packages/domain/src/workflow/*.ts` |
-| Prisma models/migrations | `packages/database/prisma/schema.prisma` |
-| Transition service (atomicity/idempotency/concurrency/budget/audit) | `packages/database/src/repositories/campaign-transition-service.ts` |
-| Fact derivation from persisted state | `packages/database/src/repositories/transition-facts.ts` |
-| Budget ledger | `packages/database/src/repositories/budget-repository.ts` |
-| Asset lineage | `packages/database/src/repositories/asset-repository.ts` |
-| Prompt versioning | `packages/database/src/repositories/prompt-repository.ts` |
-| Human approval (immutable) | `packages/database/src/repositories/human-approval-repository.ts` |
+| Concern                                                                     | Location                                                            |
+| --------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| Zod schemas (source of truth; TS types are inferred, never hand-duplicated) | `packages/domain/src/schemas/*.ts`                                  |
+| Campaign stage enum, transition table, typed errors, pure evaluator         | `packages/domain/src/workflow/*.ts`                                 |
+| Prisma models/migrations                                                    | `packages/database/prisma/schema.prisma`                            |
+| Transition service (atomicity/idempotency/concurrency/budget/audit)         | `packages/database/src/repositories/campaign-transition-service.ts` |
+| Fact derivation from persisted state                                        | `packages/database/src/repositories/transition-facts.ts`            |
+| Budget ledger                                                               | `packages/database/src/repositories/budget-repository.ts`           |
+| Asset lineage                                                               | `packages/database/src/repositories/asset-repository.ts`            |
+| Prompt versioning                                                           | `packages/database/src/repositories/prompt-repository.ts`           |
+| Human approval (immutable)                                                  | `packages/database/src/repositories/human-approval-repository.ts`   |
 
 Every Zod schema has an inferred `type X = z.infer<typeof XSchema>` — there is
 no hand-written interface anywhere in `packages/domain` duplicating a schema's
@@ -30,33 +38,33 @@ shape.
 
 ## 2. The 24 required domain schemas
 
-| Schema | File | Notes |
-| --- | --- | --- |
-| CampaignBrief | `schemas/campaign.ts` | versioned, immutable once `acceptedAt` is set |
-| AudienceProfile | `schemas/audience-profile.ts` | child of a CampaignBrief |
-| CreativeConcept | `schemas/creative-concept.ts` | versioned |
-| VisualLanguage | `schemas/creative-concept.ts` | 1:1 with a CreativeConcept version |
-| Script | `schemas/script.ts` | versioned |
-| Timeline | `schemas/timeline.ts` | versioned; `entries` reference Shot + TransitionSpecification |
-| Shot | `schemas/shot.ts` | belongs to a Script |
-| TransitionSpecification | `schemas/transition-specification.ts` | reusable cut/dissolve/wipe/fade definition |
-| GenerationPrompt | `schemas/generation-prompt.ts` | `promptVersionId` is **mandatory** |
-| GenerationCandidate | `schemas/generation-candidate.ts` | one video-gen attempt |
-| QualityAssessment | `schemas/quality-assessment.ts` | assesses a candidate *or* a final-master asset (XOR) |
-| QualityFailure | `schemas/quality-assessment.ts` | structured failure detail on an assessment |
-| HumanApproval | `schemas/human-approval.ts` | **immutable** — insert-only repository |
-| Asset | `schemas/asset.ts` | polymorphic; always has a ProvenanceRecord |
-| AssetProvenance | `schemas/asset.ts` | lineage edge list (`derivedFromAssetIds`) |
-| LicenseRecord | `schemas/license-record.ts` | 0..1 on Asset |
-| RenderJob | `schemas/render-job.ts` | COMPOSITING or EXPORT |
-| SoundCue | `schemas/sound-cue.ts` | belongs to a Timeline |
-| EditDecisionList | `schemas/edit-decision-list.ts` | versioned; `entries` reference Asset |
-| DeliverySpecification | `schemas/delivery-specification.ts` | per platform/aspect-ratio |
-| CreativeVariant | `schemas/creative-variant.ts` | a rendered delivery-spec-conformant cut |
-| PerformanceMetrics | `schemas/performance-metrics.ts` | per CreativeVariant, per platform |
-| PromptTemplate | `schemas/prompt-template.ts` | one per agent/purpose |
-| PromptVersion | `schemas/prompt-template.ts` | monotonically versioned; pinned by GenerationPrompt |
-| BudgetPolicy | `schemas/budget-policy.ts` | cap at WORKSPACE/CAMPAIGN/SHOT/PROVIDER level |
+| Schema                  | File                                  | Notes                                                                                           |
+| ----------------------- | ------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| CampaignBrief           | `schemas/campaign.ts`                 | versioned, immutable once `acceptedAt` is set                                                   |
+| AudienceProfile         | `schemas/audience-profile.ts`         | child of a CampaignBrief                                                                        |
+| CreativeConcept         | `schemas/creative-concept.ts`         | versioned                                                                                       |
+| VisualLanguage          | `schemas/creative-concept.ts`         | 1:1 with a CreativeConcept version                                                              |
+| Script                  | `schemas/script.ts`                   | versioned                                                                                       |
+| Timeline                | `schemas/timeline.ts`                 | versioned; `entries` reference Shot + TransitionSpecification                                   |
+| Shot                    | `schemas/shot.ts`                     | belongs to a Script                                                                             |
+| TransitionSpecification | `schemas/transition-specification.ts` | reusable cut/dissolve/wipe/fade definition                                                      |
+| GenerationPrompt        | `schemas/generation-prompt.ts`        | `promptVersionId` is **mandatory**                                                              |
+| GenerationCandidate     | `schemas/generation-candidate.ts`     | one video-gen attempt                                                                           |
+| QualityAssessment       | `schemas/quality-assessment.ts`       | assesses a candidate _or_ a stage-output asset (XOR); `subjectStage` disambiguates which stage  |
+| QualityFailure          | `schemas/quality-assessment.ts`       | structured failure detail on an assessment; `category` drives typed revision routing (§4.2)     |
+| HumanApproval           | `schemas/human-approval.ts`           | **immutable** — insert-only repository; `repairTarget` required for a rejected `FINAL` decision |
+| Asset                   | `schemas/asset.ts`                    | polymorphic; always has a ProvenanceRecord                                                      |
+| AssetProvenance         | `schemas/asset.ts`                    | lineage edge list (`derivedFromAssetIds`)                                                       |
+| LicenseRecord           | `schemas/license-record.ts`           | 0..1 on Asset                                                                                   |
+| RenderJob               | `schemas/render-job.ts`               | COMPOSITING or EXPORT                                                                           |
+| SoundCue                | `schemas/sound-cue.ts`                | belongs to a Timeline                                                                           |
+| EditDecisionList        | `schemas/edit-decision-list.ts`       | versioned; `entries` reference Asset                                                            |
+| DeliverySpecification   | `schemas/delivery-specification.ts`   | per platform/aspect-ratio                                                                       |
+| CreativeVariant         | `schemas/creative-variant.ts`         | a rendered delivery-spec-conformant cut                                                         |
+| PerformanceMetrics      | `schemas/performance-metrics.ts`      | per CreativeVariant, per platform                                                               |
+| PromptTemplate          | `schemas/prompt-template.ts`          | one per agent/purpose                                                                           |
+| PromptVersion           | `schemas/prompt-template.ts`          | monotonically versioned; pinned by GenerationPrompt                                             |
+| BudgetPolicy            | `schemas/budget-policy.ts`            | cap at WORKSPACE/CAMPAIGN/SHOT/PROVIDER level                                                   |
 
 Three supporting tables exist beyond the literal 24, because the explicit
 requirements ("audited", "idempotent", "immutable approval records") need
@@ -95,66 +103,74 @@ stateDiagram-v2
     [*] --> DRAFT
     DRAFT --> STRATEGY_REVIEW
     STRATEGY_REVIEW --> CONCEPT_REVIEW
-    STRATEGY_REVIEW --> DRAFT: revision requested
     CONCEPT_REVIEW --> SCRIPT_REVIEW
     CONCEPT_REVIEW --> STRATEGY_REVIEW: revision requested
     SCRIPT_REVIEW --> ASSET_COLLECTION
-    SCRIPT_REVIEW --> CONCEPT_REVIEW: revision requested
-    ASSET_COLLECTION --> SHOT_GENERATION
-    SHOT_GENERATION --> AUTOMATED_QA
-    AUTOMATED_QA --> HUMAN_SHOT_SELECTION
-    AUTOMATED_QA --> SHOT_GENERATION: QA failed, retries remain
+    SCRIPT_REVIEW --> CONCEPT_REVIEW: checkpoint revision
+    ASSET_COLLECTION --> PROMPTING
+    PROMPTING --> SHOT_GENERATION
+    SHOT_GENERATION --> VISUAL_QA
+    VISUAL_QA --> CONTINUITY_QA
+    VISUAL_QA --> SHOT_GENERATION: visual QC failed, retries remain
+    CONTINUITY_QA --> HUMAN_SHOT_SELECTION
+    CONTINUITY_QA --> SHOT_GENERATION: continuity conflict, retries remain
     HUMAN_SHOT_SELECTION --> COMPOSITING
     HUMAN_SHOT_SELECTION --> SHOT_GENERATION: reviewer rejects candidates
     COMPOSITING --> ROUGH_CUT
-    ROUGH_CUT --> FINAL_QA
+    COMPOSITING --> HUMAN_SHOT_SELECTION: shot unusable
+    COMPOSITING --> COMPOSITING: technical retry
+    ROUGH_CUT --> SOUND_DESIGN
+    ROUGH_CUT --> COMPOSITING: recompositing required
+    SOUND_DESIGN --> FINAL_QA
+    SOUND_DESIGN --> ROUGH_CUT: edit-timing issue
+    SOUND_DESIGN --> SOUND_DESIGN: audio-technical retry
     FINAL_QA --> FINAL_APPROVAL
-    FINAL_QA --> ROUGH_CUT: technical failure
-    FINAL_APPROVAL --> EXPORTING
-    FINAL_APPROVAL --> ROUGH_CUT: changes requested
+    FINAL_QA --> COMPOSITING: compositing-technical failure
+    FINAL_QA --> ROUGH_CUT: edit-timing failure
+    FINAL_QA --> SOUND_DESIGN: audio failure
+    FINAL_APPROVAL --> VARIANT_GENERATION
+    FINAL_APPROVAL --> COMPOSITING: rejected, repair target = COMPOSITING
+    FINAL_APPROVAL --> ROUGH_CUT: rejected, repair target = ROUGH_CUT
+    FINAL_APPROVAL --> SOUND_DESIGN: rejected, repair target = SOUND_DESIGN
+    VARIANT_GENERATION --> VARIANT_QA
+    VARIANT_QA --> EXPORTING
+    VARIANT_QA --> VARIANT_GENERATION: variant QA failed
     EXPORTING --> READY_FOR_DISTRIBUTION
+    EXPORTING --> EXPORTING: technical retry
     READY_FOR_DISTRIBUTION --> DISTRIBUTED
-    DISTRIBUTED --> PERFORMANCE_COLLECTION
-    PERFORMANCE_COLLECTION --> ITERATION_PLANNING
-    ITERATION_PLANNING --> DRAFT: new iteration cycle
+    DISTRIBUTED --> READY_FOR_DISTRIBUTION: distribution failure
 ```
 
 This is the exhaustive transition table — see
 `packages/domain/src/workflow/transition-rules.ts`'s `CAMPAIGN_TRANSITIONS`
 constant. Any `(from, to)` pair not listed there is invalid by construction;
-there is no fallback/default-allow path. 24 transitions total: 16 forward, 8
-revision/failure loops.
+there is no fallback/default-allow path. **38 transitions total: 19 forward,
+19 revision/failure loops** — three of which (`COMPOSITING`, `SOUND_DESIGN`,
+`EXPORTING`) are same-stage technical-retry loops that don't regress any
+earlier creative approval.
 
-**Relationship to docs/architecture.md §3.1.** That earlier diagram used
-coarser stage names (`CONCEPT`, `SCRIPTING`, `PROMPTING`, `GENERATION`, …)
-and treated only concept/shot-selection/final-master as human gates. This
-schema work supersedes it with the 17-stage breakdown above per this
-milestone's requirements, and — per CLAUDE.md's rule that a narrowing of a
-"resolved" architecture decision gets a note rather than a silent edit — a
-corresponding entry has been added to `docs/architecture.md` §7.1 (item 8)
-recording that **STRATEGY_REVIEW, CONCEPT_REVIEW, and SCRIPT_REVIEW are now
-also treated as immutable-approval-gated human review stages**, in addition
-to the three gates the architecture doc originally called out. The
-underlying principle ("human gates require immutable approval records,
-enforced server-side, never bypassable by workflow/activity code") is
-unchanged; only the *count* of gated stages grew.
+**Relationship to docs/architecture.md §3.1 and ADR-0002.** That earlier
+diagram used different stage names for an equivalent 19-stage pipeline. This
+document's 20-stage machine is the corrected, canonical implementation —
+see `docs/adr/0002-campaign-lifecycle-alignment.md` for the full account of
+what changed and why, including a brief interim 17-stage implementation that
+was found to deviate from the architecture and has been superseded.
 
 ### 4.2 Prerequisites and human gates
 
 Every transition has a `requiredFacts: TransitionFactKey[]` list; the pure
 `evaluateCampaignTransition(from, to, facts)` function only returns `{ ok: true }`
-once every required fact is `true`. Five forward transitions additionally
-carry a `requiredApprovalGate`:
+once every required fact is `true`. **Exactly three** forward transitions
+carry a `requiredApprovalGate` — matching docs/architecture.md's original
+three-gate design exactly:
 
-| Transition | Gate |
-| --- | --- |
-| `STRATEGY_REVIEW -> CONCEPT_REVIEW` | `STRATEGY` |
-| `CONCEPT_REVIEW -> SCRIPT_REVIEW` | `CONCEPT` |
-| `SCRIPT_REVIEW -> ASSET_COLLECTION` | `SCRIPT` |
-| `HUMAN_SHOT_SELECTION -> COMPOSITING` | `SHOT_SELECTION` |
-| `FINAL_APPROVAL -> EXPORTING` | `FINAL` |
+| Transition                             | Gate             |
+| -------------------------------------- | ---------------- |
+| `CONCEPT_REVIEW -> SCRIPT_REVIEW`      | `CONCEPT`        |
+| `HUMAN_SHOT_SELECTION -> COMPOSITING`  | `SHOT_SELECTION` |
+| `FINAL_APPROVAL -> VARIANT_GENERATION` | `FINAL`          |
 
-The corresponding fact (e.g. `strategyApproved`) is derived by
+The corresponding fact (e.g. `conceptApproved`) is derived by
 `computeTransitionFacts` from the **most recent `HumanApproval` row at that
 gate** (`latestApprovalForGate`, sorted by `decidedAt`) — never from a
 caller-supplied claim. `HumanApproval` rows are immutable: a revised decision
@@ -163,6 +179,52 @@ read helpers, no update/delete. Every applied transition through a gate
 records the deciding `HumanApproval.id` on the `CampaignTransitionAudit.approvalId`
 column, so "which approval authorized this transition" is always
 reconstructible.
+
+`STRATEGY_REVIEW` and `SCRIPT_REVIEW` are deliberately **not** gates —
+`STRATEGY_REVIEW -> CONCEPT_REVIEW` requires only `conceptDrafted` (a
+`CreativeConcept` exists) and `SCRIPT_REVIEW -> ASSET_COLLECTION` requires
+only `scriptDrafted` (a `Script` exists); neither checks a `HumanApproval`
+record. `SCRIPT_REVIEW`'s revision edge back to `CONCEPT_REVIEW` is
+consequently the **one** transition in the entire table with an empty
+`requiredFacts` list — a deliberate, documented exception (see the inline
+comment on that entry in `transition-rules.ts`), not an oversight of "every
+transition must have prerequisites."
+
+#### Typed failure routing
+
+`COMPOSITING`, `SOUND_DESIGN`, and `FINAL_QA` each have more than one valid
+revision target, disambiguated by a **typed `QualityFailureCategory`** rather
+than caller choice:
+
+| Category                | Routes to              | Used by                                 |
+| ----------------------- | ---------------------- | --------------------------------------- |
+| `SHOT_UNUSABLE`         | `HUMAN_SHOT_SELECTION` | `COMPOSITING`                           |
+| `COMPOSITING_TECHNICAL` | `COMPOSITING`          | `COMPOSITING` (self-retry), `FINAL_QA`  |
+| `EDIT_TIMING`           | `ROUGH_CUT`            | `SOUND_DESIGN`, `FINAL_QA`              |
+| `AUDIO_TECHNICAL`       | `SOUND_DESIGN`         | `SOUND_DESIGN` (self-retry), `FINAL_QA` |
+
+`packages/domain/src/workflow/quality-failure-routing.ts`'s
+`QUALITY_FAILURE_ROUTING` map is the single source of truth for this table;
+`transition-facts.ts` reverse-looks-up a target stage's category from that
+map rather than hardcoding it a second time. Each candidate revision edge
+checks for the **existence** of an asset-based `QualityAssessment` (`pass:
+false`) tagged `subjectStage` for that stage, with an attached `QualityFailure`
+of the matching category (`assetAssessmentExists` in `transition-facts.ts`).
+
+`FINAL_APPROVAL`'s rejection is the one case where the target is a **human
+choice**, not an automated category: `HumanApproval.repairTarget` is
+required (and Zod-validated to one of `COMPOSITING | ROUGH_CUT |
+SOUND_DESIGN`) exactly when `gate = FINAL` and `decision != APPROVED`. Because
+`latestApprovalForGate` only considers the single most recent decision per
+gate, a campaign can only be actively routed to _one_ of the three targets at
+a time from a given rejection — reflected in
+`campaign-transition-service.test.ts`'s dedicated per-target tests for this
+edge (it is not covered by the generic all-revision-facts-true fixture used
+for every other revision transition).
+
+`ROUGH_CUT -> COMPOSITING`, `EXPORTING -> EXPORTING`, and `DISTRIBUTED ->
+READY_FOR_DISTRIBUTION` each have exactly one target and need no category
+disambiguation — they're gated on a plain existence/status fact instead.
 
 ### 4.3 Atomicity, idempotency, concurrency, audit
 
@@ -178,8 +240,8 @@ one caller-managed transaction:
 3. **Budget check + reservation** (only for transitions into
    `SHOT_GENERATION`) at the WORKSPACE and CAMPAIGN levels — see §5.3.
 4. **Compare-and-swap stage update.** `campaign.updateMany({ where: { id,
-   workspaceId, currentStage, version }, data: { currentStage: next, version:
-   { increment: 1 } } })`. If no row matches (because another attempt already
+workspaceId, currentStage, version }, data: { currentStage: next, version:
+{ increment: 1 } } })`. If no row matches (because another attempt already
    moved the campaign), `count === 0` and the caller gets a typed
    `CONCURRENT_MODIFICATION` error — this is what makes concurrent transition
    attempts safe without a Postgres advisory lock.
@@ -223,38 +285,63 @@ released before returning.
 
 ### 4.4 Bounded retries
 
-`AUTOMATED_QA -> SHOT_GENERATION` (retry) is only valid while
-`automatedQARetryAllowed` is true: a shot that hasn't yet passed automated QA
-and whose highest `GenerationCandidate.attempt` is still below
+`VISUAL_QA -> SHOT_GENERATION` and `CONTINUITY_QA -> SHOT_GENERATION` (each a
+retry) are only valid while `visualQARetryAllowed`/`continuityQARetryAllowed`
+is true: a shot that hasn't yet passed the respective check and whose
+highest `GenerationCandidate.attempt` is still below
 `MAX_SHOT_GENERATION_ATTEMPTS` (3, matching architecture.md §3.3's stated
-default). Once a shot exhausts its attempts, this fact is false and the
+default). Once a shot exhausts its attempts, the fact is false and the
 workflow-level caller must route it to `HUMAN_SHOT_SELECTION` as a
 `NEEDS_HUMAN` shot instead of retrying forever — there is no unbounded loop
-in this table.
+for shot generation in this table.
+
+The three same-stage technical-retry loops (`COMPOSITING`, `SOUND_DESIGN`,
+`EXPORTING`) are **not** currently bounded by an attempt counter — each is
+gated only on the existence of a matching technical-failure signal, not a
+capped retry count. This is a known limitation (§8), consistent with
+CLAUDE.md's "bound retries explicitly" rule only being fully applied to the
+shot-generation loop in this milestone; extending bounded retries to these
+three loops is expected before production hardening (architecture.md §8,
+M14).
 
 ---
 
 ## 5. Deriving facts from persisted state
 
 `loadTransitionFactInputs` fetches flat, un-nested rows (briefs, approvals,
-scripts, shots, generation prompts/candidates, quality assessments, render
-jobs, edit decision lists, delivery specs, creative variants, performance
-metrics) for one campaign. `computeTransitionFacts` then joins them **in
-memory** into the boolean facts a transition needs. This split (I/O layer vs.
-pure computation layer) is what lets `transition-rules.test.ts` (in
-`packages/domain`) test the rule table with hand-built facts, and what lets
-`campaign-transition-service.test.ts` (in `packages/database`) test the full
-service against an in-memory store — neither needs a live database.
+concepts, scripts, shots, generation prompts/candidates, quality assessments
+and failures, render jobs, edit decision lists, delivery specs, creative
+variants, timelines, sound cues) for one campaign. `computeTransitionFacts`
+then joins them **in memory** into the boolean facts a transition needs.
+This split (I/O layer vs. pure computation layer) is what lets
+`transition-rules.test.ts` (in `packages/domain`) test the rule table with
+hand-built facts, and what lets `campaign-transition-service.test.ts` (in
+`packages/database`) test the full service against an in-memory store —
+neither needs a live database. Performance-related tables are deliberately
+never loaded here — performance analysis is a separate, decoupled workflow
+(ADR-0002) and must not feed campaign-stage transition facts.
 
 Several facts are deliberate MVP heuristics, called out here so they're not
 mistaken for finished business logic:
 
 - `allShotsHaveRequiredAssets` is approximated as "the latest Script has at
   least one Shot" — there is no dedicated `RequiredAsset` join table yet.
-- `compositingComplete` / `exportRenderComplete` check for *any* successful
-  `RenderJob` of the right kind, not a per-shot completeness join.
-- `deliverySpecMet` / `distributionConfirmed` check for *any* `CreativeVariant`
-  in the right status, not a full per-platform matrix.
+- `compositingComplete` / `exportRenderComplete` / `soundDesignComplete`
+  check for _any_ successful `RenderJob`/`SoundCue` of the right kind, not a
+  per-shot completeness join.
+- `deliverySpecMet` checks for _any_ `CreativeVariant` in the right status,
+  not a full per-platform matrix.
+- The typed-failure-routing facts (`*RepairTargetIs*`, `finalQAAudioFailure`,
+  `roughCutFailureRequiresRecompositing`) check for the **existence** of a
+  matching `QualityFailure` among a campaign's asset-based assessments, not
+  specifically the most recent one for a given subject — a stale failure
+  that was actually fixed by a later, unassessed attempt could in principle
+  still satisfy the fact. Tightening this to "most recent assessment per
+  subject" is a natural next refinement once the activities that create
+  these rows exist.
+- `distributionFailureDetected` and `variantQAFailed` currently share one
+  underlying signal (`CreativeVariant.status === 'FAILED'`), because no
+  dedicated distribution-attempt entity exists in this schema yet.
 
 These will be tightened once the workflows/activities milestones (M6–M12,
 architecture.md §8) that actually populate these tables in fine grain are
@@ -302,12 +389,12 @@ reconstructible via `promptVersionId -> PromptVersion.systemPrompt`.
   validation and Prisma Client generation) succeed without a database
   connection and have been run — the schema is valid and compiles to correct
   PostgreSQL DDL (spot-checked via `prisma migrate diff --from-empty
-  --to-schema-datamodel ... --script`, which also needs no live connection).
+--to-schema-datamodel ... --script`, which also needs no live connection).
   Per CLAUDE.md's migration rule, migration files are only ever created by
   `pnpm --filter @combat/database run migrate` (`prisma migrate dev`) against
   a live Postgres — they are never hand-authored — so no migration has been
   written to `packages/database/prisma/migrations/`. Run `docker compose -f
-  infrastructure/docker-compose.yml up -d postgres` and then `pnpm db:migrate`
+infrastructure/docker-compose.yml up -d postgres` and then `pnpm db:migrate`
   to create and apply the initial migration once Postgres is available.
 - Fact-derivation heuristics are MVP-level — see §5.
 - No specialist agent, provider integration, or dashboard UI exists yet
@@ -318,3 +405,10 @@ reconstructible via `promptVersionId -> PromptVersion.systemPrompt`.
   are expected to be invoked at generation-dispatch granularity inside the
   future `ShotGenerationWorkflow` activity (architecture.md §3.3), not at the
   campaign-stage-transition granularity this milestone implements.
+- The `COMPOSITING`, `SOUND_DESIGN`, and `EXPORTING` same-stage technical-retry
+  loops are not yet bounded by an attempt counter (§4.4) — only the
+  shot-generation retry loop (`VISUAL_QA`/`CONTINUITY_QA`) is bounded in this
+  milestone.
+- This document describes the campaign lifecycle corrected in
+  `docs/adr/0002-campaign-lifecycle-alignment.md`; that ADR records the prior,
+  superseded 17-stage implementation for historical context.

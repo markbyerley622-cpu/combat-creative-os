@@ -82,24 +82,33 @@ model Membership {
 // Campaign production domain (docs/domain-model.md)
 // ---------------------------------------------------------------------------
 
+// 20-stage canonical campaign-production lifecycle — see
+// docs/domain-model.md §4 and docs/adr/0002-campaign-lifecycle-alignment.md.
+// Performance analysis is intentionally NOT represented here; it runs as a
+// separate, decoupled PerformanceAnalysisWorkflow over completed campaign/
+// distribution records so this workflow can complete without waiting on
+// advertising results.
 enum CampaignStage {
   DRAFT
   STRATEGY_REVIEW
   CONCEPT_REVIEW
   SCRIPT_REVIEW
   ASSET_COLLECTION
+  PROMPTING
   SHOT_GENERATION
-  AUTOMATED_QA
+  VISUAL_QA
+  CONTINUITY_QA
   HUMAN_SHOT_SELECTION
   COMPOSITING
   ROUGH_CUT
+  SOUND_DESIGN
   FINAL_QA
   FINAL_APPROVAL
+  VARIANT_GENERATION
+  VARIANT_QA
   EXPORTING
   READY_FOR_DISTRIBUTION
   DISTRIBUTED
-  PERFORMANCE_COLLECTION
-  ITERATION_PLANNING
 }
 
 enum DeliveryPlatform {
@@ -122,10 +131,11 @@ enum BudgetLedgerEntryType {
   RELEASE
 }
 
+// Only the three architecturally-required gates. STRATEGY_REVIEW and
+// SCRIPT_REVIEW are checkpoint stages, not gates — see decision 9 in
+// docs/adr/0002-campaign-lifecycle-alignment.md.
 enum ApprovalGate {
-  STRATEGY
   CONCEPT
-  SCRIPT
   SHOT_SELECTION
   FINAL
 }
@@ -155,11 +165,18 @@ enum GenerationCandidateStatus {
   TIMED_OUT
 }
 
+// SHOT_UNUSABLE/COMPOSITING_TECHNICAL/EDIT_TIMING/AUDIO_TECHNICAL drive typed
+// revision routing for stages with more than one valid repair target — see
+// packages/domain/src/workflow/quality-failure-routing.ts.
 enum QualityFailureCategory {
   PROMPT
   GENERATION
   CONTINUITY
   TECHNICAL
+  SHOT_UNUSABLE
+  COMPOSITING_TECHNICAL
+  EDIT_TIMING
+  AUDIO_TECHNICAL
 }
 
 enum QualityFailureSeverity {
@@ -497,14 +514,18 @@ model GenerationCandidate {
 /// does not currently support a declarative cross-column CHECK constraint
 /// for it.
 model QualityAssessment {
-  id                    String     @id @default(uuid())
+  id                    String        @id @default(uuid())
   workspaceId           String
   generationCandidateId String?
   assetId               String?
+  // Disambiguates which stage's output this assessment concerns (VISUAL_QA /
+  // CONTINUITY_QA for a candidate; COMPOSITING / ROUGH_CUT / SOUND_DESIGN /
+  // FINAL_QA for an asset) — see docs/domain-model.md §5.
+  subjectStage          CampaignStage?
   pass                  Boolean
-  scores                Json       @default("{}")
+  scores                Json          @default("{}")
   assessedBy            AssessedBy
-  createdAt             DateTime   @default(now())
+  createdAt             DateTime      @default(now())
 
   generationCandidate GenerationCandidate? @relation(fields: [generationCandidateId], references: [id], onDelete: Cascade)
   asset               Asset?               @relation(fields: [assetId], references: [id], onDelete: Cascade)
@@ -545,6 +566,10 @@ model HumanApproval {
   stageAtDecision  CampaignStage
   decidedByUserId  String
   comments         String?
+  // Required exactly when gate=FINAL and decision != APPROVED (see
+  // HumanApprovalSchema's refine in packages/domain); the reviewer's choice
+  // among the three valid FINAL_APPROVAL repair targets.
+  repairTarget     CampaignStage?
   decidedAt        DateTime         @default(now())
 
   campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)

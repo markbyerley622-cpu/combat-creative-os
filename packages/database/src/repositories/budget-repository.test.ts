@@ -1,6 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { checkAndReserveBudget, chargeBudget, computeSpentCents, releaseBudget } from './budget-repository';
+import {
+  checkAndReserveBudget,
+  chargeBudget,
+  computeSpentCents,
+  releaseBudget,
+} from './budget-repository';
 import { InMemoryCampaignStore } from './test-helpers/in-memory-campaign-store';
 
 describe('budget checks — reservation, charge, release, idempotency', () => {
@@ -8,7 +13,13 @@ describe('budget checks — reservation, charge, release, idempotency', () => {
     const store = new InMemoryCampaignStore();
     const workspaceId = randomUUID();
     const campaignId = randomUUID();
-    store.budgetPolicies.push({ id: randomUUID(), workspaceId, level: 'CAMPAIGN', scopeId: campaignId, limitCents: 10_000 });
+    store.budgetPolicies.push({
+      id: randomUUID(),
+      workspaceId,
+      level: 'CAMPAIGN',
+      scopeId: campaignId,
+      limitCents: 10_000,
+    });
 
     const result = await checkAndReserveBudget(store, {
       workspaceId,
@@ -31,7 +42,13 @@ describe('budget checks — reservation, charge, release, idempotency', () => {
     const workspaceId = randomUUID();
     const campaignId = randomUUID();
     const policyId = randomUUID();
-    store.budgetPolicies.push({ id: policyId, workspaceId, level: 'CAMPAIGN', scopeId: campaignId, limitCents: 1000 });
+    store.budgetPolicies.push({
+      id: policyId,
+      workspaceId,
+      level: 'CAMPAIGN',
+      scopeId: campaignId,
+      limitCents: 1000,
+    });
     store.budgetLedgerEntries.push({
       id: randomUUID(),
       workspaceId,
@@ -73,7 +90,13 @@ describe('budget checks — reservation, charge, release, idempotency', () => {
     const store = new InMemoryCampaignStore();
     const workspaceId = randomUUID();
     const campaignId = randomUUID();
-    store.budgetPolicies.push({ id: randomUUID(), workspaceId, level: 'CAMPAIGN', scopeId: campaignId, limitCents: 10_000 });
+    store.budgetPolicies.push({
+      id: randomUUID(),
+      workspaceId,
+      level: 'CAMPAIGN',
+      scopeId: campaignId,
+      limitCents: 10_000,
+    });
     const idempotencyKey = randomUUID();
 
     const first = await checkAndReserveBudget(store, {
@@ -106,10 +129,22 @@ describe('budget checks — reservation, charge, release, idempotency', () => {
     const policyId = randomUUID();
 
     await store.budgetLedgerEntry.create({
-      data: { workspaceId, budgetPolicyId: policyId, entryType: 'RESERVATION', amountCents: 500, idempotencyKey: randomUUID() },
+      data: {
+        workspaceId,
+        budgetPolicyId: policyId,
+        entryType: 'RESERVATION',
+        amountCents: 500,
+        idempotencyKey: randomUUID(),
+      },
     });
-    await chargeBudget(store, policyId, workspaceId, { amountCents: 500, idempotencyKey: randomUUID() });
-    await releaseBudget(store, policyId, workspaceId, { amountCents: 200, idempotencyKey: randomUUID() });
+    await chargeBudget(store, policyId, workspaceId, {
+      amountCents: 500,
+      idempotencyKey: randomUUID(),
+    });
+    await releaseBudget(store, policyId, workspaceId, {
+      amountCents: 200,
+      idempotencyKey: randomUUID(),
+    });
 
     const entries = await store.budgetLedgerEntry.findMany({ where: { budgetPolicyId: policyId } });
     expect(entries).toHaveLength(3);

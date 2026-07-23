@@ -24,14 +24,13 @@ export const BudgetLedgerEntryTypeSchema = z.enum(BUDGET_LEDGER_ENTRY_TYPES);
 export type BudgetLedgerEntryType = z.infer<typeof BudgetLedgerEntryTypeSchema>;
 
 /**
- * The three architecturally-required gates (concept, shot selection, final
- * master — docs/architecture.md §0/§3.3) plus STRATEGY and SCRIPT, which this
- * milestone's more granular stage list (CLAUDE.md-adjacent task scope) also
- * treats as human review gates. See docs/domain-model.md and
- * docs/architecture.md §7.1 item 8 for why this list is broader than the
- * architecture doc's original "three gates" framing.
+ * The three architecturally-required gates — concept, shot selection, final
+ * master (docs/architecture.md §0/§3.3) — and only these three. STRATEGY_REVIEW
+ * and SCRIPT_REVIEW are checkpoint stages, not approval gates: per
+ * docs/adr/0002-campaign-lifecycle-alignment.md decision 9, they must not
+ * require a HumanApproval record unless a future decision explicitly adds one.
  */
-export const APPROVAL_GATES = ['STRATEGY', 'CONCEPT', 'SCRIPT', 'SHOT_SELECTION', 'FINAL'] as const;
+export const APPROVAL_GATES = ['CONCEPT', 'SHOT_SELECTION', 'FINAL'] as const;
 export const ApprovalGateSchema = z.enum(APPROVAL_GATES);
 export type ApprovalGate = z.infer<typeof ApprovalGateSchema>;
 
@@ -62,11 +61,22 @@ export const GENERATION_CANDIDATE_STATUSES = [
 export const GenerationCandidateStatusSchema = z.enum(GENERATION_CANDIDATE_STATUSES);
 export type GenerationCandidateStatus = z.infer<typeof GenerationCandidateStatusSchema>;
 
+/**
+ * `SHOT_UNUSABLE`, `COMPOSITING_TECHNICAL`, `EDIT_TIMING`, and `AUDIO_TECHNICAL`
+ * exist specifically to drive typed revision routing for stages with more than
+ * one valid repair target (COMPOSITING, SOUND_DESIGN, FINAL_QA) — see
+ * `packages/domain/src/workflow/quality-failure-routing.ts` for the
+ * category -> target-stage mapping these four values feed.
+ */
 export const QUALITY_FAILURE_CATEGORIES = [
   'PROMPT',
   'GENERATION',
   'CONTINUITY',
   'TECHNICAL',
+  'SHOT_UNUSABLE',
+  'COMPOSITING_TECHNICAL',
+  'EDIT_TIMING',
+  'AUDIO_TECHNICAL',
 ] as const;
 export const QualityFailureCategorySchema = z.enum(QUALITY_FAILURE_CATEGORIES);
 export type QualityFailureCategory = z.infer<typeof QualityFailureCategorySchema>;
@@ -83,7 +93,13 @@ export const RENDER_JOB_KINDS = ['COMPOSITING', 'EXPORT'] as const;
 export const RenderJobKindSchema = z.enum(RENDER_JOB_KINDS);
 export type RenderJobKind = z.infer<typeof RenderJobKindSchema>;
 
-export const RENDER_JOB_STATUSES = ['QUEUED', 'SUBMITTED', 'RUNNING', 'SUCCEEDED', 'FAILED'] as const;
+export const RENDER_JOB_STATUSES = [
+  'QUEUED',
+  'SUBMITTED',
+  'RUNNING',
+  'SUCCEEDED',
+  'FAILED',
+] as const;
 export const RenderJobStatusSchema = z.enum(RENDER_JOB_STATUSES);
 export type RenderJobStatus = z.infer<typeof RenderJobStatusSchema>;
 

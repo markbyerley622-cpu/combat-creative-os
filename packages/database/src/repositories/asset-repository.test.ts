@@ -1,6 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { createAssetWithProvenance, getAssetProvenance, traceAssetLineage } from './asset-repository';
+import {
+  createAssetWithProvenance,
+  getAssetProvenance,
+  traceAssetLineage,
+} from './asset-repository';
 import { InMemoryCampaignStore } from './test-helpers/in-memory-campaign-store';
 
 describe('asset lineage — provenance is required and traceable', () => {
@@ -79,8 +83,20 @@ describe('asset lineage — provenance is required and traceable', () => {
     const idB = randomUUID();
 
     store.assetProvenances.push(
-      { id: randomUUID(), workspaceId, assetId: idA, derivedFromAssetIds: [idB], createdAt: new Date() },
-      { id: randomUUID(), workspaceId, assetId: idB, derivedFromAssetIds: [idA], createdAt: new Date() },
+      {
+        id: randomUUID(),
+        workspaceId,
+        assetId: idA,
+        derivedFromAssetIds: [idB],
+        createdAt: new Date(),
+      },
+      {
+        id: randomUUID(),
+        workspaceId,
+        assetId: idB,
+        derivedFromAssetIds: [idA],
+        createdAt: new Date(),
+      },
     );
 
     const lineage = await traceAssetLineage(store, workspaceId, idA);

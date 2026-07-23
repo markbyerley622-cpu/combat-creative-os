@@ -36,7 +36,12 @@ export interface PromptDataSource {
   };
   promptVersion: {
     create(args: {
-      data: { workspaceId: string; promptTemplateId: string; version: number; systemPrompt: string };
+      data: {
+        workspaceId: string;
+        promptTemplateId: string;
+        version: number;
+        systemPrompt: string;
+      };
     }): Promise<PromptVersionRecord>;
     findMany(args: { where: { promptTemplateId: string } }): Promise<PromptVersionRecord[]>;
   };
@@ -51,7 +56,9 @@ export interface PromptDataSource {
         negativePrompt?: string;
       };
     }): Promise<GenerationPromptRecord>;
-    findFirst(args: { where: { id: string; workspaceId: string } }): Promise<GenerationPromptRecord | null>;
+    findFirst(args: {
+      where: { id: string; workspaceId: string };
+    }): Promise<GenerationPromptRecord | null>;
   };
 }
 
@@ -61,7 +68,12 @@ export async function createPromptTemplate(
   input: { agentKey: string; name: string; description?: string },
 ): Promise<PromptTemplateRecord> {
   return db.promptTemplate.create({
-    data: { workspaceId, agentKey: input.agentKey, name: input.name, description: input.description },
+    data: {
+      workspaceId,
+      agentKey: input.agentKey,
+      name: input.name,
+      description: input.description,
+    },
   });
 }
 

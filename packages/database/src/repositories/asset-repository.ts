@@ -47,7 +47,9 @@ export interface AssetDataSource {
         providerJobRef?: string;
       };
     }): Promise<AssetProvenanceRecord>;
-    findFirst(args: { where: { assetId: string; workspaceId: string } }): Promise<AssetProvenanceRecord | null>;
+    findFirst(args: {
+      where: { assetId: string; workspaceId: string };
+    }): Promise<AssetProvenanceRecord | null>;
   };
 }
 
@@ -131,7 +133,9 @@ export async function traceAssetLineage(
     if (currentId === undefined || visited.has(currentId)) continue;
     visited.add(currentId);
 
-    const provenance = await db.assetProvenance.findFirst({ where: { assetId: currentId, workspaceId } });
+    const provenance = await db.assetProvenance.findFirst({
+      where: { assetId: currentId, workspaceId },
+    });
     if (!provenance) continue;
 
     for (const ancestorId of provenance.derivedFromAssetIds) {

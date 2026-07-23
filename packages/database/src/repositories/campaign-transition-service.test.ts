@@ -5,19 +5,22 @@ import { attemptCampaignTransition } from './campaign-transition-service';
 import { InMemoryCampaignStore } from './test-helpers/in-memory-campaign-store';
 
 /**
- * Seeds a store such that every DB-derived transition fact evaluates true —
- * used for exercising the *valid transitions* half of the exhaustive sweep.
- * Mirrors the real shape the fact-derivation logic in transition-facts.ts
- * expects (see that file's tests for direct coverage of the derivation
- * rules); here we only care that the service applies the CAS update,
- * writes an APPLIED audit row, and advances `currentStage`/`version`.
+ * Seeds a store such that every DB-derived FORWARD-transition fact evaluates
+ * true — used for exercising the *valid forward transitions* half of the
+ * exhaustive sweep. Mirrors the real shape the fact-derivation logic in
+ * transition-facts.ts expects (see that file's tests for direct coverage of
+ * the derivation rules).
  */
-function seedAllFactsTrue(store: InMemoryCampaignStore, campaign: ReturnType<InMemoryCampaignStore['seedCampaign']>) {
+function seedAllFactsTrue(
+  store: InMemoryCampaignStore,
+  campaign: ReturnType<InMemoryCampaignStore['seedCampaign']>,
+) {
   const { id: campaignId, workspaceId } = campaign;
 
   store.briefs.push({ id: randomUUID(), campaignId, version: 1, acceptedAt: new Date() });
+  store.concepts.push({ id: randomUUID(), campaignId });
 
-  for (const gate of ['STRATEGY', 'CONCEPT', 'SCRIPT', 'SHOT_SELECTION', 'FINAL'] as const) {
+  for (const gate of ['CONCEPT', 'SHOT_SELECTION', 'FINAL'] as const) {
     store.approvals.push({
       id: randomUUID(),
       workspaceId,
@@ -37,26 +40,51 @@ function seedAllFactsTrue(store: InMemoryCampaignStore, campaign: ReturnType<InM
   const promptId = randomUUID();
   store.generationPrompts.push({ id: promptId, shotId });
   const candidateId = randomUUID();
-  store.generationCandidates.push({ id: candidateId, generationPromptId: promptId, status: 'SUCCEEDED', attempt: 1 });
-  store.qualityAssessments.push({ id: randomUUID(), generationCandidateId: candidateId, assetId: null, pass: true });
-  store.qualityAssessments.push({ id: randomUUID(), generationCandidateId: null, assetId: randomUUID(), pass: true });
+  store.generationCandidates.push({
+    id: candidateId,
+    generationPromptId: promptId,
+    status: 'SUCCEEDED',
+    attempt: 1,
+  });
+  store.qualityAssessments.push({
+    id: randomUUID(),
+    generationCandidateId: candidateId,
+    assetId: null,
+    subjectStage: 'VISUAL_QA',
+    pass: true,
+  });
+  store.qualityAssessments.push({
+    id: randomUUID(),
+    generationCandidateId: candidateId,
+    assetId: null,
+    subjectStage: 'CONTINUITY_QA',
+    pass: true,
+  });
+  store.qualityAssessments.push({
+    id: randomUUID(),
+    generationCandidateId: null,
+    assetId: randomUUID(),
+    subjectStage: 'FINAL_QA',
+    pass: true,
+  });
 
   store.renderJobs.push({ id: randomUUID(), kind: 'COMPOSITING', status: 'SUCCEEDED' });
   store.renderJobs.push({ id: randomUUID(), kind: 'EXPORT', status: 'SUCCEEDED' });
   store.editDecisionLists.push({ id: randomUUID(), version: 1 });
+  const timelineId = randomUUID();
+  store.timelines.push({ id: timelineId, campaignId });
+  store.soundCues.push({ id: randomUUID(), timelineId });
   store.deliverySpecifications.push({ id: randomUUID() });
-  const variantId = randomUUID();
-  store.creativeVariants.push({ id: variantId, assetId: randomUUID(), status: 'READY' });
-  store.performanceMetricsRows.push({ id: randomUUID(), creativeVariantId: variantId });
+  store.creativeVariants.push({ id: randomUUID(), assetId: randomUUID(), status: 'READY' });
 }
 
-/** Seeds facts so that every *revision-loop* transition's required fact is true (rejections/changes-requested). */
+/** Seeds facts so that every generically-shared REVISION fact is true (excludes the three FINAL_APPROVAL repair-target edges — see their dedicated tests below). */
 function seedAllRevisionFactsTrue(
   store: InMemoryCampaignStore,
   campaign: ReturnType<InMemoryCampaignStore['seedCampaign']>,
 ) {
   const { id: campaignId, workspaceId } = campaign;
-  for (const gate of ['STRATEGY', 'CONCEPT', 'SCRIPT', 'SHOT_SELECTION', 'FINAL'] as const) {
+  for (const gate of ['CONCEPT', 'SHOT_SELECTION'] as const) {
     store.approvals.push({
       id: randomUUID(),
       workspaceId,
@@ -75,39 +103,105 @@ function seedAllRevisionFactsTrue(
   const promptId = randomUUID();
   store.generationPrompts.push({ id: promptId, shotId });
   const candidateId = randomUUID();
-  store.generationCandidates.push({ id: candidateId, generationPromptId: promptId, status: 'FAILED', attempt: 1 });
-  store.qualityAssessments.push({ id: randomUUID(), generationCandidateId: null, assetId: randomUUID(), pass: false });
-  const variantId = randomUUID();
-  store.creativeVariants.push({ id: variantId, assetId: null, status: 'READY' });
-  store.performanceMetricsRows.push({ id: randomUUID(), creativeVariantId: variantId });
-}
+  store.generationCandidates.push({
+    id: candidateId,
+    generationPromptId: promptId,
+    status: 'FAILED',
+    attempt: 1,
+  });
+  // No passing VISUAL_QA/CONTINUITY_QA assessment for this candidate -> both retries stay allowed (attempt 1 < MAX 3).
 
-describe('attemptCampaignTransition — every valid transition applies atomically', () => {
-  it.each(CAMPAIGN_TRANSITIONS.filter((t) => t.kind === 'FORWARD').map((t) => [t.from, t.to] as const))(
-    'forward: %s -> %s',
-    async (from, to) => {
-      const store = new InMemoryCampaignStore();
-      const campaign = store.seedCampaign({ currentStage: from });
-      const initialVersion = campaign.version;
-      seedAllFactsTrue(store, campaign);
-
-      const result = await attemptCampaignTransition(store, {
-        workspaceId: campaign.workspaceId,
-        campaignId: campaign.id,
-        toStage: to,
-        idempotencyKey: randomUUID(),
-      });
-
-      expect(result.ok).toBe(true);
-      if (result.ok) {
-        expect(result.campaign.currentStage).toBe(to);
-        expect(result.campaign.version).toBe(initialVersion + 1);
-        expect(result.audit.result).toBe('APPLIED');
-      }
+  const compositingAssessmentId = randomUUID();
+  store.qualityAssessments.push({
+    id: compositingAssessmentId,
+    generationCandidateId: null,
+    assetId: randomUUID(),
+    subjectStage: 'COMPOSITING',
+    pass: false,
+  });
+  store.qualityFailures.push(
+    { id: randomUUID(), qualityAssessmentId: compositingAssessmentId, category: 'SHOT_UNUSABLE' },
+    {
+      id: randomUUID(),
+      qualityAssessmentId: compositingAssessmentId,
+      category: 'COMPOSITING_TECHNICAL',
     },
   );
 
-  it.each(CAMPAIGN_TRANSITIONS.filter((t) => t.kind === 'REVISION').map((t) => [t.from, t.to] as const))(
+  store.qualityAssessments.push({
+    id: randomUUID(),
+    generationCandidateId: null,
+    assetId: randomUUID(),
+    subjectStage: 'ROUGH_CUT',
+    pass: false,
+  });
+
+  const soundDesignAssessmentId = randomUUID();
+  store.qualityAssessments.push({
+    id: soundDesignAssessmentId,
+    generationCandidateId: null,
+    assetId: randomUUID(),
+    subjectStage: 'SOUND_DESIGN',
+    pass: false,
+  });
+  store.qualityFailures.push(
+    { id: randomUUID(), qualityAssessmentId: soundDesignAssessmentId, category: 'EDIT_TIMING' },
+    { id: randomUUID(), qualityAssessmentId: soundDesignAssessmentId, category: 'AUDIO_TECHNICAL' },
+  );
+
+  const finalQAAssessmentId = randomUUID();
+  store.qualityAssessments.push({
+    id: finalQAAssessmentId,
+    generationCandidateId: null,
+    assetId: randomUUID(),
+    subjectStage: 'FINAL_QA',
+    pass: false,
+  });
+  store.qualityFailures.push(
+    {
+      id: randomUUID(),
+      qualityAssessmentId: finalQAAssessmentId,
+      category: 'COMPOSITING_TECHNICAL',
+    },
+    { id: randomUUID(), qualityAssessmentId: finalQAAssessmentId, category: 'EDIT_TIMING' },
+    { id: randomUUID(), qualityAssessmentId: finalQAAssessmentId, category: 'AUDIO_TECHNICAL' },
+  );
+
+  store.creativeVariants.push({ id: randomUUID(), assetId: null, status: 'FAILED' });
+  store.renderJobs.push({ id: randomUUID(), kind: 'EXPORT', status: 'FAILED' });
+}
+
+describe('attemptCampaignTransition — every valid forward transition applies atomically', () => {
+  it.each(
+    CAMPAIGN_TRANSITIONS.filter((t) => t.kind === 'FORWARD').map((t) => [t.from, t.to] as const),
+  )('forward: %s -> %s', async (from, to) => {
+    const store = new InMemoryCampaignStore();
+    const campaign = store.seedCampaign({ currentStage: from });
+    const initialVersion = campaign.version;
+    seedAllFactsTrue(store, campaign);
+
+    const result = await attemptCampaignTransition(store, {
+      workspaceId: campaign.workspaceId,
+      campaignId: campaign.id,
+      toStage: to,
+      idempotencyKey: randomUUID(),
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.campaign.currentStage).toBe(to);
+      expect(result.campaign.version).toBe(initialVersion + 1);
+      expect(result.audit.result).toBe('APPLIED');
+    }
+  });
+});
+
+describe('attemptCampaignTransition — every valid revision transition applies atomically', () => {
+  const genericRevisions = CAMPAIGN_TRANSITIONS.filter(
+    (t) => t.kind === 'REVISION' && t.from !== 'FINAL_APPROVAL',
+  );
+
+  it.each(genericRevisions.map((t) => [t.from, t.to] as const))(
     'revision: %s -> %s',
     async (from, to) => {
       const store = new InMemoryCampaignStore();
@@ -124,6 +218,71 @@ describe('attemptCampaignTransition — every valid transition applies atomicall
       expect(result.ok).toBe(true);
       if (result.ok) {
         expect(result.campaign.currentStage).toBe(to);
+      }
+    },
+  );
+
+  it.each(
+    (['COMPOSITING', 'ROUGH_CUT', 'SOUND_DESIGN'] as const).map(
+      (repairTarget) => [repairTarget] as const,
+    ),
+  )(
+    'FINAL_APPROVAL rejection with repairTarget=%s routes to that stage only',
+    async (repairTarget) => {
+      const store = new InMemoryCampaignStore();
+      const campaign = store.seedCampaign({ currentStage: 'FINAL_APPROVAL' });
+      await store.humanApproval.create({
+        data: {
+          workspaceId: campaign.workspaceId,
+          campaignId: campaign.id,
+          gate: 'FINAL',
+          decision: 'CHANGES_REQUESTED',
+          stageAtDecision: 'FINAL_APPROVAL',
+          decidedByUserId: randomUUID(),
+          repairTarget,
+        },
+      });
+
+      const result = await attemptCampaignTransition(store, {
+        workspaceId: campaign.workspaceId,
+        campaignId: campaign.id,
+        toStage: repairTarget,
+        idempotencyKey: randomUUID(),
+      });
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.campaign.currentStage).toBe(repairTarget);
+      }
+
+      // The other two targets must NOT be satisfied by this single-target approval.
+      const otherTargets = (['COMPOSITING', 'ROUGH_CUT', 'SOUND_DESIGN'] as const).filter(
+        (s) => s !== repairTarget,
+      );
+      for (const otherTarget of otherTargets) {
+        const otherStore = new InMemoryCampaignStore();
+        const otherCampaign = otherStore.seedCampaign({
+          currentStage: 'FINAL_APPROVAL',
+          workspaceId: campaign.workspaceId,
+        });
+        await otherStore.humanApproval.create({
+          data: {
+            workspaceId: otherCampaign.workspaceId,
+            campaignId: otherCampaign.id,
+            gate: 'FINAL',
+            decision: 'CHANGES_REQUESTED',
+            stageAtDecision: 'FINAL_APPROVAL',
+            decidedByUserId: randomUUID(),
+            repairTarget,
+          },
+        });
+        const otherResult = await attemptCampaignTransition(otherStore, {
+          workspaceId: otherCampaign.workspaceId,
+          campaignId: otherCampaign.id,
+          toStage: otherTarget,
+          idempotencyKey: randomUUID(),
+        });
+        expect(otherResult.ok).toBe(false);
       }
     },
   );
@@ -157,7 +316,9 @@ describe('attemptCampaignTransition — every invalid transition is rejected', (
       expect(result.audit.result).toBe('REJECTED_INVALID_TRANSITION');
     }
     // The campaign must not have moved.
-    const reloaded = await store.campaign.findFirst({ where: { id: campaign.id, workspaceId: campaign.workspaceId } });
+    const reloaded = await store.campaign.findFirst({
+      where: { id: campaign.id, workspaceId: campaign.workspaceId },
+    });
     expect(reloaded?.currentStage).toBe(from);
   });
 });
@@ -182,33 +343,62 @@ describe('attemptCampaignTransition — missing prerequisites', () => {
     }
   });
 
-  it('does not advance the stage when a human gate has not been approved', async () => {
+  it('STRATEGY_REVIEW -> CONCEPT_REVIEW requires only that a concept has been drafted, no HumanApproval', async () => {
     const store = new InMemoryCampaignStore();
     const campaign = store.seedCampaign({ currentStage: 'STRATEGY_REVIEW' });
-    // No HumanApproval seeded for the STRATEGY gate.
+    // No CreativeConcept seeded -> conceptDrafted is false, no approval involved either way.
 
-    const result = await attemptCampaignTransition(store, {
+    const rejected = await attemptCampaignTransition(store, {
       workspaceId: campaign.workspaceId,
       campaignId: campaign.id,
       toStage: 'CONCEPT_REVIEW',
       idempotencyKey: randomUUID(),
     });
+    expect(rejected.ok).toBe(false);
+    if (!rejected.ok) {
+      expect(rejected.error.reason.type).toBe('MISSING_PREREQUISITE');
+    }
 
-    expect(result.ok).toBe(false);
-    const reloaded = await store.campaign.findFirst({ where: { id: campaign.id, workspaceId: campaign.workspaceId } });
-    expect(reloaded?.currentStage).toBe('STRATEGY_REVIEW');
+    store.concepts.push({ id: randomUUID(), campaignId: campaign.id });
+    const approved = await attemptCampaignTransition(store, {
+      workspaceId: campaign.workspaceId,
+      campaignId: campaign.id,
+      toStage: 'CONCEPT_REVIEW',
+      idempotencyKey: randomUUID(),
+    });
+    expect(approved.ok).toBe(true);
+    expect(approved.audit.approvalId).toBeUndefined();
   });
 
-  it('advances past a human gate once an APPROVED HumanApproval is recorded, and records its id on the audit', async () => {
+  it('does not advance past the CONCEPT gate without an APPROVED HumanApproval', async () => {
     const store = new InMemoryCampaignStore();
-    const campaign = store.seedCampaign({ currentStage: 'STRATEGY_REVIEW' });
+    const campaign = store.seedCampaign({ currentStage: 'CONCEPT_REVIEW' });
+    // No HumanApproval seeded for the CONCEPT gate.
+
+    const result = await attemptCampaignTransition(store, {
+      workspaceId: campaign.workspaceId,
+      campaignId: campaign.id,
+      toStage: 'SCRIPT_REVIEW',
+      idempotencyKey: randomUUID(),
+    });
+
+    expect(result.ok).toBe(false);
+    const reloaded = await store.campaign.findFirst({
+      where: { id: campaign.id, workspaceId: campaign.workspaceId },
+    });
+    expect(reloaded?.currentStage).toBe('CONCEPT_REVIEW');
+  });
+
+  it('advances past the CONCEPT gate once an APPROVED HumanApproval is recorded, and records its id on the audit', async () => {
+    const store = new InMemoryCampaignStore();
+    const campaign = store.seedCampaign({ currentStage: 'CONCEPT_REVIEW' });
     const approval = await store.humanApproval.create({
       data: {
         workspaceId: campaign.workspaceId,
         campaignId: campaign.id,
-        gate: 'STRATEGY',
+        gate: 'CONCEPT',
         decision: 'APPROVED',
-        stageAtDecision: 'STRATEGY_REVIEW',
+        stageAtDecision: 'CONCEPT_REVIEW',
         decidedByUserId: randomUUID(),
       },
     });
@@ -216,7 +406,7 @@ describe('attemptCampaignTransition — missing prerequisites', () => {
     const result = await attemptCampaignTransition(store, {
       workspaceId: campaign.workspaceId,
       campaignId: campaign.id,
-      toStage: 'CONCEPT_REVIEW',
+      toStage: 'SCRIPT_REVIEW',
       idempotencyKey: randomUUID(),
     });
 
@@ -226,19 +416,33 @@ describe('attemptCampaignTransition — missing prerequisites', () => {
     }
   });
 
-  it('a REJECTED decision does not satisfy the approval gate', async () => {
+  it('a REJECTED decision does not satisfy the CONCEPT gate', async () => {
     const store = new InMemoryCampaignStore();
-    const campaign = store.seedCampaign({ currentStage: 'STRATEGY_REVIEW' });
+    const campaign = store.seedCampaign({ currentStage: 'CONCEPT_REVIEW' });
     await store.humanApproval.create({
       data: {
         workspaceId: campaign.workspaceId,
         campaignId: campaign.id,
-        gate: 'STRATEGY',
+        gate: 'CONCEPT',
         decision: 'REJECTED',
-        stageAtDecision: 'STRATEGY_REVIEW',
+        stageAtDecision: 'CONCEPT_REVIEW',
         decidedByUserId: randomUUID(),
       },
     });
+
+    const result = await attemptCampaignTransition(store, {
+      workspaceId: campaign.workspaceId,
+      campaignId: campaign.id,
+      toStage: 'SCRIPT_REVIEW',
+      idempotencyKey: randomUUID(),
+    });
+
+    expect(result.ok).toBe(false);
+  });
+
+  it('SCRIPT_REVIEW -> CONCEPT_REVIEW (revision) has no prerequisites and always succeeds, by design', async () => {
+    const store = new InMemoryCampaignStore();
+    const campaign = store.seedCampaign({ currentStage: 'SCRIPT_REVIEW' });
 
     const result = await attemptCampaignTransition(store, {
       workspaceId: campaign.workspaceId,
@@ -247,7 +451,7 @@ describe('attemptCampaignTransition — missing prerequisites', () => {
       idempotencyKey: randomUUID(),
     });
 
-    expect(result.ok).toBe(false);
+    expect(result.ok).toBe(true);
   });
 });
 
@@ -351,7 +555,7 @@ describe('attemptCampaignTransition — concurrent transition attempts', () => {
 describe('attemptCampaignTransition — budget rejection', () => {
   it('rejects entry into SHOT_GENERATION when the campaign-level budget is exhausted', async () => {
     const store = new InMemoryCampaignStore();
-    const campaign = store.seedCampaign({ currentStage: 'ASSET_COLLECTION' });
+    const campaign = store.seedCampaign({ currentStage: 'PROMPTING' });
     seedAllFactsTrue(store, campaign);
 
     store.budgetPolicies.push({
@@ -375,15 +579,17 @@ describe('attemptCampaignTransition — budget rejection', () => {
       expect(result.error.reason.type).toBe('BUDGET_EXCEEDED');
       expect(result.audit.result).toBe('REJECTED_BUDGET_EXCEEDED');
     }
-    const reloaded = await store.campaign.findFirst({ where: { id: campaign.id, workspaceId: campaign.workspaceId } });
-    expect(reloaded?.currentStage).toBe('ASSET_COLLECTION');
+    const reloaded = await store.campaign.findFirst({
+      where: { id: campaign.id, workspaceId: campaign.workspaceId },
+    });
+    expect(reloaded?.currentStage).toBe('PROMPTING');
     // No reservation should have been left dangling.
     expect(store.budgetLedgerEntries).toHaveLength(0);
   });
 
   it('reserves budget and advances the stage when funds are sufficient', async () => {
     const store = new InMemoryCampaignStore();
-    const campaign = store.seedCampaign({ currentStage: 'ASSET_COLLECTION' });
+    const campaign = store.seedCampaign({ currentStage: 'PROMPTING' });
     seedAllFactsTrue(store, campaign);
 
     store.budgetPolicies.push({
@@ -403,8 +609,10 @@ describe('attemptCampaignTransition — budget rejection', () => {
     });
 
     expect(result.ok).toBe(true);
-    expect(store.budgetLedgerEntries.some((e) => e.entryType === 'RESERVATION' && e.amountCents === 5000)).toBe(
-      true,
-    );
+    expect(
+      store.budgetLedgerEntries.some(
+        (e) => e.entryType === 'RESERVATION' && e.amountCents === 5000,
+      ),
+    ).toBe(true);
   });
 });

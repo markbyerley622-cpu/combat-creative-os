@@ -11,32 +11,46 @@ import type { TransitionRejectionReason } from './transition-errors';
  * without needing a database handle.
  */
 export interface TransitionFacts {
+  // --- Forward-path prerequisites ---
   briefAccepted?: boolean;
-  strategyApproved?: boolean;
+  conceptDrafted?: boolean;
   conceptApproved?: boolean;
-  scriptApproved?: boolean;
+  scriptDrafted?: boolean;
   allShotsHaveRequiredAssets?: boolean;
+  allShotsHavePrompts?: boolean;
   allShotsHaveCandidate?: boolean;
-  allShotsPassedAutomatedQA?: boolean;
+  allShotsPassedVisualQA?: boolean;
+  allShotsPassedContinuityQA?: boolean;
   allShotsSelected?: boolean;
   compositingComplete?: boolean;
   roughCutAssembled?: boolean;
+  soundDesignComplete?: boolean;
   finalQAPassed?: boolean;
   finalApproved?: boolean;
+  variantsGenerated?: boolean;
+  variantQAPassed?: boolean;
   exportRenderComplete?: boolean;
   deliverySpecMet?: boolean;
-  distributionConfirmed?: boolean;
-  performanceMetricsCollected?: boolean;
 
-  // Revision-loop facts
-  strategyRevisionRequested?: boolean;
+  // --- Revision-loop facts ---
   conceptRevisionRequested?: boolean;
-  scriptRevisionRequested?: boolean;
-  automatedQARetryAllowed?: boolean;
+  visualQARetryAllowed?: boolean;
+  continuityQARetryAllowed?: boolean;
   shotSelectionRegenerateRequested?: boolean;
-  finalQARevisionRequested?: boolean;
-  finalApprovalRevisionRequested?: boolean;
-  iterationPlanningRestartRequested?: boolean;
+  compositingRepairTargetIsShotSelection?: boolean;
+  compositingRepairTargetIsCompositingRetry?: boolean;
+  roughCutFailureRequiresRecompositing?: boolean;
+  soundDesignRepairTargetIsRoughCut?: boolean;
+  soundDesignRepairTargetIsSoundDesignRetry?: boolean;
+  finalQARepairTargetIsCompositing?: boolean;
+  finalQARepairTargetIsRoughCut?: boolean;
+  finalQAAudioFailure?: boolean;
+  finalApprovalRepairTargetIsCompositing?: boolean;
+  finalApprovalRepairTargetIsRoughCut?: boolean;
+  finalApprovalRepairTargetIsSoundDesign?: boolean;
+  variantQAFailed?: boolean;
+  exportTechnicalFailureRetry?: boolean;
+  distributionFailureDetected?: boolean;
 }
 
 export type TransitionFactKey = keyof TransitionFacts;
@@ -53,10 +67,21 @@ export interface TransitionDefinition {
 }
 
 /**
- * The complete, exhaustive transition table for the 17-stage campaign
- * pipeline (see campaign-stage.ts and docs/domain-model.md). Any (from, to)
- * pair not listed here is an invalid transition by construction — there is no
+ * The complete, exhaustive transition table for the 20-stage campaign
+ * pipeline (see campaign-stage.ts, docs/domain-model.md §4, and
+ * docs/adr/0002-campaign-lifecycle-alignment.md). Any (from, to) pair not
+ * listed here is an invalid transition by construction — there is no
  * fallback/default-allow path.
+ *
+ * Three stages have more than one valid revision target — COMPOSITING,
+ * SOUND_DESIGN, and FINAL_QA — disambiguated by a *typed failure category*
+ * (see quality-failure-routing.ts) rather than by caller say-so: each
+ * candidate edge has its own `requiredFacts` entry, and the database layer
+ * only reports the relevant one true when a persisted QualityFailure (or, for
+ * FINAL_APPROVAL, a persisted HumanApproval.repairTarget) actually carries
+ * that specific category/target. COMPOSITING, SOUND_DESIGN, and EXPORTING
+ * additionally support a same-stage revision edge (`from === to`) for a
+ * technical retry that doesn't regress any earlier creative approval.
  */
 export const CAMPAIGN_TRANSITIONS: readonly TransitionDefinition[] = [
   // --- Forward path ---
@@ -65,8 +90,7 @@ export const CAMPAIGN_TRANSITIONS: readonly TransitionDefinition[] = [
     from: 'STRATEGY_REVIEW',
     to: 'CONCEPT_REVIEW',
     kind: 'FORWARD',
-    requiredFacts: ['strategyApproved'],
-    requiredApprovalGate: 'STRATEGY',
+    requiredFacts: ['conceptDrafted'],
   },
   {
     from: 'CONCEPT_REVIEW',
@@ -79,26 +103,37 @@ export const CAMPAIGN_TRANSITIONS: readonly TransitionDefinition[] = [
     from: 'SCRIPT_REVIEW',
     to: 'ASSET_COLLECTION',
     kind: 'FORWARD',
-    requiredFacts: ['scriptApproved'],
-    requiredApprovalGate: 'SCRIPT',
+    requiredFacts: ['scriptDrafted'],
   },
   {
     from: 'ASSET_COLLECTION',
-    to: 'SHOT_GENERATION',
+    to: 'PROMPTING',
     kind: 'FORWARD',
     requiredFacts: ['allShotsHaveRequiredAssets'],
   },
   {
+    from: 'PROMPTING',
+    to: 'SHOT_GENERATION',
+    kind: 'FORWARD',
+    requiredFacts: ['allShotsHavePrompts'],
+  },
+  {
     from: 'SHOT_GENERATION',
-    to: 'AUTOMATED_QA',
+    to: 'VISUAL_QA',
     kind: 'FORWARD',
     requiredFacts: ['allShotsHaveCandidate'],
   },
   {
-    from: 'AUTOMATED_QA',
+    from: 'VISUAL_QA',
+    to: 'CONTINUITY_QA',
+    kind: 'FORWARD',
+    requiredFacts: ['allShotsPassedVisualQA'],
+  },
+  {
+    from: 'CONTINUITY_QA',
     to: 'HUMAN_SHOT_SELECTION',
     kind: 'FORWARD',
-    requiredFacts: ['allShotsPassedAutomatedQA'],
+    requiredFacts: ['allShotsPassedContinuityQA'],
   },
   {
     from: 'HUMAN_SHOT_SELECTION',
@@ -108,42 +143,37 @@ export const CAMPAIGN_TRANSITIONS: readonly TransitionDefinition[] = [
     requiredApprovalGate: 'SHOT_SELECTION',
   },
   { from: 'COMPOSITING', to: 'ROUGH_CUT', kind: 'FORWARD', requiredFacts: ['compositingComplete'] },
-  { from: 'ROUGH_CUT', to: 'FINAL_QA', kind: 'FORWARD', requiredFacts: ['roughCutAssembled'] },
+  { from: 'ROUGH_CUT', to: 'SOUND_DESIGN', kind: 'FORWARD', requiredFacts: ['roughCutAssembled'] },
+  { from: 'SOUND_DESIGN', to: 'FINAL_QA', kind: 'FORWARD', requiredFacts: ['soundDesignComplete'] },
   { from: 'FINAL_QA', to: 'FINAL_APPROVAL', kind: 'FORWARD', requiredFacts: ['finalQAPassed'] },
   {
     from: 'FINAL_APPROVAL',
-    to: 'EXPORTING',
+    to: 'VARIANT_GENERATION',
     kind: 'FORWARD',
     requiredFacts: ['finalApproved'],
     requiredApprovalGate: 'FINAL',
   },
-  { from: 'EXPORTING', to: 'READY_FOR_DISTRIBUTION', kind: 'FORWARD', requiredFacts: ['exportRenderComplete'] },
+  {
+    from: 'VARIANT_GENERATION',
+    to: 'VARIANT_QA',
+    kind: 'FORWARD',
+    requiredFacts: ['variantsGenerated'],
+  },
+  { from: 'VARIANT_QA', to: 'EXPORTING', kind: 'FORWARD', requiredFacts: ['variantQAPassed'] },
+  {
+    from: 'EXPORTING',
+    to: 'READY_FOR_DISTRIBUTION',
+    kind: 'FORWARD',
+    requiredFacts: ['exportRenderComplete'],
+  },
   {
     from: 'READY_FOR_DISTRIBUTION',
     to: 'DISTRIBUTED',
     kind: 'FORWARD',
     requiredFacts: ['deliverySpecMet'],
   },
-  {
-    from: 'DISTRIBUTED',
-    to: 'PERFORMANCE_COLLECTION',
-    kind: 'FORWARD',
-    requiredFacts: ['distributionConfirmed'],
-  },
-  {
-    from: 'PERFORMANCE_COLLECTION',
-    to: 'ITERATION_PLANNING',
-    kind: 'FORWARD',
-    requiredFacts: ['performanceMetricsCollected'],
-  },
 
   // --- Revision / failure loops ---
-  {
-    from: 'STRATEGY_REVIEW',
-    to: 'DRAFT',
-    kind: 'REVISION',
-    requiredFacts: ['strategyRevisionRequested'],
-  },
   {
     from: 'CONCEPT_REVIEW',
     to: 'STRATEGY_REVIEW',
@@ -151,16 +181,29 @@ export const CAMPAIGN_TRANSITIONS: readonly TransitionDefinition[] = [
     requiredFacts: ['conceptRevisionRequested'],
   },
   {
+    // STRATEGY_REVIEW and SCRIPT_REVIEW are checkpoint stages, not approval
+    // gates (decision 9) — there is deliberately no HumanApproval record (or
+    // any other persisted signal) backing this edge yet, so it carries no
+    // required facts. This is the one intentional exception to "every
+    // transition has prerequisites" in this table; a future decision that
+    // adds real script-validation tracking should replace this with a real
+    // fact rather than leaving it open-ended indefinitely.
     from: 'SCRIPT_REVIEW',
     to: 'CONCEPT_REVIEW',
     kind: 'REVISION',
-    requiredFacts: ['scriptRevisionRequested'],
+    requiredFacts: [],
   },
   {
-    from: 'AUTOMATED_QA',
+    from: 'VISUAL_QA',
     to: 'SHOT_GENERATION',
     kind: 'REVISION',
-    requiredFacts: ['automatedQARetryAllowed'],
+    requiredFacts: ['visualQARetryAllowed'],
+  },
+  {
+    from: 'CONTINUITY_QA',
+    to: 'SHOT_GENERATION',
+    kind: 'REVISION',
+    requiredFacts: ['continuityQARetryAllowed'],
   },
   {
     from: 'HUMAN_SHOT_SELECTION',
@@ -169,24 +212,95 @@ export const CAMPAIGN_TRANSITIONS: readonly TransitionDefinition[] = [
     requiredFacts: ['shotSelectionRegenerateRequested'],
   },
   {
+    from: 'COMPOSITING',
+    to: 'HUMAN_SHOT_SELECTION',
+    kind: 'REVISION',
+    requiredFacts: ['compositingRepairTargetIsShotSelection'],
+  },
+  {
+    from: 'COMPOSITING',
+    to: 'COMPOSITING',
+    kind: 'REVISION',
+    requiredFacts: ['compositingRepairTargetIsCompositingRetry'],
+  },
+  {
+    from: 'ROUGH_CUT',
+    to: 'COMPOSITING',
+    kind: 'REVISION',
+    requiredFacts: ['roughCutFailureRequiresRecompositing'],
+  },
+  {
+    from: 'SOUND_DESIGN',
+    to: 'ROUGH_CUT',
+    kind: 'REVISION',
+    requiredFacts: ['soundDesignRepairTargetIsRoughCut'],
+  },
+  {
+    from: 'SOUND_DESIGN',
+    to: 'SOUND_DESIGN',
+    kind: 'REVISION',
+    requiredFacts: ['soundDesignRepairTargetIsSoundDesignRetry'],
+  },
+  {
+    from: 'FINAL_QA',
+    to: 'COMPOSITING',
+    kind: 'REVISION',
+    requiredFacts: ['finalQARepairTargetIsCompositing'],
+  },
+  {
     from: 'FINAL_QA',
     to: 'ROUGH_CUT',
     kind: 'REVISION',
-    requiredFacts: ['finalQARevisionRequested'],
+    requiredFacts: ['finalQARepairTargetIsRoughCut'],
+  },
+  {
+    from: 'FINAL_QA',
+    to: 'SOUND_DESIGN',
+    kind: 'REVISION',
+    requiredFacts: ['finalQAAudioFailure'],
+  },
+  {
+    from: 'FINAL_APPROVAL',
+    to: 'COMPOSITING',
+    kind: 'REVISION',
+    requiredFacts: ['finalApprovalRepairTargetIsCompositing'],
   },
   {
     from: 'FINAL_APPROVAL',
     to: 'ROUGH_CUT',
     kind: 'REVISION',
-    requiredFacts: ['finalApprovalRevisionRequested'],
+    requiredFacts: ['finalApprovalRepairTargetIsRoughCut'],
   },
   {
-    from: 'ITERATION_PLANNING',
-    to: 'DRAFT',
+    from: 'FINAL_APPROVAL',
+    to: 'SOUND_DESIGN',
     kind: 'REVISION',
-    requiredFacts: ['iterationPlanningRestartRequested'],
+    requiredFacts: ['finalApprovalRepairTargetIsSoundDesign'],
+  },
+  {
+    from: 'VARIANT_QA',
+    to: 'VARIANT_GENERATION',
+    kind: 'REVISION',
+    requiredFacts: ['variantQAFailed'],
+  },
+  {
+    from: 'EXPORTING',
+    to: 'EXPORTING',
+    kind: 'REVISION',
+    requiredFacts: ['exportTechnicalFailureRetry'],
+  },
+  {
+    from: 'DISTRIBUTED',
+    to: 'READY_FOR_DISTRIBUTION',
+    kind: 'REVISION',
+    requiredFacts: ['distributionFailureDetected'],
   },
 ] as const;
+
+/** Stages that have a `from === to` revision edge — a technical retry that doesn't regress any earlier creative approval. */
+export const SELF_LOOP_STAGES: ReadonlySet<CampaignStage> = new Set(
+  CAMPAIGN_TRANSITIONS.filter((t) => t.from === t.to).map((t) => t.from),
+);
 
 function findDefinition(from: CampaignStage, to: CampaignStage): TransitionDefinition | undefined {
   return CAMPAIGN_TRANSITIONS.find((t) => t.from === from && t.to === to);
@@ -201,8 +315,7 @@ export function listValidNextStages(from: CampaignStage): CampaignStage[] {
 }
 
 export type TransitionEvaluation =
-  | { ok: true; definition: TransitionDefinition }
-  | { ok: false; reason: TransitionRejectionReason };
+  { ok: true; definition: TransitionDefinition } | { ok: false; reason: TransitionRejectionReason };
 
 /**
  * Pure evaluation of a single transition attempt against gathered facts. Does

@@ -4,11 +4,7 @@ import {
   type CampaignStage,
   type TransitionAuditResult,
 } from '@combat/domain';
-import {
-  checkAndReserveBudget,
-  releaseBudget,
-  type BudgetDataSource,
-} from './budget-repository';
+import { checkAndReserveBudget, releaseBudget, type BudgetDataSource } from './budget-repository';
 import type { CampaignDataSource, CampaignRecord } from './campaign-repository';
 import { latestApprovalForGate, type HumanApprovalDataSource } from './human-approval-repository';
 import {
@@ -171,29 +167,42 @@ export async function attemptCampaignTransition(
   // in-memory computation is cheap relative to the queries already made.
   const allFactKeys = [
     'briefAccepted',
-    'strategyApproved',
+    'conceptDrafted',
     'conceptApproved',
-    'scriptApproved',
+    'scriptDrafted',
     'allShotsHaveRequiredAssets',
+    'allShotsHavePrompts',
     'allShotsHaveCandidate',
-    'allShotsPassedAutomatedQA',
+    'allShotsPassedVisualQA',
+    'allShotsPassedContinuityQA',
     'allShotsSelected',
     'compositingComplete',
     'roughCutAssembled',
+    'soundDesignComplete',
     'finalQAPassed',
     'finalApproved',
+    'variantsGenerated',
+    'variantQAPassed',
     'exportRenderComplete',
     'deliverySpecMet',
-    'distributionConfirmed',
-    'performanceMetricsCollected',
-    'strategyRevisionRequested',
     'conceptRevisionRequested',
-    'scriptRevisionRequested',
-    'automatedQARetryAllowed',
+    'visualQARetryAllowed',
+    'continuityQARetryAllowed',
     'shotSelectionRegenerateRequested',
-    'finalQARevisionRequested',
-    'finalApprovalRevisionRequested',
-    'iterationPlanningRestartRequested',
+    'compositingRepairTargetIsShotSelection',
+    'compositingRepairTargetIsCompositingRetry',
+    'roughCutFailureRequiresRecompositing',
+    'soundDesignRepairTargetIsRoughCut',
+    'soundDesignRepairTargetIsSoundDesignRetry',
+    'finalQARepairTargetIsCompositing',
+    'finalQARepairTargetIsRoughCut',
+    'finalQAAudioFailure',
+    'finalApprovalRepairTargetIsCompositing',
+    'finalApprovalRepairTargetIsRoughCut',
+    'finalApprovalRepairTargetIsSoundDesign',
+    'variantQAFailed',
+    'exportTechnicalFailureRetry',
+    'distributionFailureDetected',
   ] as const;
   const facts = computeTransitionFacts(inputs, allFactKeys);
 
@@ -204,10 +213,19 @@ export async function attemptCampaignTransition(
         ? 'REJECTED_INVALID_TRANSITION'
         : 'REJECTED_MISSING_PREREQUISITE';
     const error = new CampaignTransitionError(evaluation.reason);
-    const audit = await writeAudit(db, workspaceId, campaignId, idempotencyKey, fromStage, toStage, result, {
-      reason: error.message,
-      requestedByUserId: request.requestedByUserId,
-    });
+    const audit = await writeAudit(
+      db,
+      workspaceId,
+      campaignId,
+      idempotencyKey,
+      fromStage,
+      toStage,
+      result,
+      {
+        reason: error.message,
+        requestedByUserId: request.requestedByUserId,
+      },
+    );
     return { ok: false, error, audit };
   }
 
@@ -248,7 +266,10 @@ export async function attemptCampaignTransition(
         return { ok: false, error: budgetResult.error, audit };
       }
       if (budgetResult.policy) {
-        reservedBudget = { policyId: budgetResult.policy.id, amountCents: request.generationBudgetCents };
+        reservedBudget = {
+          policyId: budgetResult.policy.id,
+          amountCents: request.generationBudgetCents,
+        };
       }
     }
   }
@@ -289,10 +310,19 @@ export async function attemptCampaignTransition(
     throw new Error(`campaign ${campaignId} disappeared immediately after a successful update`);
   }
 
-  const audit = await writeAudit(db, workspaceId, campaignId, idempotencyKey, fromStage, toStage, 'APPLIED', {
-    approvalId,
-    requestedByUserId: request.requestedByUserId,
-  });
+  const audit = await writeAudit(
+    db,
+    workspaceId,
+    campaignId,
+    idempotencyKey,
+    fromStage,
+    toStage,
+    'APPLIED',
+    {
+      approvalId,
+      requestedByUserId: request.requestedByUserId,
+    },
+  );
 
   return { ok: true, campaign: updatedCampaign, audit };
 }

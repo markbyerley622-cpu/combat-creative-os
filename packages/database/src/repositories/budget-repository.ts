@@ -1,4 +1,8 @@
-import { CampaignTransitionError, type BudgetLedgerEntryType, type BudgetLevel } from '@combat/domain';
+import {
+  CampaignTransitionError,
+  type BudgetLedgerEntryType,
+  type BudgetLevel,
+} from '@combat/domain';
 
 /**
  * Budget checks happen before every external-generation dispatch, at every

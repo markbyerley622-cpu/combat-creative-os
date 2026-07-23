@@ -1,9 +1,16 @@
 import { randomUUID } from 'node:crypto';
 import type { CampaignStage } from '@combat/domain';
 import type { AssetDataSource, AssetProvenanceRecord, AssetRecord } from '../asset-repository';
-import type { BudgetDataSource, BudgetLedgerEntryRecord, BudgetPolicyRecord } from '../budget-repository';
+import type {
+  BudgetDataSource,
+  BudgetLedgerEntryRecord,
+  BudgetPolicyRecord,
+} from '../budget-repository';
 import type { CampaignDataSource, CampaignRecord } from '../campaign-repository';
-import type { CampaignTransitionAuditDataSource, CampaignTransitionAuditRecord } from '../campaign-transition-service';
+import type {
+  CampaignTransitionAuditDataSource,
+  CampaignTransitionAuditRecord,
+} from '../campaign-transition-service';
 import type { HumanApprovalDataSource, HumanApprovalRecord } from '../human-approval-repository';
 import type {
   GenerationPromptRecord,
@@ -13,16 +20,19 @@ import type {
 } from '../prompt-repository';
 import type {
   CampaignBriefFactRow,
+  CreativeConceptFactRow,
   CreativeVariantFactRow,
   DeliverySpecificationFactRow,
   EditDecisionListFactRow,
   GenerationCandidateFactRow,
   GenerationPromptFactRow,
-  PerformanceMetricsFactRow,
   QualityAssessmentFactRow,
+  QualityFailureFactRow,
   RenderJobFactRow,
   ScriptFactRow,
   ShotFactRow,
+  SoundCueFactRow,
+  TimelineFactRow,
   TransitionFactsDataSource,
 } from '../transition-facts';
 
@@ -41,7 +51,9 @@ import type {
  * This is intentionally one large fake rather than one per repository file —
  * campaign-transition-service.ts composes many repositories in a single
  * logical transaction, and a real transaction shares one connection/lock
- * scope across all of them.
+ * scope across all of them. Performance entities (PerformanceMetrics, etc.)
+ * are deliberately not modeled here — they no longer feed campaign-stage
+ * transition facts (docs/adr/0002-campaign-lifecycle-alignment.md).
  */
 export class InMemoryCampaignStore
   implements
@@ -57,16 +69,19 @@ export class InMemoryCampaignStore
   audits: CampaignTransitionAuditRecord[] = [];
   approvals: HumanApprovalRecord[] = [];
   briefs: CampaignBriefFactRow[] = [];
+  concepts: CreativeConceptFactRow[] = [];
   scripts: ScriptFactRow[] = [];
   shots: ShotFactRow[] = [];
   generationPrompts: (GenerationPromptFactRow & Partial<GenerationPromptRecord>)[] = [];
   generationCandidates: GenerationCandidateFactRow[] = [];
   qualityAssessments: QualityAssessmentFactRow[] = [];
+  qualityFailures: QualityFailureFactRow[] = [];
   renderJobs: RenderJobFactRow[] = [];
   editDecisionLists: EditDecisionListFactRow[] = [];
   deliverySpecifications: DeliverySpecificationFactRow[] = [];
   creativeVariants: CreativeVariantFactRow[] = [];
-  performanceMetricsRows: PerformanceMetricsFactRow[] = [];
+  timelines: TimelineFactRow[] = [];
+  soundCues: SoundCueFactRow[] = [];
   budgetPolicies: BudgetPolicyRecord[] = [];
   budgetLedgerEntries: BudgetLedgerEntryRecord[] = [];
   assets: AssetRecord[] = [];
@@ -133,8 +148,9 @@ export class InMemoryCampaignStore
   campaignTransitionAudit: CampaignTransitionAuditDataSource['campaignTransitionAudit'] = {
     findFirst: async ({ where }) => {
       return (
-        this.audits.find((a) => a.campaignId === where.campaignId && a.idempotencyKey === where.idempotencyKey) ??
-        null
+        this.audits.find(
+          (a) => a.campaignId === where.campaignId && a.idempotencyKey === where.idempotencyKey,
+        ) ?? null
       );
     },
     create: async ({ data }) => {
@@ -146,7 +162,11 @@ export class InMemoryCampaignStore
           `unique constraint violation on campaign_transition_audits (campaignId, idempotencyKey)`,
         );
       }
-      const audit: CampaignTransitionAuditRecord = { id: randomUUID(), createdAt: new Date(), ...data };
+      const audit: CampaignTransitionAuditRecord = {
+        id: randomUUID(),
+        createdAt: new Date(),
+        ...data,
+      };
       this.audits.push(audit);
       return audit;
     },
@@ -168,13 +188,17 @@ export class InMemoryCampaignStore
   campaignBrief: TransitionFactsDataSource['campaignBrief'] = {
     findMany: async ({ where }) => this.briefs.filter((b) => b.campaignId === where.campaignId),
   };
+  creativeConcept: TransitionFactsDataSource['creativeConcept'] = {
+    findMany: async ({ where }) => this.concepts.filter((c) => c.campaignId === where.campaignId),
+  };
   script: TransitionFactsDataSource['script'] = {
     findMany: async ({ where }) => this.scripts.filter((s) => s.campaignId === where.campaignId),
   };
   shot: TransitionFactsDataSource['shot'] = {
     findMany: async ({ where }) => this.shots.filter((s) => where.scriptId.in.includes(s.scriptId)),
   };
-  generationPrompt: TransitionFactsDataSource['generationPrompt'] & PromptDataSource['generationPrompt'] = {
+  generationPrompt: TransitionFactsDataSource['generationPrompt'] &
+    PromptDataSource['generationPrompt'] = {
     findMany: async ({ where }) =>
       this.generationPrompts.filter((p) => where.shotId.in.includes(p.shotId)),
     create: async ({ data }) => {
@@ -191,7 +215,9 @@ export class InMemoryCampaignStore
   };
   generationCandidate: TransitionFactsDataSource['generationCandidate'] = {
     findMany: async ({ where }) =>
-      this.generationCandidates.filter((c) => where.generationPromptId.in.includes(c.generationPromptId)),
+      this.generationCandidates.filter((c) =>
+        where.generationPromptId.in.includes(c.generationPromptId),
+      ),
   };
   qualityAssessment: TransitionFactsDataSource['qualityAssessment'] = {
     findMany: async ({ where }) => {
@@ -203,6 +229,12 @@ export class InMemoryCampaignStore
           qa.assetId != null,
       );
     },
+  };
+  qualityFailure: TransitionFactsDataSource['qualityFailure'] = {
+    findMany: async ({ where }) =>
+      this.qualityFailures.filter((f) =>
+        where.qualityAssessmentId.in.includes(f.qualityAssessmentId),
+      ),
   };
   renderJob: TransitionFactsDataSource['renderJob'] = {
     findMany: async () => this.renderJobs,
@@ -216,15 +248,21 @@ export class InMemoryCampaignStore
   creativeVariant: TransitionFactsDataSource['creativeVariant'] = {
     findMany: async () => this.creativeVariants,
   };
-  performanceMetrics: TransitionFactsDataSource['performanceMetrics'] = {
+  timeline: TransitionFactsDataSource['timeline'] = {
+    findMany: async ({ where }) => this.timelines.filter((t) => t.campaignId === where.campaignId),
+  };
+  soundCue: TransitionFactsDataSource['soundCue'] = {
     findMany: async ({ where }) =>
-      this.performanceMetricsRows.filter((m) => where.creativeVariantId.in.includes(m.creativeVariantId)),
+      this.soundCues.filter((s) => where.timelineId.in.includes(s.timelineId)),
   };
 
   budgetPolicy: BudgetDataSource['budgetPolicy'] = {
     findFirst: async ({ where }) =>
       this.budgetPolicies.find(
-        (p) => p.workspaceId === where.workspaceId && p.level === where.level && p.scopeId === where.scopeId,
+        (p) =>
+          p.workspaceId === where.workspaceId &&
+          p.level === where.level &&
+          p.scopeId === where.scopeId,
       ) ?? null,
   };
   budgetLedgerEntry: BudgetDataSource['budgetLedgerEntry'] = {
@@ -232,14 +270,17 @@ export class InMemoryCampaignStore
       this.budgetLedgerEntries.filter((e) => e.budgetPolicyId === where.budgetPolicyId),
     findFirst: async ({ where }) =>
       this.budgetLedgerEntries.find(
-        (e) => e.budgetPolicyId === where.budgetPolicyId && e.idempotencyKey === where.idempotencyKey,
+        (e) =>
+          e.budgetPolicyId === where.budgetPolicyId && e.idempotencyKey === where.idempotencyKey,
       ) ?? null,
     create: async ({ data }) => {
       const exists = this.budgetLedgerEntries.some(
         (e) => e.budgetPolicyId === data.budgetPolicyId && e.idempotencyKey === data.idempotencyKey,
       );
       if (exists) {
-        throw new Error('unique constraint violation on budget_ledger_entries (budgetPolicyId, idempotencyKey)');
+        throw new Error(
+          'unique constraint violation on budget_ledger_entries (budgetPolicyId, idempotencyKey)',
+        );
       }
       const entry: BudgetLedgerEntryRecord = { id: randomUUID(), createdAt: new Date(), ...data };
       this.budgetLedgerEntries.push(entry);
@@ -258,13 +299,18 @@ export class InMemoryCampaignStore
   };
   assetProvenance: AssetDataSource['assetProvenance'] = {
     create: async ({ data }) => {
-      const provenance: AssetProvenanceRecord = { id: randomUUID(), createdAt: new Date(), ...data };
+      const provenance: AssetProvenanceRecord = {
+        id: randomUUID(),
+        createdAt: new Date(),
+        ...data,
+      };
       this.assetProvenances.push(provenance);
       return provenance;
     },
     findFirst: async ({ where }) =>
-      this.assetProvenances.find((p) => p.assetId === where.assetId && p.workspaceId === where.workspaceId) ??
-      null,
+      this.assetProvenances.find(
+        (p) => p.assetId === where.assetId && p.workspaceId === where.workspaceId,
+      ) ?? null,
   };
 
   promptTemplate: PromptDataSource['promptTemplate'] = {
@@ -276,7 +322,12 @@ export class InMemoryCampaignStore
   };
   promptVersion: PromptDataSource['promptVersion'] = {
     create: async ({ data }) => {
-      const version: PromptVersionRecord = { id: randomUUID(), isActive: false, createdAt: new Date(), ...data };
+      const version: PromptVersionRecord = {
+        id: randomUUID(),
+        isActive: false,
+        createdAt: new Date(),
+        ...data,
+      };
       this.promptVersions.push(version);
       return version;
     },

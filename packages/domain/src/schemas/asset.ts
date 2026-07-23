@@ -13,9 +13,12 @@ export const AssetSchema = z
     uploadedByUserId: z.string().uuid().optional(),
     createdAt: z.date(),
   })
-  .refine((asset) => Boolean(asset.createdByAgentInvocationId) !== Boolean(asset.uploadedByUserId), {
-    message: 'exactly one of createdByAgentInvocationId or uploadedByUserId must be set',
-  });
+  .refine(
+    (asset) => Boolean(asset.createdByAgentInvocationId) !== Boolean(asset.uploadedByUserId),
+    {
+      message: 'exactly one of createdByAgentInvocationId or uploadedByUserId must be set',
+    },
+  );
 export type Asset = z.infer<typeof AssetSchema>;
 
 /**

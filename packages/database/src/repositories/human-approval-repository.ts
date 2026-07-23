@@ -16,6 +16,8 @@ export interface HumanApprovalRecord {
   stageAtDecision: CampaignStage;
   decidedByUserId: string;
   comments?: string;
+  /** The human-selected repair target for a rejected FINAL decision — see HumanApprovalSchema's refine in packages/domain. */
+  repairTarget?: CampaignStage;
   decidedAt: Date;
 }
 
@@ -30,6 +32,7 @@ export interface HumanApprovalDataSource {
         stageAtDecision: CampaignStage;
         decidedByUserId: string;
         comments?: string;
+        repairTarget?: CampaignStage;
       };
     }): Promise<HumanApprovalRecord>;
     findMany(args: {
@@ -48,6 +51,7 @@ export async function recordHumanApproval(
     stageAtDecision: CampaignStage;
     decidedByUserId: string;
     comments?: string;
+    repairTarget?: CampaignStage;
   },
 ): Promise<HumanApprovalRecord> {
   return db.humanApproval.create({
@@ -59,6 +63,7 @@ export async function recordHumanApproval(
       stageAtDecision: input.stageAtDecision,
       decidedByUserId: input.decidedByUserId,
       comments: input.comments,
+      repairTarget: input.repairTarget,
     },
   });
 }
