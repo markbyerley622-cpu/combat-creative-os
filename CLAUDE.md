@@ -10,6 +10,26 @@ real external provider integration (Veo, Runway, Figma, aerender, Frame.io,
 Anthropic) is implemented yet — see `packages/agents/README.md` and
 `docs/architecture.md` §7.1/§8.
 
+## Context and token efficiency
+
+- Read only files relevant to the active task.
+- Search for relevant code before opening large files.
+- Do not repeat architecture already documented.
+- Keep progress explanations concise.
+- Use package-level tests during implementation.
+- Run the complete repository validation only once at the end.
+- Do not print lengthy successful command output.
+- When a command fails, inspect only the relevant error section.
+- Use subagents only for independent, clearly bounded work.
+- Do not make multiple agents inspect the same files.
+- At the end of each milestone, update relevant documentation, commit the
+  work and report only:
+  - commit hash
+  - files changed
+  - tests run
+  - remaining limitations
+  - next milestone
+
 ## Architecture boundaries
 
 - **Temporal workflow files never do I/O.** Files under
