@@ -1,12 +1,22 @@
 // Combat Creative OS — foundation schema.
 //
-// Scope note (see docs/architecture.md §4.4 and the 2026-07-23 scaffolding
-// plan): this schema covers only the tenancy core — Workspace, User, Role,
-// Membership. The full domain schema (Campaign, Script, Shot, GenerationJob,
-// Asset, Budget, etc. — architecture.md §4.1) is business-pipeline data model
-// work for a later milestone, once the specialist agents and workflows it
-// supports are being implemented. Every future table added to this schema
-// MUST carry a workspaceId column per the tenancy rule in CLAUDE.md.
+// Tenancy core (Workspace, User, Role, Membership) plus the full campaign
+// production domain model — see docs/domain-model.md for an ER diagram, the
+// campaign state machine this schema backs, and worked examples.
+//
+// Tenancy-scoping convention (docs/architecture.md §4.4, CLAUDE.md): every
+// table below carries a `workspaceId` column with an index. A real FK
+// relation to Workspace (with back-relation array) is declared only on
+// aggregate roots that are queried/created directly by API/activity code
+// (Campaign, Asset, HumanApproval, PromptTemplate, BudgetPolicy,
+// BudgetLedgerEntry, CampaignTransitionAudit) — deeply-nested child tables
+// (Shot, GenerationPrompt, QualityFailure, etc.) rely on their immediate
+// parent's FK chain up to Campaign/Workspace for referential integrity, and
+// carry `workspaceId` as a denormalized, indexed scoping column so the
+// repository layer can always filter directly on it without joining up the
+// chain (see packages/database's repository rule in CLAUDE.md). This keeps
+// the schema's relation graph readable while still satisfying "every
+// workspace-owned table gets a workspaceId column and an index on it."
 
 generator client {
   provider = "prisma-client-js"
@@ -32,6 +42,12 @@ model Workspace {
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
   memberships Membership[]
+
+  campaigns                Campaign[]
+  assets                   Asset[]
+  promptTemplates          PromptTemplate[]
+  budgetPolicies           BudgetPolicy[]
+  campaignTransitionAudits CampaignTransitionAudit[]
 
   @@map("workspaces")
 }
@@ -60,4 +76,781 @@ model Membership {
   @@unique([workspaceId, userId])
   @@index([workspaceId])
   @@map("memberships")
+}
+
+// ---------------------------------------------------------------------------
+// Campaign production domain (docs/domain-model.md)
+// ---------------------------------------------------------------------------
+
+enum CampaignStage {
+  DRAFT
+  STRATEGY_REVIEW
+  CONCEPT_REVIEW
+  SCRIPT_REVIEW
+  ASSET_COLLECTION
+  SHOT_GENERATION
+  AUTOMATED_QA
+  HUMAN_SHOT_SELECTION
+  COMPOSITING
+  ROUGH_CUT
+  FINAL_QA
+  FINAL_APPROVAL
+  EXPORTING
+  READY_FOR_DISTRIBUTION
+  DISTRIBUTED
+  PERFORMANCE_COLLECTION
+  ITERATION_PLANNING
+}
+
+enum DeliveryPlatform {
+  TIKTOK
+  INSTAGRAM_REELS
+  YOUTUBE_SHORTS
+  GENERIC
+}
+
+enum BudgetLevel {
+  WORKSPACE
+  CAMPAIGN
+  SHOT
+  PROVIDER
+}
+
+enum BudgetLedgerEntryType {
+  RESERVATION
+  CHARGE
+  RELEASE
+}
+
+enum ApprovalGate {
+  STRATEGY
+  CONCEPT
+  SCRIPT
+  SHOT_SELECTION
+  FINAL
+}
+
+enum ApprovalDecision {
+  APPROVED
+  CHANGES_REQUESTED
+  REJECTED
+}
+
+enum AssetKind {
+  VIDEO_CANDIDATE
+  THUMBNAIL
+  PROXY
+  MOTION_GRAPHICS_RENDER
+  SOUND_STEM
+  FINAL_MASTER
+  VARIANT
+  DESIGN_EXPORT
+}
+
+enum GenerationCandidateStatus {
+  PENDING
+  SUBMITTED
+  SUCCEEDED
+  FAILED
+  TIMED_OUT
+}
+
+enum QualityFailureCategory {
+  PROMPT
+  GENERATION
+  CONTINUITY
+  TECHNICAL
+}
+
+enum QualityFailureSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  BLOCKING
+}
+
+enum AssessedBy {
+  AGENT
+  HUMAN
+}
+
+enum RenderJobKind {
+  COMPOSITING
+  EXPORT
+}
+
+enum RenderJobStatus {
+  QUEUED
+  SUBMITTED
+  RUNNING
+  SUCCEEDED
+  FAILED
+}
+
+enum SoundCueType {
+  MUSIC
+  SFX
+  VOICEOVER
+}
+
+enum TransitionType {
+  CUT
+  DISSOLVE
+  WIPE
+  FADE_IN
+  FADE_OUT
+}
+
+enum ShotStatus {
+  PENDING
+  GENERATING
+  QC_REVIEW
+  NEEDS_HUMAN
+  BUDGET_EXCEEDED
+  SELECTED
+  REJECTED
+}
+
+enum LicenseType {
+  FULL_BUY_OUT
+  LIMITED_USAGE
+  ROYALTY_FREE
+  EXCLUSIVE
+}
+
+enum CreativeVariantStatus {
+  PENDING
+  RENDERING
+  READY
+  FAILED
+}
+
+enum TransitionAuditResult {
+  APPLIED
+  REJECTED_INVALID_TRANSITION
+  REJECTED_MISSING_PREREQUISITE
+  REJECTED_BUDGET_EXCEEDED
+  REJECTED_CONCURRENT_MODIFICATION
+  DUPLICATE_IGNORED
+}
+
+enum EditTrackType {
+  VIDEO
+  AUDIO
+}
+
+/// Campaign is the aggregate root the state machine (packages/domain/src/workflow)
+/// operates on. `version` is an optimistic-concurrency counter — every applied
+/// transition is a compare-and-swap update on (id, workspaceId, currentStage,
+/// version), which is what makes concurrent transition attempts safe without
+/// a Postgres advisory lock (see campaign-transition-service.ts).
+model Campaign {
+  id           String        @id @default(uuid())
+  workspaceId  String
+  name         String
+  currentStage CampaignStage @default(DRAFT)
+  version      Int           @default(0)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  briefs               CampaignBrief[]
+  concepts             CreativeConcept[]
+  scripts              Script[]
+  timelines            Timeline[]
+  renderJobs           RenderJob[]
+  editDecisionLists    EditDecisionList[]
+  deliverySpecs        DeliverySpecification[]
+  creativeVariants     CreativeVariant[]
+  humanApprovals       HumanApproval[]
+  transitionAudits     CampaignTransitionAudit[]
+
+  @@index([workspaceId])
+  @@map("campaigns")
+}
+
+/// Versioned and immutable once accepted (`acceptedAt` set) — a revision is a
+/// new row with an incremented `version`, never a mutation of an existing one.
+model CampaignBrief {
+  id               String             @id @default(uuid())
+  workspaceId      String
+  campaignId       String
+  version          Int
+  brandName        String
+  objective        String
+  targetPlatforms  DeliveryPlatform[]
+  durationsSeconds Int[]
+  budgetCents      Int
+  keyMessages      String[]
+  mandatories      String[]
+  acceptedAt       DateTime?
+  createdAt        DateTime           @default(now())
+
+  campaign         Campaign           @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  audienceProfiles AudienceProfile[]
+
+  @@unique([campaignId, version])
+  @@index([workspaceId])
+  @@map("campaign_briefs")
+}
+
+model AudienceProfile {
+  id               String   @id @default(uuid())
+  workspaceId      String
+  campaignBriefId  String
+  name             String
+  demographics     Json     @default("{}")
+  psychographics   Json     @default("{}")
+  painPoints       String[]
+  platformBehavior Json     @default("{}")
+  createdAt        DateTime @default(now())
+
+  campaignBrief CampaignBrief @relation(fields: [campaignBriefId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([campaignBriefId])
+  @@map("audience_profiles")
+}
+
+model CreativeConcept {
+  id              String   @id @default(uuid())
+  workspaceId     String
+  campaignId      String
+  version         Int
+  logline         String
+  visualDirection String
+  narrativeArc    String
+  referenceNotes  String[]
+  createdAt       DateTime @default(now())
+
+  campaign       Campaign        @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  visualLanguage VisualLanguage?
+  scripts        Script[]
+
+  @@unique([campaignId, version])
+  @@index([workspaceId])
+  @@map("creative_concepts")
+}
+
+/// One-to-one with CreativeConcept — a concept version has exactly one visual
+/// language spec; a revised concept version gets a new VisualLanguage row.
+model VisualLanguage {
+  id                String   @id @default(uuid())
+  workspaceId       String
+  creativeConceptId String   @unique
+  colorPalette      String[]
+  typography        Json     @default("{}")
+  motionPrinciples  String[]
+  brandAssetRefs    String[]
+  createdAt         DateTime @default(now())
+
+  creativeConcept CreativeConcept @relation(fields: [creativeConceptId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@map("visual_languages")
+}
+
+model Script {
+  id                  String   @id @default(uuid())
+  workspaceId         String
+  campaignId          String
+  creativeConceptId   String
+  version             Int
+  totalDurationFrames Int
+  createdAt           DateTime @default(now())
+
+  campaign        Campaign        @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  creativeConcept CreativeConcept @relation(fields: [creativeConceptId], references: [id], onDelete: Restrict)
+  shots           Shot[]
+  timelines       Timeline[]
+
+  @@unique([campaignId, version])
+  @@index([workspaceId])
+  @@map("scripts")
+}
+
+model Shot {
+  id               String     @id @default(uuid())
+  workspaceId      String
+  scriptId         String
+  index            Int
+  description      String
+  durationFrames   Int
+  status           ShotStatus @default(PENDING)
+  dependsOnShotIds String[]
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+
+  script            Script             @relation(fields: [scriptId], references: [id], onDelete: Cascade)
+  generationPrompts GenerationPrompt[]
+  timelineEntries   TimelineEntry[]
+
+  @@unique([scriptId, index])
+  @@index([workspaceId])
+  @@map("shots")
+}
+
+/// Reusable edit-transition definition (cut/dissolve/wipe/fade), referenced by
+/// TimelineEntry. Not to be confused with campaign *stage* transitions.
+model TransitionSpecification {
+  id             String         @id @default(uuid())
+  workspaceId    String
+  type           TransitionType
+  durationFrames Int
+  easing         String?
+  params         Json           @default("{}")
+  createdAt      DateTime       @default(now())
+
+  timelineEntries TimelineEntry[]
+
+  @@index([workspaceId])
+  @@map("transition_specifications")
+}
+
+model Timeline {
+  id            String   @id @default(uuid())
+  workspaceId   String
+  campaignId    String
+  scriptId      String
+  version       Int
+  frameRate     Int      @default(30)
+  durationFrames Int
+  createdAt     DateTime @default(now())
+
+  campaign Campaign        @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  script   Script          @relation(fields: [scriptId], references: [id], onDelete: Restrict)
+  entries  TimelineEntry[]
+  soundCues SoundCue[]
+
+  @@unique([campaignId, version])
+  @@index([workspaceId])
+  @@map("timelines")
+}
+
+model TimelineEntry {
+  id                        String   @id @default(uuid())
+  workspaceId               String
+  timelineId                String
+  shotId                    String
+  transitionSpecificationId String?
+  order                     Int
+  startFrame                Int
+  durationFrames            Int
+
+  timeline               Timeline                 @relation(fields: [timelineId], references: [id], onDelete: Cascade)
+  shot                   Shot                     @relation(fields: [shotId], references: [id], onDelete: Restrict)
+  transitionSpecification TransitionSpecification? @relation(fields: [transitionSpecificationId], references: [id], onDelete: SetNull)
+
+  @@unique([timelineId, order])
+  @@index([workspaceId])
+  @@map("timeline_entries")
+}
+
+/// `promptVersionId` is a required (non-nullable) FK — CLAUDE.md "Prompt
+/// version used for every generation must be recorded" is enforced at the
+/// database level, not left to callers to remember.
+model GenerationPrompt {
+  id              String   @id @default(uuid())
+  workspaceId     String
+  shotId          String
+  promptVersionId String
+  providerId      String
+  promptText      String
+  negativePrompt  String?
+  params          Json     @default("{}")
+  createdAt       DateTime @default(now())
+
+  shot          Shot                @relation(fields: [shotId], references: [id], onDelete: Cascade)
+  promptVersion PromptVersion       @relation(fields: [promptVersionId], references: [id], onDelete: Restrict)
+  candidates    GenerationCandidate[]
+
+  @@index([workspaceId])
+  @@index([shotId])
+  @@map("generation_prompts")
+}
+
+model GenerationCandidate {
+  id                 String                    @id @default(uuid())
+  workspaceId        String
+  generationPromptId String
+  assetId            String?
+  providerJobRef     String?
+  status             GenerationCandidateStatus @default(PENDING)
+  attempt            Int
+  createdAt          DateTime                  @default(now())
+  updatedAt          DateTime                  @updatedAt
+
+  generationPrompt   GenerationPrompt    @relation(fields: [generationPromptId], references: [id], onDelete: Cascade)
+  asset              Asset?              @relation(fields: [assetId], references: [id], onDelete: SetNull)
+  qualityAssessments QualityAssessment[]
+
+  @@index([workspaceId])
+  @@index([generationPromptId])
+  @@map("generation_candidates")
+}
+
+/// Assesses either a GenerationCandidate (Visual QC) or a final-master Asset
+/// (Final QA) — exactly one of generationCandidateId/assetId is set. This XOR
+/// is an application-level invariant (see packages/domain's
+/// QualityAssessmentSchema .refine and its repository-layer tests); Prisma
+/// does not currently support a declarative cross-column CHECK constraint
+/// for it.
+model QualityAssessment {
+  id                    String     @id @default(uuid())
+  workspaceId           String
+  generationCandidateId String?
+  assetId               String?
+  pass                  Boolean
+  scores                Json       @default("{}")
+  assessedBy            AssessedBy
+  createdAt             DateTime   @default(now())
+
+  generationCandidate GenerationCandidate? @relation(fields: [generationCandidateId], references: [id], onDelete: Cascade)
+  asset               Asset?               @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  failures            QualityFailure[]
+
+  @@index([workspaceId])
+  @@index([generationCandidateId])
+  @@index([assetId])
+  @@map("quality_assessments")
+}
+
+model QualityFailure {
+  id                  String                 @id @default(uuid())
+  workspaceId         String
+  qualityAssessmentId String
+  category            QualityFailureCategory
+  severity            QualityFailureSeverity
+  description         String
+  suggestedAction     String?
+  createdAt           DateTime               @default(now())
+
+  qualityAssessment QualityAssessment @relation(fields: [qualityAssessmentId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([qualityAssessmentId])
+  @@map("quality_failures")
+}
+
+/// Immutable once created — architecture.md §0 guiding constraint 3. The
+/// repository layer exposes only an insert for this table; a revised
+/// decision is a new row, never an update of an existing one.
+model HumanApproval {
+  id               String           @id @default(uuid())
+  workspaceId      String
+  campaignId       String
+  gate             ApprovalGate
+  decision         ApprovalDecision
+  stageAtDecision  CampaignStage
+  decidedByUserId  String
+  comments         String?
+  decidedAt        DateTime         @default(now())
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([campaignId, gate])
+  @@map("human_approvals")
+}
+
+model Asset {
+  id                         String    @id @default(uuid())
+  workspaceId                String
+  kind                       AssetKind
+  s3Key                      String    @unique
+  checksum                   String
+  mimeType                   String
+  createdByAgentInvocationId String?
+  uploadedByUserId           String?
+  createdAt                  DateTime  @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  provenance           AssetProvenance?
+  license              LicenseRecord?
+  generationCandidates GenerationCandidate[]
+  qualityAssessments   QualityAssessment[]
+  renderJobOutputs     RenderJob[]
+  soundCues            SoundCue[]
+  editDecisionEntries  EditDecisionEntry[]
+  creativeVariants     CreativeVariant[]
+
+  @@index([workspaceId])
+  @@map("assets")
+}
+
+/// Kept separate from Asset because provenance chains are multi-hop
+/// (architecture.md §4.3). `derivedFromAssetIds` is a plain id array, not an
+/// FK array (Postgres/Prisma do not support array foreign keys) — it is the
+/// authoritative lineage edge list, read by lineage-traversal queries in
+/// packages/database's asset-repository.ts.
+model AssetProvenance {
+  id                     String   @id @default(uuid())
+  workspaceId            String
+  assetId                String   @unique
+  derivedFromAssetIds    String[]
+  producedByInvocationId String?
+  providerJobRef         String?
+  createdAt              DateTime @default(now())
+
+  asset Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@map("asset_provenance_records")
+}
+
+/// 0..1 on Asset by design — intermediate assets (proxies, thumbnails) don't need one.
+model LicenseRecord {
+  id            String      @id @default(uuid())
+  workspaceId   String
+  assetId       String      @unique
+  licenseType   LicenseType
+  rightsHolder  String
+  restrictions  String[]
+  expiresAt     DateTime?
+  createdAt     DateTime    @default(now())
+
+  asset Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@map("license_records")
+}
+
+/// Backs both COMPOSITING-stage motion-graphics jobs and EXPORTING-stage
+/// final renders. `inputAssetIds` is a plain id array, not FK-enforced — see
+/// AssetProvenance for the FK-backed lineage edge this complements.
+model RenderJob {
+  id             String          @id @default(uuid())
+  workspaceId    String
+  campaignId     String
+  kind           RenderJobKind
+  status         RenderJobStatus @default(QUEUED)
+  inputAssetIds  String[]
+  outputAssetId  String?
+  providerJobRef String?
+  createdAt      DateTime        @default(now())
+  completedAt    DateTime?
+
+  campaign    Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  outputAsset Asset?   @relation(fields: [outputAssetId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId])
+  @@index([campaignId])
+  @@map("render_jobs")
+}
+
+model SoundCue {
+  id             String       @id @default(uuid())
+  workspaceId    String
+  timelineId     String
+  type           SoundCueType
+  startFrame     Int
+  durationFrames Int
+  assetId        String?
+  notes          String?
+  createdAt      DateTime     @default(now())
+
+  timeline Timeline @relation(fields: [timelineId], references: [id], onDelete: Cascade)
+  asset    Asset?   @relation(fields: [assetId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId])
+  @@index([timelineId])
+  @@map("sound_cues")
+}
+
+model EditDecisionList {
+  id          String   @id @default(uuid())
+  workspaceId String
+  campaignId  String
+  version     Int
+  createdAt   DateTime @default(now())
+
+  campaign Campaign            @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  entries  EditDecisionEntry[]
+
+  @@unique([campaignId, version])
+  @@index([workspaceId])
+  @@map("edit_decision_lists")
+}
+
+model EditDecisionEntry {
+  id                 String        @id @default(uuid())
+  workspaceId        String
+  editDecisionListId String
+  assetId            String
+  sourceInFrame      Int
+  sourceOutFrame     Int
+  timelinePosition   Int
+  trackType          EditTrackType
+  order              Int
+
+  editDecisionList EditDecisionList @relation(fields: [editDecisionListId], references: [id], onDelete: Cascade)
+  asset            Asset            @relation(fields: [assetId], references: [id], onDelete: Restrict)
+
+  @@unique([editDecisionListId, order])
+  @@index([workspaceId])
+  @@map("edit_decision_entries")
+}
+
+model DeliverySpecification {
+  id                   String           @id @default(uuid())
+  workspaceId          String
+  campaignId           String
+  platform             DeliveryPlatform
+  aspectRatio          String
+  durationSeconds      Int
+  safeArea             Json?
+  captionBurnRequired  Boolean          @default(false)
+  format               String
+  createdAt            DateTime         @default(now())
+
+  campaign         Campaign          @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  creativeVariants CreativeVariant[]
+
+  @@index([workspaceId])
+  @@map("delivery_specifications")
+}
+
+model CreativeVariant {
+  id                      String                @id @default(uuid())
+  workspaceId             String
+  campaignId              String
+  deliverySpecificationId String
+  durationSeconds         Int
+  assetId                 String?
+  status                  CreativeVariantStatus @default(PENDING)
+  createdAt               DateTime              @default(now())
+
+  campaign              Campaign               @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  deliverySpecification DeliverySpecification  @relation(fields: [deliverySpecificationId], references: [id], onDelete: Restrict)
+  asset                 Asset?                 @relation(fields: [assetId], references: [id], onDelete: SetNull)
+  performanceMetrics    PerformanceMetrics[]
+
+  @@index([workspaceId])
+  @@map("creative_variants")
+}
+
+model PerformanceMetrics {
+  id                String           @id @default(uuid())
+  workspaceId       String
+  creativeVariantId String
+  platform          DeliveryPlatform
+  impressions       Int
+  clicks            Int
+  conversions       Int
+  spendCents        Int
+  ctr               Float
+  collectedAt       DateTime
+
+  creativeVariant CreativeVariant @relation(fields: [creativeVariantId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([creativeVariantId])
+  @@map("performance_metrics")
+}
+
+model PromptTemplate {
+  id          String   @id @default(uuid())
+  workspaceId String
+  agentKey    String
+  name        String
+  description String?
+  createdAt   DateTime @default(now())
+
+  workspace Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  versions  PromptVersion[]
+
+  @@unique([workspaceId, agentKey, name])
+  @@map("prompt_templates")
+}
+
+/// `version` is monotonically increasing per template, never reused —
+/// GenerationPrompt.promptVersionId pins a generation to exactly one of these
+/// rows so "prompt version used for every generation" is always reconstructible.
+model PromptVersion {
+  id               String   @id @default(uuid())
+  workspaceId      String
+  promptTemplateId String
+  version          Int
+  systemPrompt     String
+  isActive         Boolean  @default(false)
+  createdAt        DateTime @default(now())
+
+  promptTemplate    PromptTemplate     @relation(fields: [promptTemplateId], references: [id], onDelete: Cascade)
+  generationPrompts GenerationPrompt[]
+
+  @@unique([promptTemplateId, version])
+  @@index([workspaceId])
+  @@map("prompt_versions")
+}
+
+/// A configured spending cap at one of the four required levels (workspace,
+/// campaign, shot, provider — architecture.md §4.3). `scopeId` is the id of
+/// the scoped entity; for level=WORKSPACE, scopeId equals workspaceId.
+model BudgetPolicy {
+  id          String      @id @default(uuid())
+  workspaceId String
+  level       BudgetLevel
+  scopeId     String
+  limitCents  Int
+  periodStart DateTime?
+  periodEnd   DateTime?
+  createdAt   DateTime    @default(now())
+
+  workspace Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  entries   BudgetLedgerEntry[]
+
+  @@unique([workspaceId, level, scopeId])
+  @@map("budget_policies")
+}
+
+/// Append-only spend ledger (architecture.md §4.3: "No budget row is ever
+/// mutated in place"). A BudgetPolicy's remaining amount is always a computed
+/// aggregate over this table. `idempotencyKey` is unique per budgetPolicyId so
+/// a retried reservation for the same (workflowRunId, stage, entityId, attempt)
+/// key never double-reserves.
+model BudgetLedgerEntry {
+  id               String                @id @default(uuid())
+  workspaceId      String
+  budgetPolicyId   String
+  entryType        BudgetLedgerEntryType
+  amountCents      Int
+  idempotencyKey   String
+  campaignId       String?
+  shotId           String?
+  generationJobRef String?
+  createdAt        DateTime              @default(now())
+
+  budgetPolicy BudgetPolicy @relation(fields: [budgetPolicyId], references: [id], onDelete: Cascade)
+
+  @@unique([budgetPolicyId, idempotencyKey])
+  @@index([workspaceId])
+  @@map("budget_ledger_entries")
+}
+
+/// Append-only audit trail for every transition *attempt* (CLAUDE.md
+/// "Transition attempts must be audited"). The unique (campaignId,
+/// idempotencyKey) constraint is the idempotency mechanism: a retried
+/// request with the same key is answered from this row instead of being
+/// re-evaluated — see campaign-transition-service.ts.
+model CampaignTransitionAudit {
+  id                String                @id @default(uuid())
+  workspaceId       String
+  campaignId        String
+  idempotencyKey    String
+  fromStage         CampaignStage
+  toStage           CampaignStage
+  result            TransitionAuditResult
+  reason            String?
+  approvalId        String?
+  requestedByUserId String?
+  createdAt         DateTime              @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  campaign  Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, idempotencyKey])
+  @@index([workspaceId])
+  @@map("campaign_transition_audits")
 }

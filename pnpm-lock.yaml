@@ -151,6 +151,9 @@ importers:
 
   packages/database:
     dependencies:
+      '@combat/domain':
+        specifier: workspace:*
+        version: link:../domain
       '@prisma/client':
         specifier: ^5.19.1
         version: 5.22.0(prisma@5.22.0)

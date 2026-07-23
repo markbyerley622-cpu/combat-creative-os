@@ -225,6 +225,15 @@ regardless of what the UI would have allowed.
 
 ## 3. Workflow state machine
 
+> **Note (domain-model milestone, see §7.1 item 8):** the diagram below is the
+> original illustrative design. The persistence-layer milestone implemented a
+> more granular, 17-stage version of this same pipeline, with a broader set of
+> immutable-approval-gated human review stages — see `docs/domain-model.md`
+> §4 for the current, implemented state machine and
+> `packages/domain/src/workflow/transition-rules.ts` for its exhaustive
+> transition table. The stages below map roughly 1:1 conceptually but not
+> name-for-name.
+
 ### 3.1 Top-level stages
 
 ```mermaid
@@ -674,6 +683,22 @@ architecture change, not a correction of this document.
    `apps/dashboard`, and is the only app (besides the narrowly-scoped
    `apps/webhook-receiver`) that holds a Temporal client or enforces RBAC. See
    §2.1.
+8. **Campaign state machine granularity and gate count (domain-model
+   milestone, narrows §3.1).** The illustrative 3.1 diagram's coarser stages
+   (`CONCEPT`, `SCRIPTING`, `PROMPTING`, `GENERATION`, …) and "three human
+   gates" framing are superseded by a 17-stage pipeline (`DRAFT` through
+   `ITERATION_PLANNING`) implemented in `packages/domain/src/workflow` and
+   `packages/database`'s transition service — see `docs/domain-model.md` for
+   the full state diagram, transition table, and worked examples.
+   `STRATEGY_REVIEW`, `CONCEPT_REVIEW`, and `SCRIPT_REVIEW` are now also
+   treated as immutable-approval-gated human review stages, in addition to
+   the original three (concept, shot selection, final master) — five gates
+   total. The underlying principle (human gates require immutable approval
+   records, enforced server-side, structurally unbypassable by
+   workflow/activity code) is unchanged; only the count of gated stages grew.
+   No live migration has been applied in this environment (no Docker, no
+   local Postgres) — see `docs/domain-model.md` §8 for what was verified
+   without a database connection and what remains to be run.
 
 ### 7.2 Remaining open questions
 
