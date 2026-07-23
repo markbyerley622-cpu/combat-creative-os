@@ -1,0 +1,45 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+build/
+.next/
+out/
+*.tsbuildinfo
+
+# Turborepo
+.turbo/
+
+# Env files (never commit real secrets/config)
+.env
+.env.*.local
+.env.local
+!.env.example
+
+# Prisma
+packages/database/prisma/migrations/**/migration_lock.toml.bak
+
+# Test / coverage
+coverage/
+playwright-report/
+test-results/
+blob-report/
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# MinIO / Postgres local volumes (if bind-mounted during local dev)
+infrastructure/.data/

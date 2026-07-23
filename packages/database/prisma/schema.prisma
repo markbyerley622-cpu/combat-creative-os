@@ -1,0 +1,63 @@
+// Combat Creative OS — foundation schema.
+//
+// Scope note (see docs/architecture.md §4.4 and the 2026-07-23 scaffolding
+// plan): this schema covers only the tenancy core — Workspace, User, Role,
+// Membership. The full domain schema (Campaign, Script, Shot, GenerationJob,
+// Asset, Budget, etc. — architecture.md §4.1) is business-pipeline data model
+// work for a later milestone, once the specialist agents and workflows it
+// supports are being implemented. Every future table added to this schema
+// MUST carry a workspaceId column per the tenancy rule in CLAUDE.md.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum RoleName {
+  OWNER_ADMIN
+  CREATIVE_DIRECTOR
+  PRODUCTION_OPERATOR
+  REVIEWER
+  ANALYST
+}
+
+model Workspace {
+  id          String       @id @default(uuid())
+  name        String
+  slug        String       @unique
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  memberships Membership[]
+
+  @@map("workspaces")
+}
+
+model User {
+  id          String       @id @default(uuid())
+  email       String       @unique
+  displayName String
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  memberships Membership[]
+
+  @@map("users")
+}
+
+model Membership {
+  id          String    @id @default(uuid())
+  workspaceId String
+  userId      String
+  role        RoleName
+  createdAt   DateTime  @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+  @@index([workspaceId])
+  @@map("memberships")
+}

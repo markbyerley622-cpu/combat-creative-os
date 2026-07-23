@@ -51,7 +51,7 @@ combat-creative-os/
 │   │                         # signals via packages/workflow-client. Kept separate
 │   │                         # from apps/api because its trust model is signature
 │   │                         # verification, not user sessions/RBAC.
-│   └── orchestrator-worker/  # Temporal worker process(es): hosts workflow
+│   └── worker/               # Temporal worker process(es): hosts workflow
 │                             # definitions + activity implementations
 │
 ├── packages/
@@ -142,15 +142,15 @@ authorization" (§2.2) a structural fact rather than a convention.
 
 These are the runtime deployables, distinct from the source packages above.
 
-| Service | Responsibility | Talks to |
-|---|---|---|
-| **dashboard** (Next.js) | Human UI only: brief intake, all 3 approval-gate UIs, run inspector, RBAC-gated admin views | `apps/api` over HTTP only — no DB access, no Temporal client, no provider calls |
-| **api** | Authenticated control-plane: RBAC enforcement, campaign CRUD, approval-gate commands, provider-credential/budget management, read queries | DB (read/write), Temporal client (signal/query) via `packages/workflow-client`, never calls provider APIs directly |
-| **webhook-receiver** | Verifies inbound provider webhooks (video-gen completion, review comments), converts to Temporal signals | Temporal client (signal only, restricted signal set — see §2.1), audit log write |
-| **orchestrator-worker** | Hosts all Temporal workflows + activities; the only process that calls providers, agents, and ffmpeg | DB, S3/MinIO, Claude API, video-gen/design/motion/review providers, Temporal server |
-| **temporal-server** | Durable execution engine | Postgres (its own schema), workers |
-| **postgres** | System of record: campaigns, workflow metadata mirror, assets, approvals, audit trail, agent invocations, all workspace-scoped | orchestrator-worker, api |
-| **MinIO / S3** | All binary assets | orchestrator-worker (write), api (issues presigned URLs to dashboard) |
+| Service                 | Responsibility                                                                                                                            | Talks to                                                                                                           |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| **dashboard** (Next.js) | Human UI only: brief intake, all 3 approval-gate UIs, run inspector, RBAC-gated admin views                                               | `apps/api` over HTTP only — no DB access, no Temporal client, no provider calls                                    |
+| **api**                 | Authenticated control-plane: RBAC enforcement, campaign CRUD, approval-gate commands, provider-credential/budget management, read queries | DB (read/write), Temporal client (signal/query) via `packages/workflow-client`, never calls provider APIs directly |
+| **webhook-receiver**    | Verifies inbound provider webhooks (video-gen completion, review comments), converts to Temporal signals                                  | Temporal client (signal only, restricted signal set — see §2.1), audit log write                                   |
+| **worker**              | Hosts all Temporal workflows + activities; the only process that calls providers, agents, and ffmpeg                                      | DB, S3/MinIO, Claude API, video-gen/design/motion/review providers, Temporal server                                |
+| **temporal-server**     | Durable execution engine                                                                                                                  | Postgres (its own schema), workers                                                                                 |
+| **postgres**            | System of record: campaigns, workflow metadata mirror, assets, approvals, audit trail, agent invocations, all workspace-scoped            | worker, api                                                                                                        |
+| **MinIO / S3**          | All binary assets                                                                                                                         | worker (write), api (issues presigned URLs to dashboard)                                                           |
 
 **Hard boundary:** Temporal workflow code never performs network I/O. All provider
 and agent calls happen inside Activities. This is what keeps workflows replayable
@@ -190,29 +190,29 @@ route handlers inside `dashboard`. Reasoning, for the record:
 
 Five roles, fixed for the initial build (`packages/auth` + `packages/domain`):
 
-| Role | Scope |
-|---|---|
-| `OWNER_ADMIN` | Workspace configuration, provider-credential management, budget configuration, and all three approval gates |
-| `CREATIVE_DIRECTOR` | Strategy/concept review, concept approval, final-master approval |
-| `PRODUCTION_OPERATOR` | Generation dispatch, asset management, render/compositing operations |
-| `REVIEWER` | Candidate feedback, shot selection |
-| `ANALYST` | Read-only performance and reporting access |
+| Role                  | Scope                                                                                                       |
+| --------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `OWNER_ADMIN`         | Workspace configuration, provider-credential management, budget configuration, and all three approval gates |
+| `CREATIVE_DIRECTOR`   | Strategy/concept review, concept approval, final-master approval                                            |
+| `PRODUCTION_OPERATOR` | Generation dispatch, asset management, render/compositing operations                                        |
+| `REVIEWER`            | Candidate feedback, shot selection                                                                          |
+| `ANALYST`             | Read-only performance and reporting access                                                                  |
 
 Permission matrix (illustrative — enforced as an explicit table in
 `packages/auth`, not inferred from role names at call sites):
 
-| Action | OWNER_ADMIN | CREATIVE_DIRECTOR | PRODUCTION_OPERATOR | REVIEWER | ANALYST |
-|---|:---:|:---:|:---:|:---:|:---:|
-| Configure providers/credentials | ✓ | | | | |
-| Manage budgets | ✓ | | | | |
-| Approve concept | ✓ | ✓ | | | |
-| Approve final master | ✓ | ✓ | | | |
-| Select shots / candidates | ✓ | | | ✓ | |
-| Provide candidate feedback | ✓ | ✓ | | ✓ | |
-| Trigger generation / render jobs | ✓ | | ✓ | | |
-| Manage assets | ✓ | | ✓ | | |
-| View performance / reporting | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Manage workspace membership | ✓ | | | | |
+| Action                           | OWNER_ADMIN | CREATIVE_DIRECTOR | PRODUCTION_OPERATOR | REVIEWER | ANALYST |
+| -------------------------------- | :---------: | :---------------: | :-----------------: | :------: | :-----: |
+| Configure providers/credentials  |      ✓      |                   |                     |          |         |
+| Manage budgets                   |      ✓      |                   |                     |          |         |
+| Approve concept                  |      ✓      |         ✓         |                     |          |         |
+| Approve final master             |      ✓      |         ✓         |                     |          |         |
+| Select shots / candidates        |      ✓      |                   |                     |    ✓     |         |
+| Provide candidate feedback       |      ✓      |         ✓         |                     |    ✓     |         |
+| Trigger generation / render jobs |      ✓      |                   |          ✓          |          |         |
+| Manage assets                    |      ✓      |                   |          ✓          |          |         |
+| View performance / reporting     |      ✓      |         ✓         |          ✓          |    ✓     |    ✓    |
+| Manage workspace membership      |      ✓      |                   |                     |          |         |
 
 **Governing principle:** every permission check happens in `apps/api` (and, for
 inbound provider events, in `apps/webhook-receiver`'s narrow signal allowlist)
@@ -304,6 +304,7 @@ Queries: `getCurrentStage()`, `getStageHistory()`, `getPendingApprovals()`,
 
 Retry/escalation policy (applies inside `ShotGenerationWorkflow` and analogous
 loops):
+
 - Each stage-level Activity uses Temporal's built-in retry policy
   (exponential backoff, capped attempts, non-retryable-error allowlist for things
   like schema validation failures that won't fix themselves on retry).
@@ -507,25 +508,33 @@ interface VideoGenerationProvider {
   // receiver normalizes both into the same GenerationJobStatus transitions.
 }
 
-interface DesignProvider {                 // Figma
+interface DesignProvider {
+  // Figma
   fetchNode(fileKey: string, nodeId: string): Promise<DesignAssetRef>;
   exportAsset(fileKey: string, nodeId: string, format: ExportFormat): Promise<AssetRef>;
 }
 
-interface MotionGraphicsProvider {          // After Effects / aerender
-  submitRenderJob(input: { idempotencyKey: string; template: string; dataBindings: Record<string, unknown> }): Promise<RenderJobHandle>;
+interface MotionGraphicsProvider {
+  // After Effects / aerender
+  submitRenderJob(input: {
+    idempotencyKey: string;
+    template: string;
+    dataBindings: Record<string, unknown>;
+  }): Promise<RenderJobHandle>;
   getRenderStatus(handle: RenderJobHandle): Promise<RenderJobStatus>;
   fetchRenderOutput(handle: RenderJobHandle): Promise<AssetRef>;
 }
 
-interface ReviewProvider {                  // Frame.io-compatible
+interface ReviewProvider {
+  // Frame.io-compatible
   createReviewAsset(asset: AssetRef, context: ReviewContext): Promise<ReviewAssetRef>;
   postComment(reviewAssetId: string, comment: ReviewComment): Promise<void>;
   getApprovalStatus(reviewAssetId: string): Promise<ReviewStatus>;
   generateShareLink(reviewAssetId: string): Promise<string>;
 }
 
-interface StorageProvider {                 // S3-compatible (MinIO / S3)
+interface StorageProvider {
+  // S3-compatible (MinIO / S3)
   putObject(input: PutObjectInput): Promise<{ s3Key: string; checksum: string }>;
   getPresignedUrl(s3Key: string, expirySeconds: number): Promise<string>;
   headObject(s3Key: string): Promise<ObjectMetadata>;
@@ -534,12 +543,13 @@ interface StorageProvider {                 // S3-compatible (MinIO / S3)
   // lifecycle policy only, to preserve provenance/audit guarantees.
 }
 
-interface ReasoningProvider {                // Claude API, used by agent-runtime
+interface ReasoningProvider {
+  // Claude API, used by agent-runtime
   invoke(input: {
     idempotencyKey: string;
     promptVersion: string;
     systemPrompt: string;
-    messages: ReasoningMessage[];             // supports multimodal (frames/thumbnails) for QC
+    messages: ReasoningMessage[]; // supports multimodal (frames/thumbnails) for QC
     responseSchema: ZodSchema;
   }): Promise<{ raw: unknown; validated: unknown; modelMeta: ModelMeta }>;
 }
@@ -560,27 +570,27 @@ validation, versioning, and audit logging are handled once, not per-agent.
 
 ```ts
 interface AgentInput<T> {
-  invocationId: string;          // uuid, generated by the calling Activity
+  invocationId: string; // uuid, generated by the calling Activity
   workflowRunId: string;
   stage: WorkflowStage;
-  promptVersion: string;         // pins the exact system prompt used
-  input: T;                      // validated against the agent's Zod input schema
+  promptVersion: string; // pins the exact system prompt used
+  input: T; // validated against the agent's Zod input schema
   context: {
     campaignId: string;
     priorArtifactRefs: ArtifactRef[]; // references, not inlined blobs — agents
-                                       // fetch what they need via Activity-provided
-                                       // resolved data, keeping payloads bounded
+    // fetch what they need via Activity-provided
+    // resolved data, keeping payloads bounded
     budgetRemaining: Money;
-    relevantLearnings?: Learning[];   // from Performance Analyst, strategy/concept only
+    relevantLearnings?: Learning[]; // from Performance Analyst, strategy/concept only
   };
 }
 
 interface AgentOutput<T> {
   invocationId: string;
-  output: T;                     // validated against the agent's Zod output schema
-  rationale?: string;            // free-text explanation, never trusted structurally
+  output: T; // validated against the agent's Zod output schema
+  rationale?: string; // free-text explanation, never trusted structurally
   modelMeta: { model: string; tokensIn: number; tokensOut: number; latencyMs: number };
-  validationStatus: "VALID" | "SCHEMA_INVALID" | "NEEDS_HUMAN_REVIEW";
+  validationStatus: 'VALID' | 'SCHEMA_INVALID' | 'NEEDS_HUMAN_REVIEW';
 }
 ```
 
@@ -593,22 +603,22 @@ and UI cannot be trusted without validation."
 
 ### 6.1 Representative per-agent schemas (field-level, not full Zod)
 
-| Agent | Input (beyond envelope) | Output |
-|---|---|---|
-| Campaign Strategist | `CampaignBrief`, relevant `Learning[]` | `Strategy { positioning, targetAudience, keyMessages[], toneGuidelines }` |
-| Creative Director | `Strategy` | `Concept { logline, visualDirection, narrativeArc, referenceNotes }` |
-| Script & Timing Director | `Concept`, target durations `[15,10,6]` | `Script { lines[] }`, `Shot[] { index, description, durationFrames, dependencies }` |
-| Asset Manager | `Shot[]`, brand asset library refs | `AssetManifest { shotId → requiredAssets[], licensingFlags[] }` |
-| Shot Prompt Engineer | `Shot`, provider target, prior `RevisionFeedback?` | `ShotPrompt { providerId, promptText, negativePrompt?, params, version }` |
-| Video Generation Coordinator | `ShotPrompt[]`, candidate count, budget | `GenerationJob[]` dispatch plan (this agent plans dispatch; the Activity executes it) |
-| Visual Quality Controller | `GenerationCandidate` (frames/thumbnails, multimodal), `Shot` spec | `QCResult { pass, scores{}, findings[], revisionFeedback? }` |
-| Continuity Controller | All `GenerationCandidate`s selected-so-far for a `Script` | `ContinuityCheck { pass, conflicts[] { shotIds[], issue } }` |
-| Motion-Compositing Coordinator | `Shot`, `SelectedCandidate`, brand template refs (Figma) | `CompositingPlan { aeTemplate, dataBindings, figmaOverlays[] }` |
-| Edit Director | Selected shots + compositing outputs, `Script` timing | `RoughEditPlan { timeline[] }` |
-| Sound Director | `RoughEditPlan`, brand audio guidelines | `SoundDesignPlan { musicBrief, sfxCues[], mixNotes }` |
-| Final QA Controller | `FinalMaster` technical probe (ffmpeg) + visual (multimodal) | `FinalQAResult { pass, technicalFindings[], visualFindings[] }` |
-| Variant Generator | `FinalMaster`, target duration | `VariantPlan { cutPoints[], duration }` |
-| Performance Analyst | `PerformanceRecord[]` for a campaign | `Learning[] { insight, appliesTo: "strategy"\|"concept"\|"prompting", tags[] }` |
+| Agent                          | Input (beyond envelope)                                            | Output                                                                                |
+| ------------------------------ | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------- |
+| Campaign Strategist            | `CampaignBrief`, relevant `Learning[]`                             | `Strategy { positioning, targetAudience, keyMessages[], toneGuidelines }`             |
+| Creative Director              | `Strategy`                                                         | `Concept { logline, visualDirection, narrativeArc, referenceNotes }`                  |
+| Script & Timing Director       | `Concept`, target durations `[15,10,6]`                            | `Script { lines[] }`, `Shot[] { index, description, durationFrames, dependencies }`   |
+| Asset Manager                  | `Shot[]`, brand asset library refs                                 | `AssetManifest { shotId → requiredAssets[], licensingFlags[] }`                       |
+| Shot Prompt Engineer           | `Shot`, provider target, prior `RevisionFeedback?`                 | `ShotPrompt { providerId, promptText, negativePrompt?, params, version }`             |
+| Video Generation Coordinator   | `ShotPrompt[]`, candidate count, budget                            | `GenerationJob[]` dispatch plan (this agent plans dispatch; the Activity executes it) |
+| Visual Quality Controller      | `GenerationCandidate` (frames/thumbnails, multimodal), `Shot` spec | `QCResult { pass, scores{}, findings[], revisionFeedback? }`                          |
+| Continuity Controller          | All `GenerationCandidate`s selected-so-far for a `Script`          | `ContinuityCheck { pass, conflicts[] { shotIds[], issue } }`                          |
+| Motion-Compositing Coordinator | `Shot`, `SelectedCandidate`, brand template refs (Figma)           | `CompositingPlan { aeTemplate, dataBindings, figmaOverlays[] }`                       |
+| Edit Director                  | Selected shots + compositing outputs, `Script` timing              | `RoughEditPlan { timeline[] }`                                                        |
+| Sound Director                 | `RoughEditPlan`, brand audio guidelines                            | `SoundDesignPlan { musicBrief, sfxCues[], mixNotes }`                                 |
+| Final QA Controller            | `FinalMaster` technical probe (ffmpeg) + visual (multimodal)       | `FinalQAResult { pass, technicalFindings[], visualFindings[] }`                       |
+| Variant Generator              | `FinalMaster`, target duration                                     | `VariantPlan { cutPoints[], duration }`                                               |
+| Performance Analyst            | `PerformanceRecord[]` for a campaign                               | `Learning[] { insight, appliesTo: "strategy"\|"concept"\|"prompting", tags[] }`       |
 
 `RevisionFeedback` (shared shape, returned by QC/Continuity on failure and consumed
 by Shot Prompt Engineer or the workflow's retry router):
@@ -624,6 +634,16 @@ These were open questions in the original proposal and are now settled. They are
 defaults, not permanent constraints — revisiting any of them later is a normal
 architecture change, not a correction of this document.
 
+0. **Naming, scaffolded 2026-07-23.** `apps/orchestrator-worker` was renamed
+   to `apps/worker` and `packages/db` to `packages/database` to match the
+   scaffolding request. `apps/webhook-receiver`,
+   `packages/{agent-runtime,auth,media,workflow-client}` are deferred (not yet
+   scaffolded) — they have no purpose until the business agents, real
+   provider integrations, and `apps/api` endpoints beyond `/health` that
+   would use them exist. `packages/activities` was folded into
+   `packages/workflows/src/activities` for this milestone rather than split
+   into its own package, since only one example activity exists so far; it
+   can be split out once real activities justify the separation.
 1. **Video-gen provider priority.** Both Veo and Runway stay mock-only through
    the milestone plan (§8). Veo is the preferred future provider for hero
    footage; Runway is the preferred future provider for alternative-take/shot-
@@ -664,27 +684,27 @@ depend on them (noted per item).
    AI-generated ads is a legal question, not a software one — `LicensingMetadata`
    models it, but the actual policy (what's allowed, who signs off) needs
    Combat Reviews' legal input before Final QA's licensing check can be
-   meaningfully strict rather than a rubber stamp. *Blocks: M11.*
+   meaningfully strict rather than a rubber stamp. _Blocks: M11._
 2. **Claude multimodal QA reliability and cost at production scale** is
    unverified — Visual QC and Final QA both lean on it. Needs an empirical spike
    (accuracy against a labeled sample, cost per shot) before trusting it as a
-   gate rather than an advisory signal. *Blocks: M7, M11 going to production.*
+   gate rather than an advisory signal. _Blocks: M7, M11 going to production._
 3. **Temporal Cloud vs. self-hosted** for production — self-hosted (via the
    provided docker-compose) is settled for local dev; the production hosting
-   choice affects ops burden and is left open. *Blocks: production deploy, not
-   any milestone.*
+   choice affects ops burden and is left open. _Blocks: production deploy, not
+   any milestone._
 4. **Approval SLA / escalation policy** is unspecified — what happens if a human
    doesn't act on a pending gate for N days? Temporal workflows can wait
    indefinitely, but indefinite is probably not the intended product behavior.
-   *Blocks: M14 (hardening).*
+   _Blocks: M14 (hardening)._
 5. **Target platforms/aspect ratios** (TikTok/IG Reels/YouTube Shorts) aren't
    specified beyond the three durations. Affects `Variant` schema (aspect ratio,
    safe-area, caption-burn requirements per platform) and Final QA's checklist.
-   *Blocks: M12.*
+   _Blocks: M12._
 6. **Storage cost/retention policy** for multiple generation candidates per shot
    — at scale this is a lot of video. Needs a retention/lifecycle policy (e.g.,
    non-selected candidates purged after N days) before production launch.
-   *Blocks: production launch, not any milestone.*
+   _Blocks: production launch, not any milestone._
 
 ---
 
@@ -696,71 +716,71 @@ standing in for anything not yet built. No milestone requires paid API credentia
 - **M0 — Repo & infra scaffolding.** pnpm workspace, Turborepo, docker-compose
   (Postgres, MinIO, Temporal server+UI), CI skeleton, `packages/config` env
   validation, `packages/observability` OTel baseline, empty `apps/api` and
-  `apps/dashboard` shells wired together over HTTP. *Test:* `docker compose up`
+  `apps/dashboard` shells wired together over HTTP. _Test:_ `docker compose up`
   yields a healthy stack; CI runs an empty test suite green.
 - **M1 — Domain contracts & database.** `packages/domain` Zod schemas for every
   entity in §4/§6 (including `Workspace`, `Budget`, `BudgetLedger`,
   `ProviderCredential`); `packages/db` Prisma schema, migrations, workspace-scoped
-  repository layer, seed script (single seeded workspace). *Test:* migration
+  repository layer, seed script (single seeded workspace). _Test:_ migration
   up/down round-trips; repository unit tests including explicit **cross-workspace
   access-denial tests** (a second seeded workspace whose data must be unreachable
   through every repository method); schema fixtures validate.
 - **M2 — Agent runtime harness.** `packages/agent-runtime` (versioned prompts,
   schema validation, retry-with-corrective-reprompt, audit logging, cost
   metering) plus the **Campaign Strategist** agent end-to-end against both the
-  mock and real `ReasoningProvider`. *Test:* unit tests on validation/retry
+  mock and real `ReasoningProvider`. _Test:_ unit tests on validation/retry
   logic; one integration test gated behind a real API key (skipped by default).
 - **M3 — Workflow skeleton + control plane.** `CampaignProductionWorkflow` with
   all stage states from §3.1 wired to stub Activities; `packages/workflow-client`;
   `apps/api` endpoints for the three approval signals enforcing RBAC (§2.2) and
-  workspace scoping before dispatch. *Test:* Temporal `TestWorkflowEnvironment`
+  workspace scoping before dispatch. _Test:_ Temporal `TestWorkflowEnvironment`
   with time-skipping asserting every transition in the state diagram; `apps/api`
   tests asserting each non-`OWNER_ADMIN`/`CREATIVE_DIRECTOR` role is rejected on
   approval endpoints, and that a request scoped to the wrong workspace 404s rather
   than leaking existence.
 - **M4 — Text-agent chain to Concept Approval.** Creative Director, Script &
   Timing Director wired in; `apps/dashboard` gets brief intake + Concept Approval
-  UI, calling `apps/api` exclusively. *Test:* end-to-end run through
+  UI, calling `apps/api` exclusively. _Test:_ end-to-end run through
   `CONCEPT_APPROVAL` with mock providers, Playwright test on the approval UI
   confirming a hidden-but-forged request from a non-approver role is still
   rejected server-side.
 - **M5 — Storage & media pipeline.** `packages/providers/storage` (MinIO),
-  `packages/media` (ffmpeg probe/thumbnail/proxy). *Test:* unit tests against
+  `packages/media` (ffmpeg probe/thumbnail/proxy). _Test:_ unit tests against
   local MinIO container and fixture video files, independent of any workflow.
 - **M6 — Video generation.** `providers/video-gen` deterministic mock for both
   Veo and Runway shapes; Shot Prompt Engineer; `ShotGenerationWorkflow` with
   multi-level budget checks (workspace/campaign/shot/provider) and idempotency
-  enforcement. *Test:* mock-provider integration test covering the full
+  enforcement. _Test:_ mock-provider integration test covering the full
   submit→poll→candidate loop, budget-exceeded path at each of the four levels,
   and ledger reservation/charge/release correctness. No real provider credentials
   used — that remains a future, separately-approved step per §7.1.
 - **M7 — Visual QC & Continuity.** Visual Quality Controller, Continuity
   Controller, the `VISUAL_QC ⇄ GENERATION` and `CONTINUITY_CHECK ⇄ GENERATION`
-  retry routing. *Test:* fixture candidate sets (known-good/known-bad frames)
+  retry routing. _Test:_ fixture candidate sets (known-good/known-bad frames)
   drive deterministic pass/fail assertions.
 - **M8 — Shot Selection gate.** `providers/review` (Frame.io-compatible mock,
   complete and sufficient for local dev — no real Frame.io dependency),
-  `apps/dashboard` Shot Selection UI calling `apps/api`. *Test:* Playwright
+  `apps/dashboard` Shot Selection UI calling `apps/api`. _Test:_ Playwright
   covering select/reject flows and the reject→regenerate transition; RBAC test
   confirming only `REVIEWER`/`OWNER_ADMIN` can select shots.
 - **M9 — Compositing & rough edit.** `providers/motion-graphics` (mock of the
   external-Windows-worker interface — no AE/aerender process run anywhere in
   this milestone), `providers/design` (Figma), `CompositingWorkflow`, Edit
-  Director. *Test:* mock render pipeline produces a rough-edit asset with
+  Director. _Test:_ mock render pipeline produces a rough-edit asset with
   correct provenance chain.
 - **M10 — Sound design.** Sound Director + audio asset handling.
-  *Test:* plan generation + asset attachment, fixture-based.
+  _Test:_ plan generation + asset attachment, fixture-based.
 - **M11 — Final QA & Final Approval gate.** Final QA Controller (ffmpeg technical
   checks + multimodal review), `apps/dashboard` Final Approval UI calling
-  `apps/api`. *Test:* fixture masters with known technical defects assert correct
+  `apps/api`. _Test:_ fixture masters with known technical defects assert correct
   pass/fail/routing; RBAC test confirming only `CREATIVE_DIRECTOR`/`OWNER_ADMIN`
   can approve.
 - **M12 — Variants.** Variant Generator (15/10/6s), variant QA reusing Final QA
-  logic. *Test:* cut-point correctness against fixture timelines; QA re-run per
+  logic. _Test:_ cut-point correctness against fixture timelines; QA re-run per
   variant.
 - **M13 — Performance Analyst loop.** Separate `PerformanceAnalysisWorkflow`,
   `Learning` ingestion, wired as optional context into Strategist/Creative
-  Director. *Test:* fixture performance data produces expected `Learning`
+  Director. _Test:_ fixture performance data produces expected `Learning`
   records and that they're surfaced in a subsequent Strategist call.
 - **M14 — Production hardening.** RBAC enforcement audit across every mutation
   path in `apps/api` (every endpoint checked against the full permission matrix

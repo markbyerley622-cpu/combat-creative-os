@@ -1,0 +1,28 @@
+{
+  "name": "dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "lint": "next lint",
+    "test": "echo \"no unit tests in apps/dashboard yet — see e2e/ for Playwright\" && exit 0",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "@combat/domain": "workspace:*",
+    "next": "14.2.16",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.47.2",
+    "@types/node": "^22.7.4",
+    "@types/react": "^18.3.10",
+    "@types/react-dom": "^18.3.0",
+    "eslint-config-next": "14.2.16",
+    "typescript": "^5.5.4"
+  }
+}
