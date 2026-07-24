@@ -11,3 +11,4 @@ export * from './storage';
 export * from './storage.mock';
 export * from './reasoning';
 export * from './reasoning.mock';
+export * from './reasoning.claude';

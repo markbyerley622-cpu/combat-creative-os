@@ -68,27 +68,32 @@ combat-creative-os/
 │   │                          # helpers) shared by apps/api and apps/webhook-
 │   │                          # receiver, so both authenticate differently but
 │   │                          # dispatch through one typed, tested path.
-│   ├── agent-runtime/           # Shared harness: prompt versioning, schema-validated
-│   │                          # invoke(), retry/backoff, audit logging, cost metering.
+│   ├── agent-runtime/           # IMPLEMENTED (ADR-0003, 2026-07-24). Shared harness:
+│   │                          # AgentDefinition/executeAgent, prompt versioning,
+│   │                          # schema-validated structured output via strict tool
+│   │                          # use, one corrective re-prompt on schema failure,
+│   │                          # cost/hash/latency accounting, redacted logging.
 │   │                          # Every specialist agent is built on top of this.
-│   ├── agents/
+│   ├── agents/                 # IMPLEMENTED (ADR-0003) for 11 of 14 agents; the
+│   │                          # other 3 are typed NOT_IMPLEMENTED placeholders.
 │   │   ├── campaign-strategist/
 │   │   ├── creative-director/
-│   │   ├── script-timing-director/
-│   │   ├── asset-manager/
+│   │   ├── script-timing-director/         # displayName "Script Director"
+│   │   ├── asset-manager/                  # placeholder — see ADR-0003
 │   │   ├── shot-prompt-engineer/
-│   │   ├── video-generation-coordinator/
-│   │   ├── visual-quality-controller/
+│   │   ├── video-generation-coordinator/   # placeholder — see ADR-0003
+│   │   ├── visual-quality-controller/      # displayName "Visual QA Controller"
 │   │   ├── continuity-controller/
-│   │   ├── motion-compositing-coordinator/
+│   │   ├── motion-compositing-coordinator/ # placeholder — see ADR-0003
 │   │   ├── edit-director/
 │   │   ├── sound-director/
 │   │   ├── final-qa-controller/
 │   │   ├── variant-generator/
 │   │   └── performance-analyst/
-│   │       # Each package: prompt templates (versioned), input/output Zod schema,
-│   │       # a thin `run(input): Output` built on agent-runtime. No agent imports
-│   │       # another agent — see ADR-0001.
+│   │       # Each folder: schema.ts (Zod input/result), prompts/v1.ts (versioned
+│   │       # PromptTemplate), agent.ts (the AgentDefinition). No agent imports
+│   │       # another agent — see ADR-0001. Not yet called from any Temporal
+│   │       # workflow/Activity — that wiring is separate, later-milestone work.
 │   │
 │   ├── providers/
 │   │   ├── video-gen/          # VideoGenerationProvider interface + gemini-veo,
@@ -96,7 +101,10 @@ combat-creative-os/
 │   │   ├── design/              # DesignProvider interface + figma, mock
 │   │   ├── motion-graphics/     # MotionGraphicsProvider interface + aerender, mock
 │   │   ├── review/               # ReviewProvider (Frame.io-compatible) + mock
-│   │   ├── reasoning/             # Claude API wrapper used by agent-runtime + mock
+│   │   ├── reasoning/             # IMPLEMENTED (ADR-0003): ReasoningProvider interface,
+│   │   │                       # MockReasoningProvider (default), ClaudeReasoningProvider
+│   │   │                       # (real @anthropic-ai/sdk adapter, strict tool-use structured
+│   │   │                       # output, gated behind ANTHROPIC_API_KEY via @combat/config)
 │   │   └── storage/                # S3-compatible client (MinIO/S3), presigned URLs
 │   │
 │   ├── media/                  # FFmpeg wrapper: probe, thumbnail, proxy, assemble,
@@ -611,6 +619,20 @@ corrective re-prompt (schema errors appended), and if that still fails it return
 malformed data downstream. This is the concrete mechanism behind "generated text
 and UI cannot be trusted without validation."
 
+**Implemented (ADR-0003, 2026-07-24).** The real envelope lives in
+`packages/domain/src/agent-envelope.ts` (`AgentInput<T>`/`AgentOutput<T>`,
+plus an additive optional `attachments?: AgentInputAttachment[]` field for
+multimodal frame/thumbnail assessment) and the real harness in
+`packages/agent-runtime/src/execute-agent.ts` (`executeAgent`, returning an
+`AgentRun<TResult>` — a superset of the illustrative `AgentOutput<T>` above
+that also carries `inputHash`/`outputHash`/`cost`/`evaluation`). The
+structured-output mechanism is Claude strict tool use (`tool_choice` forced
+to a single schema-derived tool, `strict: true`), not a JSON-mode "hope for
+the best" prompt — see `packages/agent-runtime/src/json-schema.ts` and
+`packages/providers/src/reasoning.claude.ts`. No workflow/Activity calls
+`executeAgent` yet; see `packages/agents/README.md` for what's implemented
+versus what's still orchestrator-wiring work.
+
 ### 6.1 Representative per-agent schemas (field-level, not full Zod)
 
 | Agent                          | Input (beyond envelope)                                            | Output                                                                                |
@@ -634,6 +656,23 @@ and UI cannot be trusted without validation."
 by Shot Prompt Engineer or the workflow's retry router):
 `{ shotId, severity, category: "prompt"|"generation"|"continuity"|"technical", description, suggestedAction }`.
 
+**Implemented schemas (ADR-0003).** `packages/agents/src/*/schema.ts` implements
+this table's shape for the eleven built agents, field-for-field consistent
+with the domain entities each stage eventually persists (`CreativeConcept`,
+`Script`/`Shot`, `GenerationPrompt`, `QualityAssessment`/`QualityFailure`,
+`Timeline`/`TimelineEntry`, `SoundCue`, `CreativeVariant`) but scoped to
+*content only* — no `id`/`workspaceId`/foreign keys, which a future Activity
+assigns at persistence time (agents don't write to the database).
+`RevisionFeedback` above is `packages/agents/src/shared/quality-finding.ts`'s
+`QualityFindingSchema`, reusing `@combat/domain`'s `QualityFailureCategory`/
+`QualityFailureSeverity` enums. `Learning` is not yet a persisted
+`@combat/domain` entity — Performance Analyst's `LearningSchema` is defined
+locally in `packages/agents/src/performance-analyst/schema.ts` pending a
+database milestone that promotes it into a real table. The three
+placeholder agents (Asset Manager, Video Generation Coordinator,
+Motion-Compositing Coordinator) each still get this table's contract
+preserved in their own `schema.ts`, unimplemented — see ADR-0003.
+
 ---
 
 ## 7. Risk register
@@ -647,10 +686,13 @@ architecture change, not a correction of this document.
 0. **Naming, scaffolded 2026-07-23.** `apps/orchestrator-worker` was renamed
    to `apps/worker` and `packages/db` to `packages/database` to match the
    scaffolding request. `apps/webhook-receiver`,
-   `packages/{agent-runtime,auth,media,workflow-client}` are deferred (not yet
-   scaffolded) — they have no purpose until the business agents, real
-   provider integrations, and `apps/api` endpoints beyond `/health` that
-   would use them exist. `packages/activities` was folded into
+   `packages/{auth,media,workflow-client}` are still deferred (not yet
+   scaffolded) — they have no purpose until real provider integrations and
+   `apps/api` endpoints beyond `/health` that would use them exist.
+   `packages/agent-runtime` was scaffolded and implemented on 2026-07-24
+   (ADR-0003), ahead of this item's original "deferred" call, once the
+   specialist-agent execution framework was explicitly requested — see item
+   9 below. `packages/activities` was folded into
    `packages/workflows/src/activities` for this milestone rather than split
    into its own package, since only one example activity exists so far; it
    can be split out once real activities justify the separation.
@@ -719,6 +761,20 @@ architecture change, not a correction of this document.
      No live migration has been applied in this environment (no Docker, no
      local Postgres) — see `docs/domain-model.md` §8 for what was verified
      without a database connection and what remains to be run.
+9. **Specialist-agent execution framework, implemented 2026-07-24
+   (ADR-0003) — an explicit milestone-order exception.** `packages/agent-
+   runtime` (the harness) and eleven of the fourteen `packages/agents`
+   specialist agents were implemented ahead of the linear M2/M4/M6/M7/M9/
+   M10/M11/M12/M13 order, on direct request. All fourteen canonical agent
+   names from §6.1 are preserved unchanged; `asset-manager`,
+   `video-generation-coordinator`, and `motion-compositing-coordinator` are
+   registered as typed `NOT_IMPLEMENTED` placeholders (disabled by default,
+   throw a non-retryable error if invoked) pending the provider/asset/
+   compositing milestones §6.1 and §8 already scope them to. No Temporal
+   workflow, Activity, or database repository calls any agent yet — that
+   remains the relevant milestones' wiring work, not something this change
+   did early. See ADR-0003 and `packages/agents/README.md` for the full
+   accounting of what's implemented versus what's still pending.
 
 ### 7.2 Remaining open questions
 
@@ -770,11 +826,21 @@ standing in for anything not yet built. No milestone requires paid API credentia
   up/down round-trips; repository unit tests including explicit **cross-workspace
   access-denial tests** (a second seeded workspace whose data must be unreachable
   through every repository method); schema fixtures validate.
-- **M2 — Agent runtime harness.** `packages/agent-runtime` (versioned prompts,
-  schema validation, retry-with-corrective-reprompt, audit logging, cost
-  metering) plus the **Campaign Strategist** agent end-to-end against both the
-  mock and real `ReasoningProvider`. _Test:_ unit tests on validation/retry
-  logic; one integration test gated behind a real API key (skipped by default).
+- **M2 — Agent runtime harness. Done (2026-07-24, ADR-0003), plus more than
+  scoped.** `packages/agent-runtime` (versioned prompts, schema validation,
+  retry-with-corrective-reprompt, redacted logging, cost metering) is
+  implemented, and — ahead of this milestone's original scope of one agent —
+  eleven of fourteen `packages/agents` specialists are implemented against
+  it (the remaining three are typed placeholders; see §7.1 item 9). _Test:_
+  unit tests on validation/retry logic in `packages/agent-runtime`; schema-
+  contract and golden-fixture handoff tests in `packages/agents`. The
+  originally-scoped "one integration test gated behind a real API key" was
+  **not** added — `ClaudeReasoningProvider` (`packages/providers/src/
+  reasoning.claude.ts`) is unit-tested with an injected fake client instead,
+  so no automated test path can spend money even if a key is present; a
+  real-key-gated integration test remains a candidate follow-up, not a gap
+  in this milestone's own test requirements (CLAUDE.md: "Do not call paid
+  APIs in automated tests").
 - **M3 — Workflow skeleton + control plane.** `CampaignProductionWorkflow` with
   all stage states from §3.1 wired to stub Activities; `packages/workflow-client`;
   `apps/api` endpoints for the three approval signals enforcing RBAC (§2.2) and

@@ -4,11 +4,16 @@ This file is the operating contract for anyone (human or agent) working in
 this repository. It is deliberately short — for the full design rationale
 see `docs/architecture.md` and `docs/adr/`.
 
-Current milestone: **repository foundation and local infrastructure only**.
-No specialist agent (Campaign Strategist, Creative Director, etc.) and no
-real external provider integration (Veo, Runway, Figma, aerender, Frame.io,
-Anthropic) is implemented yet — see `packages/agents/README.md` and
-`docs/architecture.md` §7.1/§8.
+Current milestone: **repository foundation and local infrastructure, plus the
+specialist-agent execution framework** (`packages/agent-runtime` +
+11 of 14 `packages/agents` specialists — see ADR-0003 and
+`packages/agents/README.md`). No Temporal workflow/Activity calls an agent
+yet, and no real external provider integration (Veo, Runway, Figma,
+aerender, Frame.io) beyond Claude/Anthropic is implemented — see
+`docs/architecture.md` §7.1/§8. Anthropic is reachable via
+`@combat/providers`'s `ClaudeReasoningProvider`, but only when explicitly
+configured (`REASONING_PROVIDER=claude` + `ANTHROPIC_API_KEY`); the default
+`mock` provider is what every automated test uses.
 
 ## Context and token efficiency
 

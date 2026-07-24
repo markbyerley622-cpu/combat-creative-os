@@ -34,6 +34,21 @@ export const minioEnvSchema = z.object({
   MINIO_BUCKET: z.string().min(1).default('combat-creative-assets'),
 });
 
+/**
+ * `ANTHROPIC_API_KEY` is optional at the schema level because the default
+ * `REASONING_PROVIDER` is `mock` — local dev and CI never require a real
+ * key (CLAUDE.md: "Local development must work with zero paid API keys").
+ * Whichever app wires up `@combat/providers`'s `createClaudeReasoningProvider`
+ * must check `REASONING_PROVIDER === 'claude'` and fail fast if the key is
+ * missing, rather than silently falling back to the mock in production.
+ */
+export const reasoningEnvSchema = z.object({
+  REASONING_PROVIDER: z.enum(['mock', 'claude']).default('mock'),
+  REASONING_MODEL: z.string().min(1).default('claude-opus-4-8'),
+  ANTHROPIC_API_KEY: z.string().optional(),
+});
+export type ReasoningEnv = z.infer<typeof reasoningEnvSchema>;
+
 export const observabilityEnvSchema = z.object({
   OTEL_EXPORTER_OTLP_ENDPOINT: z
     .string()
@@ -56,6 +71,7 @@ export const workerEnvSchema = baseEnvSchema
   .merge(temporalEnvSchema)
   .merge(minioEnvSchema)
   .merge(observabilityEnvSchema)
+  .merge(reasoningEnvSchema)
   .extend({
     WORKER_HEALTH_HOST: z.string().min(1).default('0.0.0.0'),
     WORKER_HEALTH_PORT: z.coerce.number().int().positive().default(4100),

@@ -29,6 +29,13 @@ export const AgentModelMetaSchema = z.object({
 });
 export type AgentModelMeta = z.infer<typeof AgentModelMetaSchema>;
 
+export const AgentInputAttachmentSchema = z.object({
+  mediaType: z.enum(['image/png', 'image/jpeg', 'image/webp']),
+  base64Data: z.string().min(1),
+  caption: z.string().optional(),
+});
+export type AgentInputAttachment = z.infer<typeof AgentInputAttachmentSchema>;
+
 export interface AgentInput<T> {
   invocationId: string;
   workflowRunId: string;
@@ -36,6 +43,13 @@ export interface AgentInput<T> {
   promptVersion: string;
   input: T;
   context: AgentInputContext;
+  /**
+   * Multimodal content (generated frames/thumbnails) for agents that assess
+   * images or video frames — e.g. visual-quality-controller, final-qa-
+   * controller (architecture.md §6: "supports multimodal (frames/
+   * thumbnails) for QC"). Absent for every text-only agent.
+   */
+  attachments?: AgentInputAttachment[];
 }
 
 export interface AgentOutput<T> {
