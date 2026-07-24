@@ -48,6 +48,7 @@ model Workspace {
   promptTemplates          PromptTemplate[]
   budgetPolicies           BudgetPolicy[]
   campaignTransitionAudits CampaignTransitionAudit[]
+  agentInvocations         AgentInvocation[]
 
   @@map("workspaces")
 }
@@ -282,6 +283,7 @@ model Campaign {
   creativeVariants     CreativeVariant[]
   humanApprovals       HumanApproval[]
   transitionAudits     CampaignTransitionAudit[]
+  agentInvocations     AgentInvocation[]
 
   @@index([workspaceId])
   @@map("campaigns")
@@ -878,4 +880,57 @@ model CampaignTransitionAudit {
   @@unique([campaignId, idempotencyKey])
   @@index([workspaceId])
   @@map("campaign_transition_audits")
+}
+
+enum AgentInvocationStatus {
+  SUCCEEDED
+  FAILED
+}
+
+/// Persists every terminal outcome of a specialist-agent execution (ADR-0004):
+/// successful output, schema-validation failure, provider failure, budget
+/// rejection, placeholder/unknown-agent rejection, and retry exhaustion. The
+/// unique (campaignId, idempotencyKey) constraint is this table's idempotency
+/// mechanism — see execute-specialist-agent-activity.ts: an Activity retry
+/// that finds an existing row here returns it directly instead of calling the
+/// reasoning provider again. `workflowRunId` is the Temporal run id as a plain
+/// string, not an FK — no `WorkflowRun` table exists in this schema (it is
+/// Postgres's queryable mirror of Temporal state in architecture.md's
+/// original ER diagram, not yet implemented; see docs/domain-model.md).
+model AgentInvocation {
+  id               String                @id @default(uuid())
+  workspaceId      String
+  campaignId       String
+  workflowRunId    String
+  stage            CampaignStage
+  agentName        String
+  agentVersion     Int
+  idempotencyKey   String
+  correlationId    String
+  causationId      String?
+  status           AgentInvocationStatus
+  result           Json?
+  failureReason    String?
+  failureRetryable Boolean?
+  failureMessage   String?
+  failureDetails   Json?
+  model            String?
+  promptVersion    Int?
+  tokensIn         Int?
+  tokensOut        Int?
+  costCents        Int?
+  inputHash        String
+  outputHash       String?
+  attempt          Int                   @default(1)
+  startedAt        DateTime
+  completedAt      DateTime
+  createdAt        DateTime              @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  campaign  Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, idempotencyKey])
+  @@index([workspaceId])
+  @@index([workflowRunId])
+  @@map("agent_invocations")
 }

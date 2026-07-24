@@ -11,12 +11,18 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@combat/agent-runtime": "workspace:*",
+    "@combat/database": "workspace:*",
+    "@combat/domain": "workspace:*",
+    "@combat/observability": "workspace:*",
+    "@combat/providers": "workspace:*",
     "@temporalio/activity": "^1.11.6",
     "@temporalio/workflow": "^1.11.6"
   },
   "devDependencies": {
     "@temporalio/worker": "^1.11.6",
     "typescript": "^5.5.4",
-    "vitest": "^2.1.1"
+    "vitest": "^2.1.1",
+    "zod": "^3.23.8"
   }
 }

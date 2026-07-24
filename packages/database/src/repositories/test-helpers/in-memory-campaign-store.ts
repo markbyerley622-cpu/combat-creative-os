@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { CampaignStage } from '@combat/domain';
+import type { AgentInvocationDataSource, AgentInvocationRecord } from '../agent-invocation-repository';
 import type { AssetDataSource, AssetProvenanceRecord, AssetRecord } from '../asset-repository';
 import type {
   BudgetDataSource,
@@ -63,7 +64,8 @@ export class InMemoryCampaignStore
     TransitionFactsDataSource,
     BudgetDataSource,
     AssetDataSource,
-    PromptDataSource
+    PromptDataSource,
+    AgentInvocationDataSource
 {
   campaigns: CampaignRecord[] = [];
   audits: CampaignTransitionAuditRecord[] = [];
@@ -88,6 +90,7 @@ export class InMemoryCampaignStore
   assetProvenances: AssetProvenanceRecord[] = [];
   promptTemplates: PromptTemplateRecord[] = [];
   promptVersions: PromptVersionRecord[] = [];
+  agentInvocations: AgentInvocationRecord[] = [];
 
   seedCampaign(overrides: Partial<CampaignRecord> = {}): CampaignRecord {
     const now = new Date();
@@ -333,5 +336,25 @@ export class InMemoryCampaignStore
     },
     findMany: async ({ where }) =>
       this.promptVersions.filter((v) => v.promptTemplateId === where.promptTemplateId),
+  };
+
+  agentInvocation: AgentInvocationDataSource['agentInvocation'] = {
+    findFirst: async ({ where }) =>
+      this.agentInvocations.find(
+        (a) => a.campaignId === where.campaignId && a.idempotencyKey === where.idempotencyKey,
+      ) ?? null,
+    create: async ({ data }) => {
+      const exists = this.agentInvocations.some(
+        (a) => a.campaignId === data.campaignId && a.idempotencyKey === data.idempotencyKey,
+      );
+      if (exists) {
+        throw new Error(
+          'unique constraint violation on agent_invocations (campaignId, idempotencyKey)',
+        );
+      }
+      const record: AgentInvocationRecord = { id: randomUUID(), createdAt: new Date(), ...data };
+      this.agentInvocations.push(record);
+      return record;
+    },
   };
 }

@@ -629,9 +629,17 @@ that also carries `inputHash`/`outputHash`/`cost`/`evaluation`). The
 structured-output mechanism is Claude strict tool use (`tool_choice` forced
 to a single schema-derived tool, `strict: true`), not a JSON-mode "hope for
 the best" prompt — see `packages/agent-runtime/src/json-schema.ts` and
-`packages/providers/src/reasoning.claude.ts`. No workflow/Activity calls
-`executeAgent` yet; see `packages/agents/README.md` for what's implemented
-versus what's still orchestrator-wiring work.
+`packages/providers/src/reasoning.claude.ts`. See `packages/agents/README.md`
+for what's implemented versus what's still orchestrator-wiring work.
+
+**Activity boundary implemented (ADR-0004, 2026-07-24).**
+`createExecuteSpecialistAgentActivity` (`packages/workflows/src/activities/
+execute-specialist-agent-activity.ts`) is the Temporal Activity that calls
+`executeAgent`: it resolves an agent through an injected registry, verifies
+campaign ownership/stage, checks budget at the WORKSPACE/CAMPAIGN/PROVIDER
+levels, and persists every terminal outcome as an `AgentInvocation` row
+(§4.1). No `CampaignProductionWorkflow` calls it yet — that remains M3/M4's
+sequencing work.
 
 ### 6.1 Representative per-agent schemas (field-level, not full Zod)
 
@@ -775,6 +783,17 @@ architecture change, not a correction of this document.
    remains the relevant milestones' wiring work, not something this change
    did early. See ADR-0003 and `packages/agents/README.md` for the full
    accounting of what's implemented versus what's still pending.
+10. **Specialist-agent execution Activity boundary, implemented 2026-07-24
+    (ADR-0004) — a continuation of item 9's exception, one layer up.** The
+    Temporal Activity that calls `executeAgent` — resolving an agent via the
+    canonical registry, verifying campaign ownership/stage, checking budget
+    at WORKSPACE/CAMPAIGN/PROVIDER, and persisting every terminal outcome as
+    an `AgentInvocation` (§4.1) — is implemented ahead of M3/M4's full
+    workflow sequencing. `CampaignProductionWorkflow` still does not exist;
+    nothing calls this Activity stage-by-stage yet. See ADR-0004 for the
+    idempotency-key design (keyed on the caller-supplied key alone, not a
+    Temporal attempt number) and why ownership/stage-mismatch rejections
+    throw rather than persist an `AgentInvocation` row.
 
 ### 7.2 Remaining open questions
 

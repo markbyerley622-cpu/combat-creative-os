@@ -35,14 +35,17 @@ registry identifiers, preserved from the approved architecture; "Script
 Director" and "Visual QA Controller" are `displayName` labels only — see
 `docs/adr/0003-agent-execution-framework.md`.
 
-**Not yet wired up:** no Temporal workflow/Activity in `packages/workflows`
-calls any of these agents yet, and no `packages/database` repository
-persists an `AgentRun`. That wiring — turning `AgentRun` into a persisted
-`AgentInvocation` row, sequencing agents inside `CampaignProductionWorkflow`/
-`ShotGenerationWorkflow`, and enforcing budget checks before dispatch — is
-later-milestone work per `docs/architecture.md` §8. This package is the
-execution framework and the eleven agents' business logic; the orchestrator
-that calls them does not exist yet.
+**Partially wired up (ADR-0004).** `packages/workflows/src/activities/
+execute-specialist-agent-activity.ts` now calls `executeAgent` through a
+Temporal Activity, persists every terminal outcome as an `AgentInvocation`
+(`packages/database`), and enforces WORKSPACE/CAMPAIGN/PROVIDER budget
+checks before dispatch — but it takes the agent registry as an injected
+dependency rather than importing `@combat/agents` directly, so this package
+has no new caller yet. No `CampaignProductionWorkflow`/
+`ShotGenerationWorkflow` exists to sequence agents stage-by-stage — that
+remains later-milestone work per `docs/architecture.md` §8. The production
+wiring that actually points that Activity's registry at this package's
+`AGENT_REGISTRY` is a future `apps/worker` change.
 
 ## How it fits together
 

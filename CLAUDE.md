@@ -4,16 +4,19 @@ This file is the operating contract for anyone (human or agent) working in
 this repository. It is deliberately short — for the full design rationale
 see `docs/architecture.md` and `docs/adr/`.
 
-Current milestone: **repository foundation and local infrastructure, plus the
-specialist-agent execution framework** (`packages/agent-runtime` +
-11 of 14 `packages/agents` specialists — see ADR-0003 and
-`packages/agents/README.md`). No Temporal workflow/Activity calls an agent
-yet, and no real external provider integration (Veo, Runway, Figma,
-aerender, Frame.io) beyond Claude/Anthropic is implemented — see
-`docs/architecture.md` §7.1/§8. Anthropic is reachable via
-`@combat/providers`'s `ClaudeReasoningProvider`, but only when explicitly
-configured (`REASONING_PROVIDER=claude` + `ANTHROPIC_API_KEY`); the default
-`mock` provider is what every automated test uses.
+Current milestone: **repository foundation and local infrastructure, the
+specialist-agent execution framework, and the Temporal Activity boundary that
+executes it** (`packages/agent-runtime` + 11 of 14 `packages/agents`
+specialists, see ADR-0003; `createExecuteSpecialistAgentActivity` in
+`packages/workflows/src/activities` + the `AgentInvocation` table, see
+ADR-0004). No `CampaignProductionWorkflow` exists yet — nothing sequences
+this Activity stage-by-stage inside a real workflow — and no real external
+provider integration (Veo, Runway, Figma, aerender, Frame.io) beyond
+Claude/Anthropic is implemented — see `docs/architecture.md` §7.1/§8.
+Anthropic is reachable via `@combat/providers`'s `ClaudeReasoningProvider`,
+but only when explicitly configured (`REASONING_PROVIDER=claude` +
+`ANTHROPIC_API_KEY`); the default `mock` provider is what every automated
+test uses.
 
 ## Context and token efficiency
 

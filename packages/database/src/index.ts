@@ -8,3 +8,4 @@ export * from './repositories/transition-facts';
 export * from './repositories/campaign-transition-service';
 export * from './repositories/asset-repository';
 export * from './repositories/prompt-repository';
+export * from './repositories/agent-invocation-repository';
