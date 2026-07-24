@@ -4,19 +4,23 @@ This file is the operating contract for anyone (human or agent) working in
 this repository. It is deliberately short — for the full design rationale
 see `docs/architecture.md` and `docs/adr/`.
 
-Current milestone: **repository foundation and local infrastructure, the
-specialist-agent execution framework, and the Temporal Activity boundary that
-executes it** (`packages/agent-runtime` + 11 of 14 `packages/agents`
-specialists, see ADR-0003; `createExecuteSpecialistAgentActivity` in
-`packages/workflows/src/activities` + the `AgentInvocation` table, see
-ADR-0004). No `CampaignProductionWorkflow` exists yet — nothing sequences
-this Activity stage-by-stage inside a real workflow — and no real external
-provider integration (Veo, Runway, Figma, aerender, Frame.io) beyond
-Claude/Anthropic is implemented — see `docs/architecture.md` §7.1/§8.
-Anthropic is reachable via `@combat/providers`'s `ClaudeReasoningProvider`,
-but only when explicitly configured (`REASONING_PROVIDER=claude` +
-`ANTHROPIC_API_KEY`); the default `mock` provider is what every automated
-test uses.
+Current milestone: **M3, workflow skeleton + control plane, done** —
+`CampaignProductionWorkflow` (`packages/workflows/src/workflows`) drives the
+full 20-stage lifecycle through the real `advanceCampaignStageActivity`/
+`verifyHumanApprovalActivity`, and `apps/api` exposes the three approval
+endpoints (RBAC- and workspace-scoped, persistence-before-signal) — see
+`docs/architecture.md` §7.1 item 11 for what shipped and three deliberate,
+documented interim narrowings (no real caller authentication yet; a
+deterministic `campaign-production:${campaignId}` workflow-ID convention in
+place of a `WorkflowRun` mapping table; no `TestWorkflowEnvironment` coverage,
+covered instead by a fake-runtime wiring suite). Nothing yet calls
+`client.workflow.start(campaignProductionWorkflow, ...)` for a real campaign,
+and no real external provider integration (Veo, Runway, Figma, aerender,
+Frame.io) beyond Claude/Anthropic is implemented — see `docs/architecture.md`
+§7.1/§8. Anthropic is reachable via `@combat/providers`'s
+`ClaudeReasoningProvider`, but only when explicitly configured
+(`REASONING_PROVIDER=claude` + `ANTHROPIC_API_KEY`); the default `mock`
+provider is what every automated test uses.
 
 ## Context and token efficiency
 

@@ -1,10 +1,18 @@
 import Fastify from 'fastify';
 import type { Logger } from '@combat/observability';
 import { createPrismaClient, type PrismaClient } from '@combat/database';
+import type { WorkflowClient } from '@temporalio/client';
+import { createApprovalDatabase, type ApprovalDatabase } from './approval-database';
+import { registerApprovalRoutes } from './approval-routes';
+import { createWorkflowClient, type TemporalEnv } from './temporal-client';
 
 export interface BuildServerOptions {
   logger: Logger;
   prisma?: PrismaClient;
+  /** Overrides the `*DataSource` adapter the approval routes use — tests inject an in-memory fake here. */
+  approvalDb?: ApprovalDatabase;
+  workflowClient?: WorkflowClient;
+  temporalEnv?: TemporalEnv;
 }
 
 /**
@@ -17,7 +25,13 @@ export interface BuildServerOptions {
  * Fastify's logger generic beyond the library's own `FastifyBaseLogger`
  * default, so an explicit bare `FastifyInstance` annotation doesn't match.
  */
-export function buildServer({ logger, prisma = createPrismaClient() }: BuildServerOptions) {
+export function buildServer({
+  logger,
+  prisma = createPrismaClient(),
+  approvalDb = createApprovalDatabase(prisma),
+  temporalEnv = { TEMPORAL_ADDRESS: 'localhost:7233', TEMPORAL_NAMESPACE: 'default' },
+  workflowClient = createWorkflowClient(temporalEnv),
+}: BuildServerOptions) {
   const app = Fastify({ logger });
 
   // Liveness: the process is up and serving requests. Does not depend on any
@@ -44,6 +58,8 @@ export function buildServer({ logger, prisma = createPrismaClient() }: BuildServ
       timestamp: new Date().toISOString(),
     };
   });
+
+  registerApprovalRoutes(app, { db: approvalDb, workflowClient });
 
   return app;
 }

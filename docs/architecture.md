@@ -693,10 +693,15 @@ architecture change, not a correction of this document.
 
 0. **Naming, scaffolded 2026-07-23.** `apps/orchestrator-worker` was renamed
    to `apps/worker` and `packages/db` to `packages/database` to match the
-   scaffolding request. `apps/webhook-receiver`,
-   `packages/{auth,media,workflow-client}` are still deferred (not yet
-   scaffolded) — they have no purpose until real provider integrations and
-   `apps/api` endpoints beyond `/health` that would use them exist.
+   scaffolding request. `apps/webhook-receiver` and `packages/{auth,media}`
+   are still deferred (not yet scaffolded) — they have no purpose until real
+   provider integrations exist and (for `auth`) until real session/token
+   verification is decided. `packages/workflow-client` remains deferred too,
+   but no longer for lack of a consumer: `apps/api` now has endpoints beyond
+   `/health` (the three approval routes, §7.1 item 11) that signal
+   `CampaignProductionWorkflow` directly against `@combat/workflows`'s signal
+   definitions plus a small endpoint-local Temporal client wrapper, rather
+   than through an extracted shared package — see item 11's own note on why.
    `packages/agent-runtime` was scaffolded and implemented on 2026-07-24
    (ADR-0003), ahead of this item's original "deferred" call, once the
    specialist-agent execution framework was explicitly requested — see item
@@ -794,6 +799,67 @@ runtime` (the harness) and eleven of the fourteen `packages/agents`
     idempotency-key design (keyed on the caller-supplied key alone, not a
     Temporal attempt number) and why ownership/stage-mismatch rejections
     throw rather than persist an `AgentInvocation` row.
+11. **`CampaignProductionWorkflow` and the three approval endpoints,
+    implemented 2026-07-25 (M3) — with three deliberate, documented interim
+    narrowings this item records rather than leaving as a silent gap.**
+    `packages/workflows/src/workflows/campaign-production-workflow.ts` drives
+    `advanceCampaignStageActivity`/`verifyHumanApprovalActivity` through the
+    full 20-stage lifecycle; every branching decision (gate routing,
+    duplicate/stale-signal rejection, bounded-revision escalation to
+    `BLOCKED`) is factored into a pure, Temporal-runtime-free reducer
+    (`campaign-production-workflow-state.ts`) so it is unit-testable without
+    `TestWorkflowEnvironment` — see item 11a below for why that harness
+    itself is out of reach here. `apps/api` gained
+    `POST /workspaces/:workspaceId/campaigns/:campaignId/approvals/{concept,shot-selection,final}`,
+    each: resolving the caller's role from a persisted `Membership` row and
+    checking `roleHasPermission` first; scoping the campaign lookup to
+    `workspaceId` (wrong-workspace 404s); persisting an immutable
+    `HumanApproval` row _before_ signalling; and signalling
+    `CampaignProductionWorkflow`, which independently re-verifies the
+    approval rather than trusting the signal payload.
+    - **(a) No `TestWorkflowEnvironment` coverage.** Its time-skipping test
+      server requires downloading a native binary
+      (`packages/testing/src/temporal-test-environment.ts` already flagged
+      this as unavailable in this environment — confirmed again this session:
+      the download host was unreachable). `campaign-production-workflow.test.ts`
+      instead drives the real workflow entrypoint end-to-end by mocking
+      `@temporalio/workflow`'s three context-bound calls
+      (`proxyActivities`/`setHandler`/`condition`) with a small in-process
+      fake (`packages/workflows/src/test-helpers/fake-temporal-workflow.ts`).
+      This covers wiring and branching thoroughly but not genuine
+      determinism-replay guarantees the real SDK's sandbox enforces — running
+      the deferred `TestWorkflowEnvironment` suite once native-binary download
+      is possible remains a real gap, not a redundant addition.
+    - **(b) No real caller authentication.** `packages/auth` is still
+      deferred (item 0). The three endpoints take a client-supplied `userId`
+      in the request body and look up its `Membership` row for role — this
+      makes the RBAC check itself real and tested (a spoofed _role_ is
+      impossible without a genuine `Membership` row), but does not verify the
+      caller _is_ that `userId`; anyone who knows/guesses a valid `userId`
+      can currently act as them. This is the same "no session layer exists
+      yet" gap item 0 already named, now concretely surfaced at a real
+      endpoint rather than staying abstract. Do not treat these endpoints as
+      secure against a hostile network caller until real session/token
+      verification lands.
+    - **(c) No `WorkflowRun` mapping table.** Rather than add one (a schema
+      migration, out of scope this session), the workflow ID is the
+      deterministic `campaign-production:${campaignId}` convention
+      (`apps/api/src/campaign-workflow-id.ts`). Whatever eventually calls
+      `client.workflow.start(campaignProductionWorkflow, ...)` for a campaign
+      — not built this session — must use the identical convention, or the
+      two halves silently address different workflow executions.
+    - **(d) Activities still are not registered with a real Worker.**
+      `createAdvanceCampaignStageActivity`/`createVerifyHumanApprovalActivity`
+      remain dependency-injectable factories (by design, for unit tests);
+      nothing yet instantiates them with a live `PrismaClient` and hands the
+      result to `Worker.create` in `apps/worker` — attempting that this
+      session surfaced a real, narrow type gap (Prisma's nullable columns
+      return `null`; the repository record types declare those fields
+      `string | undefined`), which `apps/api/src/approval-database.ts` had to
+      bridge for its own three narrower repositories (`Campaign`,
+      `HumanApproval`, `Membership`). The same adapter pattern, extended to
+      the five repositories `CampaignTransitionDataSource` composes, is the
+      concrete next step for wiring `apps/worker` for real.
 
 ### 7.2 Remaining open questions
 
@@ -860,14 +926,23 @@ reasoning.claude.ts`) is unit-tested with an injected fake client instead,
   real-key-gated integration test remains a candidate follow-up, not a gap
   in this milestone's own test requirements (CLAUDE.md: "Do not call paid
   APIs in automated tests").
-- **M3 — Workflow skeleton + control plane.** `CampaignProductionWorkflow` with
-  all stage states from §3.1 wired to stub Activities; `packages/workflow-client`;
-  `apps/api` endpoints for the three approval signals enforcing RBAC (§2.2) and
-  workspace scoping before dispatch. _Test:_ Temporal `TestWorkflowEnvironment`
-  with time-skipping asserting every transition in the state diagram; `apps/api`
-  tests asserting each non-`OWNER_ADMIN`/`CREATIVE_DIRECTOR` role is rejected on
-  approval endpoints, and that a request scoped to the wrong workspace 404s rather
-  than leaking existence.
+- **M3 — Workflow skeleton + control plane. Done (2026-07-25), with three
+  documented interim narrowings — see §7.1 item 11.** `CampaignProductionWorkflow`
+  drives all 20 stages from §3.1 through the real `advanceCampaignStageActivity`/
+  `verifyHumanApprovalActivity` (not stubs); `apps/api` gained the three approval
+  endpoints enforcing RBAC (§2.2) and workspace scoping before dispatch, persisting
+  each decision before signalling. A standalone `packages/workflow-client` was
+  **not** scaffolded — `apps/api` imports the signal/query definitions directly
+  from `@combat/workflows` and owns a small internal Temporal client wrapper
+  (`apps/api/src/temporal-client.ts`) instead; revisit extracting a shared package
+  once `apps/webhook-receiver` gives it a second consumer. _Test:_ 25 focused
+  workflow tests (a pure-reducer suite plus a fake-runtime wiring suite — see §7.1
+  item 11a for why `TestWorkflowEnvironment` itself isn't exercised) covering every
+  gate, revision routing, duplicate/stale signals, bounded revisions, and gate
+  non-bypass; 11 `apps/api` tests asserting non-approver roles are rejected, a
+  request scoped to the wrong workspace 404s rather than leaking existence, the
+  `HumanApproval` row is persisted before the signal fires, and an exact retry
+  doesn't create a second row.
 - **M4 — Text-agent chain to Concept Approval.** Creative Director, Script &
   Timing Director wired in; `apps/dashboard` gets brief intake + Concept Approval
   UI, calling `apps/api` exclusively. _Test:_ end-to-end run through

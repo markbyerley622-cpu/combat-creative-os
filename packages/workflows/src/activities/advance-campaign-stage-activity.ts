@@ -1,0 +1,189 @@
+import {
+  CAMPAIGN_TRANSITIONS,
+  type ApprovalDecision,
+  type ApprovalGate,
+  type CampaignStage,
+} from '@combat/domain';
+import type { CampaignTransitionDataSource } from '@combat/database';
+import { attemptCampaignTransition } from '@combat/database';
+
+/**
+ * The Activity boundary a `CampaignProductionWorkflow` uses to move the
+ * persisted campaign forward one stage. All knowledge of the transition
+ * table (`CAMPAIGN_TRANSITIONS`) and of which edge a gate decision routes to
+ * lives here, not in the workflow file — CLAUDE.md restricts
+ * `packages/workflows/src/workflows/*` to `@temporalio/workflow` and
+ * type-only imports, so a value-level `@combat/domain` import (needed to
+ * walk the transition table) belongs in an Activity instead. The workflow
+ * only ever sees an opaque `CampaignStage` string and this Activity's
+ * discriminated result.
+ */
+
+export interface AdvanceCampaignStageAutoInput {
+  readonly mode: 'AUTO_FORWARD';
+  readonly workspaceId: string;
+  readonly campaignId: string;
+  readonly fromStage: CampaignStage;
+  readonly idempotencyKey: string;
+  readonly requestedByUserId?: string;
+}
+
+export interface AdvanceCampaignStageGateDecisionInput {
+  readonly mode: 'GATE_DECISION';
+  readonly workspaceId: string;
+  readonly campaignId: string;
+  readonly fromStage: CampaignStage;
+  readonly idempotencyKey: string;
+  readonly gate: ApprovalGate;
+  readonly decision: ApprovalDecision;
+  /** Required exactly when gate === 'FINAL' && decision !== 'APPROVED' — mirrors HumanApprovalSchema. */
+  readonly repairTarget?: CampaignStage;
+  readonly requestedByUserId?: string;
+}
+
+export type AdvanceCampaignStageInput =
+  AdvanceCampaignStageAutoInput | AdvanceCampaignStageGateDecisionInput;
+
+export type AdvanceCampaignStageOutput =
+  | { readonly ok: true; readonly toStage: CampaignStage }
+  | { readonly ok: false; readonly reason: 'TERMINAL' }
+  | {
+      readonly ok: false;
+      readonly reason: 'GATE_REQUIRED';
+      readonly gate: ApprovalGate;
+      readonly targetStage: CampaignStage;
+    }
+  | {
+      readonly ok: false;
+      readonly reason: 'NO_MATCHING_TRANSITION';
+      readonly detail: string;
+    }
+  | {
+      readonly ok: false;
+      readonly reason:
+        | 'INVALID_TRANSITION'
+        | 'MISSING_PREREQUISITE'
+        | 'BUDGET_EXCEEDED'
+        | 'CONCURRENT_MODIFICATION'
+        | 'DUPLICATE_REQUEST';
+      readonly detail: string;
+    };
+
+export interface AdvanceCampaignStageActivityDeps {
+  readonly campaignTransitionDb: CampaignTransitionDataSource;
+}
+
+/** The single FORWARD edge out of `fromStage`, if any — the transition table has at most one per stage. */
+function findForwardEdge(fromStage: CampaignStage) {
+  return CAMPAIGN_TRANSITIONS.find((t) => t.from === fromStage && t.kind === 'FORWARD');
+}
+
+/**
+ * The REVISION edge a rejected/changes-requested decision at `gate` routes
+ * to from `fromStage`. FINAL is the only gate with more than one candidate
+ * target — disambiguated by the human-selected `repairTarget` (see
+ * HumanApprovalSchema's doc comment in packages/domain).
+ */
+function findRevisionEdge(
+  fromStage: CampaignStage,
+  gate: ApprovalGate,
+  repairTarget?: CampaignStage,
+) {
+  const candidates = CAMPAIGN_TRANSITIONS.filter(
+    (t) => t.from === fromStage && t.kind === 'REVISION',
+  );
+  if (gate === 'FINAL') {
+    return candidates.find((t) => t.to === repairTarget);
+  }
+  return candidates[0];
+}
+
+function mapRejection(
+  reason:
+    | { type: 'INVALID_TRANSITION' }
+    | { type: 'MISSING_PREREQUISITE'; missing: string[] }
+    | { type: 'BUDGET_EXCEEDED' }
+    | { type: 'CONCURRENT_MODIFICATION' }
+    | { type: 'DUPLICATE_REQUEST' },
+  message: string,
+): AdvanceCampaignStageOutput {
+  switch (reason.type) {
+    case 'INVALID_TRANSITION':
+      return { ok: false, reason: 'INVALID_TRANSITION', detail: message };
+    case 'MISSING_PREREQUISITE':
+      return { ok: false, reason: 'MISSING_PREREQUISITE', detail: message };
+    case 'BUDGET_EXCEEDED':
+      return { ok: false, reason: 'BUDGET_EXCEEDED', detail: message };
+    case 'CONCURRENT_MODIFICATION':
+      return { ok: false, reason: 'CONCURRENT_MODIFICATION', detail: message };
+    case 'DUPLICATE_REQUEST':
+      return { ok: false, reason: 'DUPLICATE_REQUEST', detail: message };
+    default: {
+      const exhaustive: never = reason;
+      return exhaustive;
+    }
+  }
+}
+
+export function createAdvanceCampaignStageActivity(
+  deps: AdvanceCampaignStageActivityDeps,
+): (input: AdvanceCampaignStageInput) => Promise<AdvanceCampaignStageOutput> {
+  return async function advanceCampaignStageActivity(
+    input: AdvanceCampaignStageInput,
+  ): Promise<AdvanceCampaignStageOutput> {
+    let toStage: CampaignStage;
+
+    if (input.mode === 'AUTO_FORWARD') {
+      const edge = findForwardEdge(input.fromStage);
+      if (!edge) {
+        return { ok: false, reason: 'TERMINAL' };
+      }
+      if (edge.requiredApprovalGate) {
+        return {
+          ok: false,
+          reason: 'GATE_REQUIRED',
+          gate: edge.requiredApprovalGate,
+          targetStage: edge.to,
+        };
+      }
+      toStage = edge.to;
+    } else {
+      if (input.decision === 'APPROVED') {
+        const edge = findForwardEdge(input.fromStage);
+        if (!edge || edge.requiredApprovalGate !== input.gate) {
+          return {
+            ok: false,
+            reason: 'NO_MATCHING_TRANSITION',
+            detail: `No forward edge gated by ${input.gate} exists from ${input.fromStage}`,
+          };
+        }
+        toStage = edge.to;
+      } else {
+        const edge = findRevisionEdge(input.fromStage, input.gate, input.repairTarget);
+        if (!edge) {
+          return {
+            ok: false,
+            reason: 'NO_MATCHING_TRANSITION',
+            detail: `No revision edge for gate ${input.gate}${
+              input.repairTarget ? ` (repairTarget ${input.repairTarget})` : ''
+            } exists from ${input.fromStage}`,
+          };
+        }
+        toStage = edge.to;
+      }
+    }
+
+    const result = await attemptCampaignTransition(deps.campaignTransitionDb, {
+      workspaceId: input.workspaceId,
+      campaignId: input.campaignId,
+      toStage,
+      idempotencyKey: input.idempotencyKey,
+      requestedByUserId: input.requestedByUserId,
+    });
+
+    if (result.ok) {
+      return { ok: true, toStage: result.campaign.currentStage };
+    }
+    return mapRejection(result.error.reason, result.error.message);
+  };
+}

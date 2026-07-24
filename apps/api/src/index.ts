@@ -10,7 +10,13 @@ async function main(): Promise<void> {
     otlpEndpoint: env.OTEL_EXPORTER_OTLP_ENDPOINT,
   });
 
-  const app = buildServer({ logger });
+  const app = buildServer({
+    logger,
+    temporalEnv: {
+      TEMPORAL_ADDRESS: env.TEMPORAL_ADDRESS,
+      TEMPORAL_NAMESPACE: env.TEMPORAL_NAMESPACE,
+    },
+  });
 
   const shutdown = async (): Promise<void> => {
     logger.info('Shutting down apps/api');
