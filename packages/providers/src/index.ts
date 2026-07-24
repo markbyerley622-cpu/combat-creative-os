@@ -9,6 +9,7 @@ export * from './review';
 export * from './review.mock';
 export * from './storage';
 export * from './storage.mock';
+export * from './storage.minio';
 export * from './reasoning';
 export * from './reasoning.mock';
 export * from './reasoning.claude';

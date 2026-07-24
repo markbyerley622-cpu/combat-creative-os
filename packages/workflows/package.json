@@ -15,6 +15,7 @@
     "@combat/agents": "workspace:*",
     "@combat/database": "workspace:*",
     "@combat/domain": "workspace:*",
+    "@combat/media": "workspace:*",
     "@combat/observability": "workspace:*",
     "@combat/providers": "workspace:*",
     "@temporalio/activity": "^1.11.6",

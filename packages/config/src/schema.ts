@@ -32,6 +32,14 @@ export const minioEnvSchema = z.object({
   MINIO_ACCESS_KEY: z.string().min(1).default('minioadmin'),
   MINIO_SECRET_KEY: z.string().min(1).default('minioadmin'),
   MINIO_BUCKET: z.string().min(1).default('combat-creative-assets'),
+  // MinIO's own documented local-dev default region ("us-east-1" is accepted
+  // by MinIO regardless of the real AWS region list — it's a required S3 API
+  // parameter, not a real geography here).
+  MINIO_REGION: z.string().min(1).default('us-east-1'),
+  // MinIO (and most self-hosted S3-compatible stores) requires path-style
+  // addressing; real AWS S3 defaults to virtual-hosted-style, so production
+  // config against real S3 should set this to false.
+  MINIO_FORCE_PATH_STYLE: booleanFromString.default(true),
 });
 
 /**
@@ -49,6 +57,23 @@ export const reasoningEnvSchema = z.object({
 });
 export type ReasoningEnv = z.infer<typeof reasoningEnvSchema>;
 
+/**
+ * M5: asset-ingestion limits. Deliberately not "configurable" per MIME type
+ * — a single byte ceiling plus a code-level MIME allowlist (see
+ * packages/workflows' ingest-asset-activity.ts) is enough for this
+ * milestone's brand-asset/reference-upload scope, and keeps the env surface
+ * small rather than trying to serialize a MIME-to-limit map through env vars.
+ */
+export const assetEnvSchema = z.object({
+  ASSET_MAX_UPLOAD_BYTES: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(200 * 1024 * 1024),
+  ASSET_UPLOAD_URL_EXPIRY_SECONDS: z.coerce.number().int().positive().default(900),
+  ASSET_DOWNLOAD_URL_EXPIRY_SECONDS: z.coerce.number().int().positive().default(3600),
+});
+
 export const observabilityEnvSchema = z.object({
   OTEL_EXPORTER_OTLP_ENDPOINT: z
     .string()
@@ -59,6 +84,8 @@ export const observabilityEnvSchema = z.object({
 export const apiEnvSchema = baseEnvSchema
   .merge(databaseEnvSchema)
   .merge(temporalEnvSchema)
+  .merge(minioEnvSchema)
+  .merge(assetEnvSchema)
   .merge(observabilityEnvSchema)
   .extend({
     API_HOST: z.string().min(1).default('0.0.0.0'),
@@ -70,6 +97,7 @@ export const workerEnvSchema = baseEnvSchema
   .merge(databaseEnvSchema)
   .merge(temporalEnvSchema)
   .merge(minioEnvSchema)
+  .merge(assetEnvSchema)
   .merge(observabilityEnvSchema)
   .merge(reasoningEnvSchema)
   .extend({

@@ -148,6 +148,8 @@ enum ApprovalDecision {
 }
 
 enum AssetKind {
+  /// M5: a file uploaded directly by a user — the only kind the ingestion service itself creates.
+  UPLOADED_SOURCE
   VIDEO_CANDIDATE
   THUMBNAIL
   PROXY
@@ -285,6 +287,7 @@ model Campaign {
   concepts             CreativeConcept[]
   scripts              Script[]
   timelines            Timeline[]
+  assets               Asset[]
   renderJobs           RenderJob[]
   editDecisionLists    EditDecisionList[]
   deliverySpecs        DeliverySpecification[]
@@ -647,18 +650,43 @@ model HumanApproval {
   @@map("human_approvals")
 }
 
+// M5: an uploaded asset's lifecycle after `putObject` succeeds — see
+// packages/domain's AssetIngestionStatusSchema doc comment.
+enum AssetIngestionStatus {
+  PENDING
+  READY
+  FAILED
+}
+
 model Asset {
-  id                         String    @id @default(uuid())
-  workspaceId                String
-  kind                       AssetKind
-  s3Key                      String    @unique
-  checksum                   String
-  mimeType                   String
+  id          String    @id @default(uuid())
+  workspaceId String
+  /// The campaign this asset was originally ingested for — see
+  /// packages/domain's AssetSchema doc comment on why a workspace-wide
+  /// checksum dedup means this isn't necessarily "the only campaign using
+  /// this asset."
+  campaignId  String
+  kind        AssetKind
+  s3Key       String    @unique
+  checksum    String
+  mimeType    String
+  /// M5 additions — see packages/domain's AssetSchema.
+  originalFilename        String
+  sizeBytes               Int
+  ingestionStatus         AssetIngestionStatus @default(PENDING)
+  mediaMetadata           Json?
+  inspectionFailureDetails String?
+
   createdByAgentInvocationId String?
   uploadedByUserId           String?
+  /// M5: set (instead of the other two) for a derived asset an Activity
+  /// produced deterministically (thumbnail/proxy) — see packages/domain's
+  /// AssetSchema doc comment.
+  generatedByActivity        String?
   createdAt                  DateTime  @default(now())
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  campaign  Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
 
   provenance           AssetProvenance?
   license              LicenseRecord?
@@ -669,7 +697,12 @@ model Asset {
   editDecisionEntries  EditDecisionEntry[]
   creativeVariants     CreativeVariant[]
 
+  // Dedup key for "detects duplicate uploads using workspace, checksum and
+  // asset type" — deliberately excludes campaignId (a re-upload of the same
+  // bytes to a different campaign in the same workspace reuses this row).
+  @@unique([workspaceId, checksum, kind])
   @@index([workspaceId])
+  @@index([campaignId])
   @@map("assets")
 }
 

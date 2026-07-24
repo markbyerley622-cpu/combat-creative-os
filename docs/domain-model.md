@@ -368,6 +368,53 @@ FINAL_MASTER "final.mp4"
 `["composited.mp4"'s id, "candidate.mp4"'s id]` — see
 `asset-repository.test.ts` for the executable version of this example.
 
+### 6.1 Asset ingestion lifecycle (M5)
+
+A user-uploaded asset (`kind: 'UPLOADED_SOURCE'` — the only kind
+`ingestAssetActivity` itself creates; every other `AssetKind` is
+agent/render-produced) moves through `ingestionStatus`:
+
+```
+PENDING --(inspectMediaActivity succeeds)--> READY
+PENDING --(inspectMediaActivity fails)-----> FAILED
+```
+
+`confirm-upload` (`apps/api`) creates the row as `PENDING` once
+`StorageProvider.headObject` confirms the object actually exists — it does
+not run ffprobe itself (`inspectMediaActivity` is a separate, worker-owned
+Activity per docs/architecture.md's process table; not wired to any live
+Temporal Worker yet, matching this document's own "no live migration" /
+M3's "the Activity exists before anything calls it" pattern). A `FAILED`
+row is not discarded — `inspectionFailureDetails` keeps the reason, so a
+failed ingestion attempt stays a permanent, auditable record rather than a
+silently-lost API error.
+
+Every `UPLOADED_SOURCE` asset also gets a `campaignId` (required — the
+campaign it was ingested for) and, because licensing is mandatory for a
+direct upload but optional for internally-generated assets (§2's
+`LicenseRecord` "0..1 by design" note is unchanged for those), a
+`LicenseRecord` created in the same ingestion call — `ingestAssetActivity`
+rejects the request outright if `licenseType`/`rightsHolder` are missing,
+before ever touching storage.
+
+Duplicate uploads are deduped by `(workspaceId, checksum, kind)` —
+deliberately not campaign-scoped: re-uploading the same bytes to a second
+campaign in the same workspace resolves to the existing `Asset` row (its
+`campaignId` stays whichever campaign ingested it first) rather than
+creating a second copy.
+
+A derived asset (a `THUMBNAIL`/`PROXY` `generateMediaProxyActivity`
+produces from a source asset) is neither agent-produced nor
+human-uploaded, so `Asset`'s "exactly one of `createdByAgentInvocationId`
+or `uploadedByUserId`" rule (§2) is now a three-way XOR against a third
+field, `generatedByActivity` (the producing Activity's name, e.g.
+`generateMediaProxyActivity`) — see that Activity's doc comment. Its
+output object key is content-addressed (sha256 of source checksum + kind +
+profile/timestamp), so a repeated request for the same source/profile
+writes to the same key and dedupes to the same `Asset` row, matching
+`FfmpegService`'s "idempotent output paths" design (docs/architecture.md
+§5).
+
 ---
 
 ## 7. Prompt versioning

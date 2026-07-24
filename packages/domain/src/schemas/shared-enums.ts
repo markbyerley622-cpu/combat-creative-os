@@ -39,6 +39,8 @@ export const ApprovalDecisionSchema = z.enum(APPROVAL_DECISIONS);
 export type ApprovalDecision = z.infer<typeof ApprovalDecisionSchema>;
 
 export const ASSET_KINDS = [
+  /** M5: a file uploaded directly by a user (brand asset, reference footage) — the only AssetKind the ingestion service itself creates; every other kind is agent/render-produced. */
+  'UPLOADED_SOURCE',
   'VIDEO_CANDIDATE',
   'THUMBNAIL',
   'PROXY',
@@ -50,6 +52,17 @@ export const ASSET_KINDS = [
 ] as const;
 export const AssetKindSchema = z.enum(ASSET_KINDS);
 export type AssetKind = z.infer<typeof AssetKindSchema>;
+
+/**
+ * M5: an uploaded asset's lifecycle after `putObject` succeeds — `PENDING`
+ * until `inspectMediaActivity` runs (packages/workflows), then `READY` or
+ * `FAILED`. Not every AssetKind necessarily needs inspection (see that
+ * activity's doc comment), but the column exists on every Asset row for a
+ * single, consistent status field.
+ */
+export const ASSET_INGESTION_STATUSES = ['PENDING', 'READY', 'FAILED'] as const;
+export const AssetIngestionStatusSchema = z.enum(ASSET_INGESTION_STATUSES);
+export type AssetIngestionStatus = z.infer<typeof AssetIngestionStatusSchema>;
 
 export const GENERATION_CANDIDATE_STATUSES = [
   'PENDING',

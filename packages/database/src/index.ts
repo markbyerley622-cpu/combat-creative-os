@@ -11,6 +11,7 @@ export * from './repositories/budget-repository';
 export * from './repositories/transition-facts';
 export * from './repositories/campaign-transition-service';
 export * from './repositories/asset-repository';
+export * from './repositories/license-repository';
 export * from './repositories/prompt-repository';
 export * from './repositories/agent-invocation-repository';
 // Exported deliberately (not just used internally) — this fake is the one

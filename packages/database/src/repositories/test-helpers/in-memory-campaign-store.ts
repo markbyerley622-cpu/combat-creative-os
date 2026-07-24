@@ -5,6 +5,7 @@ import type {
   AgentInvocationRecord,
 } from '../agent-invocation-repository';
 import type { AssetDataSource, AssetProvenanceRecord, AssetRecord } from '../asset-repository';
+import type { LicenseDataSource, LicenseRecord } from '../license-repository';
 import type {
   BudgetDataSource,
   BudgetLedgerEntryRecord,
@@ -87,7 +88,8 @@ export class InMemoryCampaignStore
     CreativeConceptDataSource,
     ScriptDataSource,
     ShotDataSource,
-    MembershipDataSource
+    MembershipDataSource,
+    LicenseDataSource
 {
   campaigns: CampaignRecord[] = [];
   audits: CampaignTransitionAuditRecord[] = [];
@@ -118,6 +120,7 @@ export class InMemoryCampaignStore
   budgetLedgerEntries: BudgetLedgerEntryRecord[] = [];
   assets: AssetRecord[] = [];
   assetProvenances: AssetProvenanceRecord[] = [];
+  licenses: LicenseRecord[] = [];
   promptTemplates: PromptTemplateRecord[] = [];
   promptVersions: PromptVersionRecord[] = [];
   agentInvocations: AgentInvocationRecord[] = [];
@@ -419,6 +422,21 @@ export class InMemoryCampaignStore
     },
     findFirst: async ({ where }) =>
       this.assets.find((a) => a.id === where.id && a.workspaceId === where.workspaceId) ?? null,
+    findMany: async ({ where }) =>
+      this.assets.filter(
+        (a) =>
+          a.workspaceId === where.workspaceId &&
+          a.checksum === where.checksum &&
+          a.kind === where.kind,
+      ),
+    update: async ({ where, data }) => {
+      const asset = this.assets.find((a) => a.id === where.id);
+      if (!asset) throw new Error(`asset ${where.id} not found`);
+      asset.ingestionStatus = data.ingestionStatus;
+      asset.mediaMetadata = data.mediaMetadata;
+      asset.inspectionFailureDetails = data.inspectionFailureDetails;
+      return asset;
+    },
   };
   assetProvenance: AssetDataSource['assetProvenance'] = {
     create: async ({ data }) => {
@@ -433,6 +451,17 @@ export class InMemoryCampaignStore
     findFirst: async ({ where }) =>
       this.assetProvenances.find(
         (p) => p.assetId === where.assetId && p.workspaceId === where.workspaceId,
+      ) ?? null,
+  };
+  licenseRecord: LicenseDataSource['licenseRecord'] = {
+    create: async ({ data }) => {
+      const license: LicenseRecord = { id: randomUUID(), createdAt: new Date(), ...data };
+      this.licenses.push(license);
+      return license;
+    },
+    findFirst: async ({ where }) =>
+      this.licenses.find(
+        (l) => l.assetId === where.assetId && l.workspaceId === where.workspaceId,
       ) ?? null,
   };
 

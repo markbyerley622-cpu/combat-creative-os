@@ -16,6 +16,21 @@ async function main(): Promise<void> {
       TEMPORAL_ADDRESS: env.TEMPORAL_ADDRESS,
       TEMPORAL_NAMESPACE: env.TEMPORAL_NAMESPACE,
     },
+    minioConfig: {
+      endpoint: env.MINIO_ENDPOINT,
+      port: env.MINIO_PORT,
+      useSSL: env.MINIO_USE_SSL,
+      accessKeyId: env.MINIO_ACCESS_KEY,
+      secretAccessKey: env.MINIO_SECRET_KEY,
+      bucket: env.MINIO_BUCKET,
+      region: env.MINIO_REGION,
+      forcePathStyle: env.MINIO_FORCE_PATH_STYLE,
+    },
+    assetLimits: {
+      maxUploadBytes: env.ASSET_MAX_UPLOAD_BYTES,
+      uploadUrlExpirySeconds: env.ASSET_UPLOAD_URL_EXPIRY_SECONDS,
+      downloadUrlExpirySeconds: env.ASSET_DOWNLOAD_URL_EXPIRY_SECONDS,
+    },
   });
 
   const shutdown = async (): Promise<void> => {

@@ -557,13 +557,21 @@ interface ReviewProvider {
 }
 
 interface StorageProvider {
-  // S3-compatible (MinIO / S3)
+  // S3-compatible (MinIO / S3). Extended in M5 — see §7.1's M5 entry for the
+  // full accounting, including why `deleteObject` below doesn't reverse the
+  // "no lifecycle delete" principle this comment originally stated.
   putObject(input: PutObjectInput): Promise<{ s3Key: string; checksum: string }>;
-  getPresignedUrl(s3Key: string, expirySeconds: number): Promise<string>;
+  getObject(s3Key: string): Promise<GetObjectResult>;
+  objectExists(s3Key: string): Promise<boolean>;
   headObject(s3Key: string): Promise<ObjectMetadata>;
+  getPresignedUploadUrl(s3Key: string, input: PresignedUploadInput): Promise<string>;
+  getPresignedUrl(s3Key: string, expirySeconds: number): Promise<string>;
   copyObject(src: string, dest: string): Promise<void>;
-  // No hard-delete method exposed to application code; deletion is via
-  // lifecycle policy only, to preserve provenance/audit guarantees.
+  // Explicitly-authorized-only — requires an {authorizedBy, reason} pair,
+  // never a bare zero-argument delete, and nothing in the application code
+  // this document describes calls it. Deletion-by-default is still via
+  // lifecycle policy, not this method.
+  deleteObject(s3Key: string, authorization: DeleteAuthorization): Promise<void>;
 }
 
 interface ReasoningProvider {
@@ -1007,9 +1015,55 @@ reasoning.claude.ts`) is unit-tested with an injected fake client instead,
   (`apps/api/src/dev-fake-server.ts`), since this environment has no live
   Postgres/Temporal to run a fully real stack against (§7.1 item 11a's same
   constraint, applied here to `apps/dashboard`'s e2e suite).
-- **M5 — Storage & media pipeline.** `packages/providers/storage` (MinIO),
-  `packages/media` (ffmpeg probe/thumbnail/proxy). _Test:_ unit tests against
-  local MinIO container and fixture video files, independent of any workflow.
+- **M5 — Storage & media pipeline. Done (2026-07-25), with one narrowing
+  this item records.** `StorageProvider` (§5) gained `getObject`,
+  `objectExists`, `getPresignedUploadUrl`, and an explicitly-authorized-only
+  `deleteObject` — `storage.mock.ts`'s `MockStorageProvider` and a new real
+  adapter, `storage.minio.ts` (`@aws-sdk/client-s3` +
+  `@aws-sdk/s3-request-presigner`, SHA-256 computed by the adapter itself
+  and round-tripped through S3 object metadata since `ETag` isn't a
+  reliable hash), both implement it. New `packages/media` wraps
+  ffprobe/ffmpeg behind an injected `CommandRunner` (array-args
+  `execFile`, never a shell) — `probeMedia`/`inspectMedia` for
+  image/video/audio inspection, `createFfmpegMediaProvider` for
+  thumbnail/proxy generation, and a deterministic `MockMediaProvider`.
+  Asset ingestion is a new `Asset.kind = 'UPLOADED_SOURCE'` path: a new
+  `campaignId` (required), `originalFilename`, `sizeBytes`,
+  `ingestionStatus` (`PENDING`/`READY`/`FAILED`), `mediaMetadata` (Json),
+  and `inspectionFailureDetails` on `Asset`, workspace-wide dedup via
+  `@@unique([workspaceId, checksum, kind])`, and a new
+  `generatedByActivity` field alongside the existing
+  `createdByAgentInvocationId`/`uploadedByUserId` — a derived
+  thumbnail/proxy is neither agent-produced nor human-uploaded, so the
+  `Asset` "exactly one of" refine (§4.1/domain-model.md) became a
+  three-way XOR, not a two-way one, to represent it honestly rather than
+  overloading one of the other two fields. Three new
+  `packages/workflows/src/activities` — `ingestAssetActivity`,
+  `inspectMediaActivity`, `generateMediaProxyActivity` — follow the same
+  `createXActivity(deps)` pattern as every other Activity in this codebase;
+  none is wired into `CampaignProductionWorkflow` (the M5 task explicitly
+  scoped this milestone to not advance it beyond what's already
+  documented), matching M3/M4's own "the Activity exists before a workflow
+  calls it" precedent. `inspectMediaActivity` in particular is worker-owned
+  per this document's own process table ("worker... the only process that
+  calls providers, agents, and ffmpeg") — `apps/api`'s `confirm-upload`
+  route registers an asset as `PENDING` and never runs ffprobe itself;
+  inspection is a separate, not-yet-triggered Activity, consistent with
+  that boundary rather than a workaround for lacking a live Temporal
+  Worker. `apps/api` gained `POST .../assets/request-upload`,
+  `.../confirm-upload`, and `GET .../assets/:assetId`,
+  `.../assets/:assetId/download-url` — all reusing the existing
+  `MANAGE_ASSETS` permission (§2.2, unchanged) for writes and workspace
+  membership for reads. The uploaded object's key is always server-derived
+  (`buildUploadS3Key`, sanitized filename, never a client-supplied value)
+  and never returned to the client as a bare field. _Test:_ this
+  environment has neither Docker nor a real MinIO/ffmpeg install (§7.1 item
+  0/11a's same constraint), so every test — `storage.minio.ts` included —
+  runs against mocks/fakes (a mocked `@aws-sdk/client-s3` `S3Client`,
+  `FakeCommandRunner`, `MockMediaProvider`), not "a local MinIO container
+  and fixture video files" as this document's original placeholder line
+  said before this milestone actually shipped; that placeholder is
+  superseded by this entry, not still accurate.
 - **M6 — Video generation.** `providers/video-gen` deterministic mock for both
   Veo and Runway shapes; Shot Prompt Engineer; `ShotGenerationWorkflow` with
   multi-level budget checks (workspace/campaign/shot/provider) and idempotency

@@ -4,26 +4,37 @@ This file is the operating contract for anyone (human or agent) working in
 this repository. It is deliberately short — for the full design rationale
 see `docs/architecture.md` and `docs/adr/`.
 
-Current milestone: **M4, text-agent chain to Concept Approval, done** —
-`CampaignProductionWorkflow` now calls `runStrategyConceptScriptActivity`
-(Campaign Strategist → Creative Director → Script & Timing Director) on
-every `STRATEGY_REVIEW` visit, ahead of the unmoved `CONCEPT` gate;
-`apps/api` gained campaign/brief-intake/workflow-start/status/retrieval
-endpoints; `apps/dashboard` gained a full brief-intake and Concept Review
-UI calling `apps/api` exclusively. See `docs/architecture.md` §8's M4 entry
-for the full accounting, including why all three agents run before the
-gate (not split across `STRATEGY_REVIEW`/`SCRIPT_REVIEW`) and the expected
-`BLOCKED`-at-`ASSET_COLLECTION` stopping point past this milestone's scope.
-Still no real caller authentication (a dev-only `workspaceId`/`userId`
-picker in `apps/dashboard/src/lib/session.tsx` stands in), no real external
-provider integration (Veo, Runway, Figma, aerender, Frame.io) beyond
-Claude/Anthropic, and no live-Postgres/Temporal environment in this
-session — `apps/api/src/dev-fake-server.ts` (in-memory-backed) is what both
-`apps/api`'s own tests and `apps/dashboard`'s Playwright suite run against
-instead. Anthropic is reachable via `@combat/providers`'s
-`ClaudeReasoningProvider`, but only when explicitly configured
-(`REASONING_PROVIDER=claude` + `ANTHROPIC_API_KEY`); the default `mock`
-provider is what every automated test uses.
+Current milestone: **M5, storage & media pipeline, done** — `StorageProvider`
+(`packages/providers`) gained `getObject`/`objectExists`/
+`getPresignedUploadUrl`/an explicitly-authorized-only `deleteObject`, backed
+by a real MinIO/S3 adapter (`storage.minio.ts`, `@aws-sdk/client-s3`) and an
+extended `MockStorageProvider`. New `packages/media` wraps ffprobe/ffmpeg
+behind an injected `CommandRunner` (array-args `execFile`, never a shell) for
+image/video/audio inspection and thumbnail/proxy generation, with a
+deterministic `MockMediaProvider` for tests. Asset ingestion is a new
+`Asset.kind = 'UPLOADED_SOURCE'` path (`ingestAssetActivity` /
+`inspectMediaActivity` / `generateMediaProxyActivity` in
+`packages/workflows`) with workspace-wide checksum dedup, mandatory
+licensing, and a `PENDING`/`READY`/`FAILED` `ingestionStatus`; `apps/api`
+gained `request-upload`/`confirm-upload`/asset-metadata/download-url
+endpoints reusing the existing `MANAGE_ASSETS` permission. See
+`docs/architecture.md` §8's M5 entry for the full accounting, including why
+none of the three new Activities is wired into `CampaignProductionWorkflow`
+yet and why `inspectMediaActivity` (ffprobe) is deliberately not called
+synchronously from `apps/api` — see also `docs/domain-model.md` §6.1 for the
+asset lifecycle. Still no real caller authentication (a dev-only
+`workspaceId`/`userId` picker in `apps/dashboard/src/lib/session.tsx` stands
+in), no real external generation provider (Veo, Runway, Figma, aerender,
+Frame.io) beyond Claude/Anthropic, and no live-Postgres/Temporal/MinIO/ffmpeg
+environment in this session — `apps/api/src/dev-fake-server.ts`
+(in-memory-backed) is what both `apps/api`'s own tests and
+`apps/dashboard`'s Playwright suite run against instead, and every M5 test
+(including `storage.minio.ts`'s) runs against mocked SDK calls or
+`FakeCommandRunner`/`MockMediaProvider`, never a real MinIO/ffmpeg install.
+Anthropic is reachable via `@combat/providers`'s `ClaudeReasoningProvider`,
+but only when explicitly configured (`REASONING_PROVIDER=claude` +
+`ANTHROPIC_API_KEY`); the default `mock` provider is what every automated
+test uses.
 
 ## Context and token efficiency
 

@@ -16,6 +16,7 @@
     "@combat/database": "workspace:*",
     "@combat/domain": "workspace:*",
     "@combat/observability": "workspace:*",
+    "@combat/providers": "workspace:*",
     "@combat/workflows": "workspace:*",
     "@fastify/cors": "^9.0.1",
     "@temporalio/client": "^1.11.6",

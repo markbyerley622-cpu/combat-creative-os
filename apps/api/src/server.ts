@@ -2,12 +2,43 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import type { Logger } from '@combat/observability';
 import { createPrismaClient, type PrismaClient } from '@combat/database';
+import {
+  createMinioStorageProvider,
+  type MinioStorageConfig,
+  type StorageProvider,
+} from '@combat/providers';
 import type { WorkflowClient } from '@temporalio/client';
 import { createApprovalDatabase, type ApprovalDatabase } from './approval-database';
 import { registerApprovalRoutes } from './approval-routes';
+import { createAssetDatabase, type AssetDatabase } from './asset-database';
+import { registerAssetRoutes, type AssetRouteLimits } from './asset-routes';
 import { createCampaignDatabase, type CampaignDatabase } from './campaign-database';
 import { registerCampaignRoutes } from './campaign-routes';
 import { createWorkflowClient, type TemporalEnv } from './temporal-client';
+
+/**
+ * MinIO's own documented local-dev defaults (matching .env.example's
+ * comment on the same values) — not a real credential, the same way
+ * `temporalEnv`'s hardcoded `localhost:7233` default below isn't one.
+ * `src/index.ts` overrides this with `@combat/config`'s validated
+ * `minioEnvSchema` output for every real run.
+ */
+const DEFAULT_MINIO_CONFIG: MinioStorageConfig = {
+  endpoint: 'localhost',
+  port: 9000,
+  useSSL: false,
+  accessKeyId: 'minioadmin',
+  secretAccessKey: 'minioadmin',
+  bucket: 'combat-creative-assets',
+  region: 'us-east-1',
+  forcePathStyle: true,
+};
+
+const DEFAULT_ASSET_LIMITS: AssetRouteLimits = {
+  maxUploadBytes: 200 * 1024 * 1024,
+  uploadUrlExpirySeconds: 900,
+  downloadUrlExpirySeconds: 3600,
+};
 
 export interface BuildServerOptions {
   logger: Logger;
@@ -16,8 +47,14 @@ export interface BuildServerOptions {
   approvalDb?: ApprovalDatabase;
   /** Overrides the M4 campaign-intake routes' `*DataSource` adapter — tests inject an in-memory fake here. */
   campaignDb?: CampaignDatabase;
+  /** Overrides the M5 asset routes' `*DataSource` adapter — tests inject an in-memory fake here. */
+  assetDb?: AssetDatabase;
   workflowClient?: WorkflowClient;
   temporalEnv?: TemporalEnv;
+  /** Overrides the real MinIO adapter — tests inject `MockStorageProvider` here. */
+  storageProvider?: StorageProvider;
+  minioConfig?: MinioStorageConfig;
+  assetLimits?: AssetRouteLimits;
 }
 
 /**
@@ -35,8 +72,12 @@ export function buildServer({
   prisma = createPrismaClient(),
   approvalDb = createApprovalDatabase(prisma),
   campaignDb = createCampaignDatabase(prisma),
+  assetDb = createAssetDatabase(prisma),
   temporalEnv = { TEMPORAL_ADDRESS: 'localhost:7233', TEMPORAL_NAMESPACE: 'default' },
   workflowClient = createWorkflowClient(temporalEnv),
+  minioConfig = DEFAULT_MINIO_CONFIG,
+  storageProvider = createMinioStorageProvider(minioConfig),
+  assetLimits = DEFAULT_ASSET_LIMITS,
 }: BuildServerOptions) {
   const app = Fastify({ logger });
 
@@ -74,6 +115,7 @@ export function buildServer({
 
   registerApprovalRoutes(app, { db: approvalDb, workflowClient });
   registerCampaignRoutes(app, { db: campaignDb, workflowClient });
+  registerAssetRoutes(app, { db: assetDb, storageProvider, limits: assetLimits });
 
   return app;
 }

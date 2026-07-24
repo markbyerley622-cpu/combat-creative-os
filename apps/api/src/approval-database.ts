@@ -21,9 +21,22 @@ export type ApprovalDatabase = CampaignDataSource & HumanApprovalDataSource & Me
 export function createApprovalDatabase(prisma: PrismaClient): ApprovalDatabase {
   return {
     campaign: {
-      create: (args) => prisma.campaign.create(args),
-      findFirst: (args) => prisma.campaign.findFirst(args),
-      findMany: (args) => prisma.campaign.findMany(args),
+      // `idempotencyKey` is nullable in Prisma (`String?`) but optional
+      // (`| undefined`) in CampaignRecord — same null-vs-undefined bridge
+      // as humanApproval below, just for a field added after this adapter
+      // was first written (M4).
+      create: async (args) => {
+        const created = await prisma.campaign.create(args);
+        return { ...created, idempotencyKey: created.idempotencyKey ?? undefined };
+      },
+      findFirst: async (args) => {
+        const found = await prisma.campaign.findFirst(args);
+        return found ? { ...found, idempotencyKey: found.idempotencyKey ?? undefined } : null;
+      },
+      findMany: async (args) => {
+        const rows = await prisma.campaign.findMany(args);
+        return rows.map((row) => ({ ...row, idempotencyKey: row.idempotencyKey ?? undefined }));
+      },
     },
     humanApproval: {
       create: async (args) => {
