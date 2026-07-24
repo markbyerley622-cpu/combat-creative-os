@@ -8,7 +8,7 @@
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "lint": "next lint",
-    "test": "echo \"no unit tests in apps/dashboard yet — see e2e/ for Playwright\" && exit 0",
+    "test": "vitest run",
     "test:e2e": "playwright test"
   },
   "dependencies": {
@@ -23,6 +23,7 @@
     "@types/react": "^18.3.10",
     "@types/react-dom": "^18.3.0",
     "eslint-config-next": "14.2.16",
-    "typescript": "^5.5.4"
+    "typescript": "^5.5.4",
+    "vitest": "^2.1.1"
   }
 }

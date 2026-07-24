@@ -38,6 +38,21 @@ function buildSignalPayload(
   };
 }
 
+function buildRunStrategyConceptScriptActivityMock() {
+  return vi
+    .fn<
+      (
+        input: activities.RunStrategyConceptScriptInput,
+      ) => Promise<activities.RunStrategyConceptScriptOutput>
+    >()
+    .mockResolvedValue({
+      ok: true,
+      strategyId: randomUUID(),
+      conceptId: randomUUID(),
+      scriptId: randomUUID(),
+    });
+}
+
 function verifiedApprovalFor(payload: GateApprovalSignalPayload): {
   found: true;
   matchesGate: true;
@@ -92,10 +107,12 @@ describe('campaignProductionWorkflow (wired via fake @temporalio/workflow runtim
           input: activities.VerifyHumanApprovalInput,
         ) => Promise<activities.VerifyHumanApprovalOutput>
       >();
+    const runStrategyConceptScriptActivity = buildRunStrategyConceptScriptActivityMock();
 
     setFakeActivityImpls({
       advanceCampaignStageActivity: advanceCampaignStageActivity as never,
       verifyHumanApprovalActivity: verifyHumanApprovalActivity as never,
+      runStrategyConceptScriptActivity: runStrategyConceptScriptActivity as never,
     });
 
     const resultPromise = campaignProductionWorkflow({
@@ -138,6 +155,13 @@ describe('campaignProductionWorkflow (wired via fake @temporalio/workflow runtim
       4,
       expect.objectContaining({ mode: 'GATE_DECISION', gate: 'CONCEPT', decision: 'APPROVED' }),
     );
+    expect(runStrategyConceptScriptActivity).toHaveBeenCalledTimes(1);
+    expect(runStrategyConceptScriptActivity).toHaveBeenCalledWith({
+      workspaceId,
+      campaignId,
+      workflowRunId: 'run-1',
+      revisionAttempt: 1,
+    });
   });
 
   it('routes a CHANGES_REQUESTED CONCEPT decision back before a later approval succeeds', async () => {
@@ -169,10 +193,12 @@ describe('campaignProductionWorkflow (wired via fake @temporalio/workflow runtim
           input: activities.VerifyHumanApprovalInput,
         ) => Promise<activities.VerifyHumanApprovalOutput>
       >();
+    const runStrategyConceptScriptActivity = buildRunStrategyConceptScriptActivityMock();
 
     setFakeActivityImpls({
       advanceCampaignStageActivity: advanceCampaignStageActivity as never,
       verifyHumanApprovalActivity: verifyHumanApprovalActivity as never,
+      runStrategyConceptScriptActivity: runStrategyConceptScriptActivity as never,
     });
 
     const resultPromise = campaignProductionWorkflow({
@@ -209,6 +235,15 @@ describe('campaignProductionWorkflow (wired via fake @temporalio/workflow runtim
 
     expect(result.status).toBe('COMPLETED');
     expect(runQuery<number>('getRevisionCount', 'CONCEPT')).toBe(1);
+    // Runs exactly once — on the revision pass through STRATEGY_REVIEW — with
+    // revisionAttempt derived from the post-CHANGES_REQUESTED revision count.
+    expect(runStrategyConceptScriptActivity).toHaveBeenCalledTimes(1);
+    expect(runStrategyConceptScriptActivity).toHaveBeenCalledWith({
+      workspaceId,
+      campaignId,
+      workflowRunId: 'run-2',
+      revisionAttempt: 2,
+    });
   });
 
   it('escalates to BLOCKED once a gate exceeds maxRevisionsPerGate, without attempting a further transition', async () => {
@@ -238,10 +273,12 @@ describe('campaignProductionWorkflow (wired via fake @temporalio/workflow runtim
           input: activities.VerifyHumanApprovalInput,
         ) => Promise<activities.VerifyHumanApprovalOutput>
       >();
+    const runStrategyConceptScriptActivity = buildRunStrategyConceptScriptActivityMock();
 
     setFakeActivityImpls({
       advanceCampaignStageActivity: advanceCampaignStageActivity as never,
       verifyHumanApprovalActivity: verifyHumanApprovalActivity as never,
+      runStrategyConceptScriptActivity: runStrategyConceptScriptActivity as never,
     });
 
     const resultPromise = campaignProductionWorkflow({
@@ -280,6 +317,9 @@ describe('campaignProductionWorkflow (wired via fake @temporalio/workflow runtim
     expect(result.blockedReason).toBe('Gate CONCEPT exceeded max revisions (1)');
     // The second, bound-exceeding decision must never reach a further advance call.
     expect(advanceCampaignStageActivity).toHaveBeenCalledTimes(4);
+    // Runs exactly once — the single revision pass through STRATEGY_REVIEW before
+    // the second CHANGES_REQUESTED decision escalates to BLOCKED without a further visit.
+    expect(runStrategyConceptScriptActivity).toHaveBeenCalledTimes(1);
   });
 
   it('drops a signal delivered on the wrong channel rather than bypassing the pending gate', async () => {

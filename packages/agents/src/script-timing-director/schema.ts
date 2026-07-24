@@ -13,6 +13,8 @@ export const ScriptTimingDirectorInputSchema = z.object({
   /** The mandatory call-to-action copy every cutdown must end on. */
   callToAction: z.string().min(1),
   frameRate: z.number().int().positive().default(30),
+  /** Set only on a regeneration attempt following a CONCEPT-gate CHANGES_REQUESTED/REJECTED decision — the human reviewer's free-text comments, carried verbatim into this next attempt. */
+  revisionFeedback: z.string().min(1).optional(),
 });
 export type ScriptTimingDirectorInput = z.infer<typeof ScriptTimingDirectorInputSchema>;
 

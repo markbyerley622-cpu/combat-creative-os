@@ -57,8 +57,21 @@ export class InMemoryAgentExecutionStore
       this.campaigns.push(campaign);
       return campaign;
     },
-    findFirst: async ({ where }) =>
-      this.campaigns.find((c) => c.id === where.id && c.workspaceId === where.workspaceId) ?? null,
+    findFirst: async ({ where }) => {
+      if ('id' in where) {
+        return (
+          this.campaigns.find((c) => c.id === where.id && c.workspaceId === where.workspaceId) ??
+          null
+        );
+      }
+      return (
+        this.campaigns.find(
+          (c) => c.workspaceId === where.workspaceId && c.idempotencyKey === where.idempotencyKey,
+        ) ?? null
+      );
+    },
+    findMany: async ({ where }) =>
+      this.campaigns.filter((c) => c.workspaceId === where.workspaceId),
   };
 
   budgetPolicy: BudgetDataSource['budgetPolicy'] = {

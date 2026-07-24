@@ -11,6 +11,8 @@ export const CampaignStrategistInputSchema = z.object({
   mandatories: z.array(z.string().min(1)).default([]),
   /** Prior campaigns' distilled insights from performance-analyst, if any. */
   priorLearnings: z.array(z.string().min(1)).default([]),
+  /** Set only on a regeneration attempt following a CONCEPT-gate CHANGES_REQUESTED/REJECTED decision — the human reviewer's free-text comments, carried verbatim into this next attempt. */
+  revisionFeedback: z.string().min(1).optional(),
 });
 export type CampaignStrategistInput = z.infer<typeof CampaignStrategistInputSchema>;
 

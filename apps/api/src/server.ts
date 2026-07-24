@@ -1,9 +1,12 @@
 import Fastify from 'fastify';
+import cors from '@fastify/cors';
 import type { Logger } from '@combat/observability';
 import { createPrismaClient, type PrismaClient } from '@combat/database';
 import type { WorkflowClient } from '@temporalio/client';
 import { createApprovalDatabase, type ApprovalDatabase } from './approval-database';
 import { registerApprovalRoutes } from './approval-routes';
+import { createCampaignDatabase, type CampaignDatabase } from './campaign-database';
+import { registerCampaignRoutes } from './campaign-routes';
 import { createWorkflowClient, type TemporalEnv } from './temporal-client';
 
 export interface BuildServerOptions {
@@ -11,6 +14,8 @@ export interface BuildServerOptions {
   prisma?: PrismaClient;
   /** Overrides the `*DataSource` adapter the approval routes use — tests inject an in-memory fake here. */
   approvalDb?: ApprovalDatabase;
+  /** Overrides the M4 campaign-intake routes' `*DataSource` adapter — tests inject an in-memory fake here. */
+  campaignDb?: CampaignDatabase;
   workflowClient?: WorkflowClient;
   temporalEnv?: TemporalEnv;
 }
@@ -29,10 +34,18 @@ export function buildServer({
   logger,
   prisma = createPrismaClient(),
   approvalDb = createApprovalDatabase(prisma),
+  campaignDb = createCampaignDatabase(prisma),
   temporalEnv = { TEMPORAL_ADDRESS: 'localhost:7233', TEMPORAL_NAMESPACE: 'default' },
   workflowClient = createWorkflowClient(temporalEnv),
 }: BuildServerOptions) {
   const app = Fastify({ logger });
+
+  // apps/dashboard runs on a different origin (port) than apps/api — every
+  // route in this file exists for it to call. Permissive for now (no
+  // production deployment target exists yet, single-workspace local-dev
+  // MVP per docs/architecture.md §7.1 item 5); scope this down once a real
+  // deployed dashboard origin exists to restrict to.
+  app.register(cors, { origin: true });
 
   // Liveness: the process is up and serving requests. Does not depend on any
   // downstream system — apps/dashboard and infra probes should hit this to
@@ -60,6 +73,7 @@ export function buildServer({
   });
 
   registerApprovalRoutes(app, { db: approvalDb, workflowClient });
+  registerCampaignRoutes(app, { db: campaignDb, workflowClient });
 
   return app;
 }

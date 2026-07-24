@@ -27,6 +27,7 @@ export interface VerifiedHumanApproval {
   readonly decision: ApprovalDecision;
   readonly decidedByUserId: string;
   readonly repairTarget?: CampaignStage;
+  readonly comments?: string;
   readonly decidedAt: string;
 }
 
@@ -66,6 +67,7 @@ export function createVerifyHumanApprovalActivity(
         decision: approval.decision,
         decidedByUserId: approval.decidedByUserId,
         repairTarget: approval.repairTarget,
+        comments: approval.comments,
         decidedAt: approval.decidedAt.toISOString(),
       },
     };

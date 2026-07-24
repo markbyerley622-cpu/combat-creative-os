@@ -11,11 +11,24 @@ import type {
   BudgetPolicyRecord,
 } from '../budget-repository';
 import type { CampaignDataSource, CampaignRecord } from '../campaign-repository';
+import type { CampaignBriefDataSource, CampaignBriefRecord } from '../campaign-brief-repository';
+import type { StrategyDataSource, StrategyRecord } from '../strategy-repository';
+import type {
+  CreativeConceptDataSource,
+  CreativeConceptRecord,
+} from '../creative-concept-repository';
+import type {
+  ScriptDataSource,
+  ScriptRecord,
+  ShotDataSource,
+  ShotRecord,
+} from '../script-repository';
 import type {
   CampaignTransitionAuditDataSource,
   CampaignTransitionAuditRecord,
 } from '../campaign-transition-service';
 import type { HumanApprovalDataSource, HumanApprovalRecord } from '../human-approval-repository';
+import type { MembershipDataSource, MembershipRecord } from '../membership-repository';
 import type {
   GenerationPromptRecord,
   PromptDataSource,
@@ -68,15 +81,29 @@ export class InMemoryCampaignStore
     BudgetDataSource,
     AssetDataSource,
     PromptDataSource,
-    AgentInvocationDataSource
+    AgentInvocationDataSource,
+    CampaignBriefDataSource,
+    StrategyDataSource,
+    CreativeConceptDataSource,
+    ScriptDataSource,
+    ShotDataSource,
+    MembershipDataSource
 {
   campaigns: CampaignRecord[] = [];
   audits: CampaignTransitionAuditRecord[] = [];
   approvals: HumanApprovalRecord[] = [];
+  memberships: MembershipRecord[] = [];
+  /** Legacy minimal fixtures — direct-pushed by campaign-transition-service.test.ts, read only through transition-facts.ts's narrow (version/acceptedAt-only) consumption. */
   briefs: CampaignBriefFactRow[] = [];
   concepts: CreativeConceptFactRow[] = [];
   scripts: ScriptFactRow[] = [];
   shots: ShotFactRow[] = [];
+  /** Full rows written via the M4 repositories' `create*` functions (campaign-brief-repository.ts etc.) — kept separate from the legacy arrays above so neither set of tests has to know about the other's minimal/full shape. */
+  strategies: StrategyRecord[] = [];
+  campaignBriefRecords: CampaignBriefRecord[] = [];
+  creativeConceptRecords: CreativeConceptRecord[] = [];
+  scriptRecords: ScriptRecord[] = [];
+  shotRecords: ShotRecord[] = [];
   generationPrompts: (GenerationPromptFactRow & Partial<GenerationPromptRecord>)[] = [];
   generationCandidates: GenerationCandidateFactRow[] = [];
   qualityAssessments: QualityAssessmentFactRow[] = [];
@@ -131,10 +158,20 @@ export class InMemoryCampaignStore
       return campaign;
     },
     findFirst: async ({ where }) => {
+      if ('id' in where) {
+        return (
+          this.campaigns.find((c) => c.id === where.id && c.workspaceId === where.workspaceId) ??
+          null
+        );
+      }
       return (
-        this.campaigns.find((c) => c.id === where.id && c.workspaceId === where.workspaceId) ?? null
+        this.campaigns.find(
+          (c) => c.workspaceId === where.workspaceId && c.idempotencyKey === where.idempotencyKey,
+        ) ?? null
       );
     },
+    findMany: async ({ where }) =>
+      this.campaigns.filter((c) => c.workspaceId === where.workspaceId),
     updateMany: async ({ where, data }) => {
       const match = this.campaigns.find(
         (c) =>
@@ -191,17 +228,97 @@ export class InMemoryCampaignStore
     },
   };
 
-  campaignBrief: TransitionFactsDataSource['campaignBrief'] = {
-    findMany: async ({ where }) => this.briefs.filter((b) => b.campaignId === where.campaignId),
+  membership: MembershipDataSource['membership'] = {
+    findFirst: async ({ where }) =>
+      this.memberships.find((m) => m.id === where.id && m.workspaceId === where.workspaceId) ??
+      null,
+    findMany: async ({ where }) =>
+      this.memberships.filter((m) => m.workspaceId === where.workspaceId),
+    create: async ({ data }) => {
+      const membership: MembershipRecord = { id: randomUUID(), createdAt: new Date(), ...data };
+      this.memberships.push(membership);
+      return membership;
+    },
   };
-  creativeConcept: TransitionFactsDataSource['creativeConcept'] = {
-    findMany: async ({ where }) => this.concepts.filter((c) => c.campaignId === where.campaignId),
+
+  campaignBrief: TransitionFactsDataSource['campaignBrief'] &
+    CampaignBriefDataSource['campaignBrief'] = {
+    create: async ({ data }) => {
+      const brief: CampaignBriefRecord = { id: randomUUID(), createdAt: new Date(), ...data };
+      this.campaignBriefRecords.push(brief);
+      return brief;
+    },
+    findMany: async ({ where }) => [
+      ...this.campaignBriefRecords.filter((b) => b.campaignId === where.campaignId),
+      // Legacy fixtures only populate CampaignBriefFactRow's 4 fields and are only ever
+      // read back through transition-facts.ts's narrow (version/acceptedAt-only)
+      // consumption — this cast is safe in practice, never exercised by M4 code paths.
+      ...(this.briefs.filter(
+        (b) => b.campaignId === where.campaignId,
+      ) as unknown as CampaignBriefRecord[]),
+    ],
   };
-  script: TransitionFactsDataSource['script'] = {
-    findMany: async ({ where }) => this.scripts.filter((s) => s.campaignId === where.campaignId),
+  strategy: StrategyDataSource['strategy'] = {
+    create: async ({ data }) => {
+      const strategy: StrategyRecord = { id: randomUUID(), createdAt: new Date(), ...data };
+      this.strategies.push(strategy);
+      return strategy;
+    },
+    findMany: async ({ where }) =>
+      this.strategies.filter(
+        (s) => s.campaignId === where.campaignId && s.workspaceId === where.workspaceId,
+      ),
   };
-  shot: TransitionFactsDataSource['shot'] = {
-    findMany: async ({ where }) => this.shots.filter((s) => where.scriptId.in.includes(s.scriptId)),
+  creativeConcept: TransitionFactsDataSource['creativeConcept'] &
+    CreativeConceptDataSource['creativeConcept'] = {
+    create: async ({ data }) => {
+      const concept: CreativeConceptRecord = { id: randomUUID(), createdAt: new Date(), ...data };
+      this.creativeConceptRecords.push(concept);
+      return concept;
+    },
+    findMany: async ({ where }) => [
+      ...this.creativeConceptRecords.filter((c) => c.campaignId === where.campaignId),
+      // Same rationale as campaignBrief.findMany above.
+      ...(this.concepts.filter(
+        (c) => c.campaignId === where.campaignId,
+      ) as unknown as CreativeConceptRecord[]),
+    ],
+  };
+  script: TransitionFactsDataSource['script'] & ScriptDataSource['script'] = {
+    create: async ({ data }) => {
+      const script: ScriptRecord = { id: randomUUID(), createdAt: new Date(), ...data };
+      this.scriptRecords.push(script);
+      return script;
+    },
+    findMany: async ({ where }) => [
+      ...this.scriptRecords.filter((s) => s.campaignId === where.campaignId),
+      // Same rationale as campaignBrief.findMany above.
+      ...(this.scripts.filter(
+        (s) => s.campaignId === where.campaignId,
+      ) as unknown as ScriptRecord[]),
+    ],
+  };
+  shot: TransitionFactsDataSource['shot'] & ShotDataSource['shot'] = {
+    create: async ({ data }) => {
+      const now = new Date();
+      const shot: ShotRecord = { id: randomUUID(), createdAt: now, updatedAt: now, ...data };
+      this.shotRecords.push(shot);
+      return shot;
+    },
+    findMany: async ({ where }) => [
+      ...this.shotRecords.filter((s) => where.scriptId.in.includes(s.scriptId)),
+      // Same rationale as campaignBrief.findMany above.
+      ...(this.shots.filter((s) =>
+        where.scriptId.in.includes(s.scriptId),
+      ) as unknown as ShotRecord[]),
+    ],
+    update: async ({ where, data }) => {
+      const shot = this.shotRecords.find((s) => s.id === where.id);
+      if (!shot) throw new Error(`shot ${where.id} not found`);
+      shot.dependsOnShotIds = data.dependsOnShotIds;
+      shot.updatedAt = new Date();
+      return shot;
+    },
   };
   generationPrompt: TransitionFactsDataSource['generationPrompt'] &
     PromptDataSource['generationPrompt'] = {

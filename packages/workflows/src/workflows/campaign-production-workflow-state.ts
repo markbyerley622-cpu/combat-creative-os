@@ -63,6 +63,31 @@ export function applyAutoForwardResult(
   return { ...state, status: 'BLOCKED', blockedReason: describeFailure(result) };
 }
 
+/**
+ * Applies the result of the STRATEGY_REVIEW artifact-generation Activity
+ * (`runStrategyConceptScriptActivity`), run before every AUTO_FORWARD
+ * attempt out of STRATEGY_REVIEW. Success leaves state unchanged — the
+ * caller proceeds to its normal `advanceCampaignStageActivity` call, which
+ * will now find `conceptDrafted` true. Failure escalates straight to
+ * BLOCKED, matching every other Activity-failure path in this reducer
+ * (CLAUDE.md: "escalate to a human state rather than retrying forever").
+ */
+export function applyRunStrategyConceptScriptResult(
+  state: CampaignProductionWorkflowState,
+  result: activities.RunStrategyConceptScriptOutput,
+): CampaignProductionWorkflowState {
+  if (result.ok) {
+    return state;
+  }
+  const detail =
+    result.reason === 'AGENT_FAILED' ? `${result.agentName}: ${result.detail}` : result.detail;
+  return {
+    ...state,
+    status: 'BLOCKED',
+    blockedReason: `STRATEGY_REVIEW artifact generation failed (${result.reason}): ${detail}`,
+  };
+}
+
 export type GateSignalDecision =
   { readonly kind: 'IGNORE' } | { readonly kind: 'VERIFY'; readonly approvalId: string };
 

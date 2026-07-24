@@ -263,17 +263,25 @@ enum EditTrackType {
 /// version), which is what makes concurrent transition attempts safe without
 /// a Postgres advisory lock (see campaign-transition-service.ts).
 model Campaign {
-  id           String        @id @default(uuid())
-  workspaceId  String
-  name         String
-  currentStage CampaignStage @default(DRAFT)
-  version      Int           @default(0)
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
+  id             String        @id @default(uuid())
+  workspaceId    String
+  name           String
+  /// Caller-supplied dedup key for POST /campaigns (M4) — same idempotency-key
+  /// convention used elsewhere (AgentInvocation, CampaignTransitionAudit,
+  /// BudgetLedgerEntry) rather than a new mechanism. Nullable (unlike those
+  /// tables) so every pre-M4 test fixture that constructs a CampaignRecord
+  /// without one stays valid — Postgres treats each NULL as distinct under
+  /// a unique index, so this only enforces dedup when a caller supplies one.
+  idempotencyKey String?
+  currentStage   CampaignStage @default(DRAFT)
+  version        Int           @default(0)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   briefs               CampaignBrief[]
+  strategies           Strategy[]
   concepts             CreativeConcept[]
   scripts              Script[]
   timelines            Timeline[]
@@ -285,26 +293,48 @@ model Campaign {
   transitionAudits     CampaignTransitionAudit[]
   agentInvocations     AgentInvocation[]
 
+  @@unique([workspaceId, idempotencyKey])
   @@index([workspaceId])
   @@map("campaigns")
 }
 
 /// Versioned and immutable once accepted (`acceptedAt` set) — a revision is a
 /// new row with an incremented `version`, never a mutation of an existing one.
+// M4: the full campaign-brief field set the dashboard's brief editor
+// collects — see packages/domain's CampaignBriefContentSchema, the
+// single source of truth this model's fields mirror field-for-field.
+// Unmigrated (no prisma/migrations directory exists yet, see
+// docs/architecture.md §7.1 item 11), so these fields were extended in
+// place for M4 rather than added via a follow-up migration.
 model CampaignBrief {
-  id               String             @id @default(uuid())
-  workspaceId      String
-  campaignId       String
-  version          Int
-  brandName        String
-  objective        String
-  targetPlatforms  DeliveryPlatform[]
-  durationsSeconds Int[]
-  budgetCents      Int
-  keyMessages      String[]
-  mandatories      String[]
-  acceptedAt       DateTime?
-  createdAt        DateTime           @default(now())
+  id                 String             @id @default(uuid())
+  workspaceId        String
+  campaignId         String
+  version            Int
+  campaignName       String
+  productName        String
+  productDescription String
+  objective          String
+  targetAudience     String
+  customerProblem    String
+  valueProposition   String
+  productFeatures    String[]
+  targetPlatforms    DeliveryPlatform[]
+  aspectRatios       String[]
+  durationsSeconds   Int[]
+  brandVoice         String
+  visualDirection    String
+  requiredMessaging  String[]
+  callToAction       String
+  references         String[]
+  assetReferences    String[]
+  prohibitedClaims   String[]
+  budgetCents        Int
+  deadline           DateTime?
+  locale             String             @default("en-US")
+  notes              String?
+  acceptedAt         DateTime?
+  createdAt          DateTime           @default(now())
 
   campaign         Campaign           @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   audienceProfiles AudienceProfile[]
@@ -312,6 +342,30 @@ model CampaignBrief {
   @@unique([campaignId, version])
   @@index([workspaceId])
   @@map("campaign_briefs")
+}
+
+// M4: Campaign Strategist's output, persisted as an immutable versioned
+// row (packages/domain's StrategySchema). `audienceProfile` is stored as
+// JSON rather than reusing the AudienceProfile model above — that model is
+// FK-scoped to CampaignBrief, a different aggregate, and isn't guaranteed
+// shape-identical to what the agent returns.
+model Strategy {
+  id                    String   @id @default(uuid())
+  workspaceId           String
+  campaignId            String
+  version               Int
+  positioning           String
+  targetAudienceSummary String
+  keyMessages           String[]
+  toneGuidelines        String[]
+  audienceProfile       Json
+  createdAt             DateTime @default(now())
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, version])
+  @@index([workspaceId])
+  @@map("strategies")
 }
 
 model AudienceProfile {
@@ -389,6 +443,17 @@ model Script {
   @@map("scripts")
 }
 
+// Script & Timing Director's per-shot narrative-beat classification
+// (packages/agents/src/script-timing-director/schema.ts's ShotBeatSchema;
+// packages/domain mirrors these same four values as ShotBeatSchema so the
+// domain package doesn't need to depend on packages/agents).
+enum ShotBeat {
+  HOOK
+  PROMISE
+  FEATURE
+  CTA
+}
+
 model Shot {
   id               String     @id @default(uuid())
   workspaceId      String
@@ -396,6 +461,7 @@ model Shot {
   index            Int
   description      String
   durationFrames   Int
+  beat             ShotBeat
   status           ShotStatus @default(PENDING)
   dependsOnShotIds String[]
   createdAt        DateTime   @default(now())

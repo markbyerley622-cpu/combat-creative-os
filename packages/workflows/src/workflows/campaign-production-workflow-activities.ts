@@ -22,4 +22,14 @@ export interface CampaignProductionActivities {
   verifyHumanApprovalActivity(
     input: activities.VerifyHumanApprovalInput,
   ): Promise<activities.VerifyHumanApprovalOutput>;
+  /**
+   * M4: sequences Campaign Strategist -> Creative Director -> Script &
+   * Timing Director for one STRATEGY_REVIEW visit, persisting each output as
+   * an immutable versioned row. See run-strategy-concept-script-activity.ts's
+   * doc comment for why this is one Activity rather than six separate
+   * proxied calls from this workflow file.
+   */
+  runStrategyConceptScriptActivity(
+    input: activities.RunStrategyConceptScriptInput,
+  ): Promise<activities.RunStrategyConceptScriptOutput>;
 }

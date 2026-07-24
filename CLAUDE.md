@@ -4,20 +4,23 @@ This file is the operating contract for anyone (human or agent) working in
 this repository. It is deliberately short — for the full design rationale
 see `docs/architecture.md` and `docs/adr/`.
 
-Current milestone: **M3, workflow skeleton + control plane, done** —
-`CampaignProductionWorkflow` (`packages/workflows/src/workflows`) drives the
-full 20-stage lifecycle through the real `advanceCampaignStageActivity`/
-`verifyHumanApprovalActivity`, and `apps/api` exposes the three approval
-endpoints (RBAC- and workspace-scoped, persistence-before-signal) — see
-`docs/architecture.md` §7.1 item 11 for what shipped and three deliberate,
-documented interim narrowings (no real caller authentication yet; a
-deterministic `campaign-production:${campaignId}` workflow-ID convention in
-place of a `WorkflowRun` mapping table; no `TestWorkflowEnvironment` coverage,
-covered instead by a fake-runtime wiring suite). Nothing yet calls
-`client.workflow.start(campaignProductionWorkflow, ...)` for a real campaign,
-and no real external provider integration (Veo, Runway, Figma, aerender,
-Frame.io) beyond Claude/Anthropic is implemented — see `docs/architecture.md`
-§7.1/§8. Anthropic is reachable via `@combat/providers`'s
+Current milestone: **M4, text-agent chain to Concept Approval, done** —
+`CampaignProductionWorkflow` now calls `runStrategyConceptScriptActivity`
+(Campaign Strategist → Creative Director → Script & Timing Director) on
+every `STRATEGY_REVIEW` visit, ahead of the unmoved `CONCEPT` gate;
+`apps/api` gained campaign/brief-intake/workflow-start/status/retrieval
+endpoints; `apps/dashboard` gained a full brief-intake and Concept Review
+UI calling `apps/api` exclusively. See `docs/architecture.md` §8's M4 entry
+for the full accounting, including why all three agents run before the
+gate (not split across `STRATEGY_REVIEW`/`SCRIPT_REVIEW`) and the expected
+`BLOCKED`-at-`ASSET_COLLECTION` stopping point past this milestone's scope.
+Still no real caller authentication (a dev-only `workspaceId`/`userId`
+picker in `apps/dashboard/src/lib/session.tsx` stands in), no real external
+provider integration (Veo, Runway, Figma, aerender, Frame.io) beyond
+Claude/Anthropic, and no live-Postgres/Temporal environment in this
+session — `apps/api/src/dev-fake-server.ts` (in-memory-backed) is what both
+`apps/api`'s own tests and `apps/dashboard`'s Playwright suite run against
+instead. Anthropic is reachable via `@combat/providers`'s
 `ClaudeReasoningProvider`, but only when explicitly configured
 (`REASONING_PROVIDER=claude` + `ANTHROPIC_API_KEY`); the default `mock`
 provider is what every automated test uses.

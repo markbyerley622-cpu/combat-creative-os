@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ShotStatusSchema } from './shared-enums';
+import { ShotBeatSchema, ShotStatusSchema } from './shared-enums';
 
 export const ShotSchema = z.object({
   id: z.string().uuid(),
@@ -8,6 +8,7 @@ export const ShotSchema = z.object({
   index: z.number().int().nonnegative(),
   description: z.string().min(1),
   durationFrames: z.number().int().positive(),
+  beat: ShotBeatSchema,
   status: ShotStatusSchema,
   dependsOnShotIds: z.array(z.string().uuid()).default([]),
   createdAt: z.date(),

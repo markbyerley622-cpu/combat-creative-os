@@ -1,9 +1,12 @@
 import { test, expect } from '@playwright/test';
 
-test('homepage renders the foundation placeholder', async ({ page }) => {
+test('homepage renders the development-identity gate for a first-time visitor', async ({
+  page,
+}) => {
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Combat Creative OS' })).toBeVisible();
-  await expect(page.getByText('apps/api')).toBeVisible();
+  await expect(page.getByLabel('Workspace ID')).toBeVisible();
+  await expect(page.getByLabel('User ID (membership)')).toBeVisible();
 });
 
 test('frontend liveness endpoint responds', async ({ request }) => {

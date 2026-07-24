@@ -23,6 +23,7 @@ export function createApprovalDatabase(prisma: PrismaClient): ApprovalDatabase {
     campaign: {
       create: (args) => prisma.campaign.create(args),
       findFirst: (args) => prisma.campaign.findFirst(args),
+      findMany: (args) => prisma.campaign.findMany(args),
     },
     humanApproval: {
       create: async (args) => {

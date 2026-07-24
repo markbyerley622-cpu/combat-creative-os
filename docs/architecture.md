@@ -222,6 +222,11 @@ Permission matrix (illustrative — enforced as an explicit table in
 | View performance / reporting     |      ✓      |         ✓         |          ✓          |    ✓     |    ✓    |
 | Manage workspace membership      |      ✓      |                   |                     |          |         |
 
+**M4 addition (2026-07-25):** `MANAGE_CAMPAIGNS` (create campaign, save/submit
+a brief, start the production workflow) — not in this illustrative matrix,
+which predates campaign intake. Granted to `OWNER_ADMIN` and
+`CREATIVE_DIRECTOR`. See §8's M4 entry and `packages/domain/src/roles.ts`.
+
 **Governing principle:** every permission check happens in `apps/api` (and, for
 inbound provider events, in `apps/webhook-receiver`'s narrow signal allowlist)
 before a command is accepted. `apps/dashboard` may hide controls a role can't use,
@@ -943,12 +948,65 @@ reasoning.claude.ts`) is unit-tested with an injected fake client instead,
   request scoped to the wrong workspace 404s rather than leaking existence, the
   `HumanApproval` row is persisted before the signal fires, and an exact retry
   doesn't create a second row.
-- **M4 — Text-agent chain to Concept Approval.** Creative Director, Script &
-  Timing Director wired in; `apps/dashboard` gets brief intake + Concept Approval
-  UI, calling `apps/api` exclusively. _Test:_ end-to-end run through
-  `CONCEPT_APPROVAL` with mock providers, Playwright test on the approval UI
-  confirming a hidden-but-forged request from a non-approver role is still
-  rejected server-side.
+- **M4 — Text-agent chain to Concept Approval. Done (2026-07-25), with the
+  interim decisions this item records.** `CampaignProductionWorkflow` now
+  calls `runStrategyConceptScriptActivity`
+  (`packages/workflows/src/activities/run-strategy-concept-script-activity.ts`)
+  on every `STRATEGY_REVIEW` visit — the Activity ADR-0004 left unwired.
+  It sequences Campaign Strategist → Creative Director → Script & Timing
+  Director, each call going through the same `executeSpecialistAgentActivity`
+  production code uses, persisting Strategy/CreativeConcept/Script+Shot rows
+  as immutable versions before the workflow's existing auto-forward attempt.
+  **All three agents run within `STRATEGY_REVIEW`, ahead of the `CONCEPT`
+  gate** (still exactly the documented `CONCEPT_REVIEW -> SCRIPT_REVIEW`
+  edge, §4.2/domain-model.md §4.2 — unmoved) so the Concept Review screen can
+  show strategy, concept, and script together; this means the first
+  `SCRIPT_REVIEW -> ASSET_COLLECTION` auto-forward after approval succeeds
+  immediately (script already drafted) and the workflow proceeds to
+  `ASSET_COLLECTION`, where it stops in `BLOCKED` — expected, since Asset
+  Manager remains an unimplemented placeholder (§7.1 item 9) until M5, not a
+  defect. A revision loop (`CHANGES_REQUESTED`/`REJECTED` at `CONCEPT`)
+  re-runs all three agents with `revisionAttempt = revisionCounts.CONCEPT +
+1` as both the new artifact `version` and the idempotency-key suffix, and
+  the human reviewer's `comments` on the latest `CONCEPT` `HumanApproval` row
+  are read back in as each agent's new optional `revisionFeedback` input
+  field. `apps/api` gained `POST /workspaces/:workspaceId/campaigns`,
+  `.../brief/draft`, `.../brief/submit`, `.../workflow/start` (deterministic
+  ID, duplicate-`WorkflowExecutionAlreadyStartedError` treated as success),
+  and `GET .../status`, `.../strategy`, `.../concept`, `.../script`,
+  `.../brief`, `.../approvals/concept/state` — all RBAC- and
+  workspace-scoped like the M3 approval endpoints, using a new
+  `MANAGE_CAMPAIGNS` permission (additive to §2.2's matrix — granted to
+  `OWNER_ADMIN` and `CREATIVE_DIRECTOR`) for the write routes and plain
+  workspace membership for the read routes. `apps/api` also gained
+  permissive CORS (`@fastify/cors`, `origin: true`) since `apps/dashboard`
+  now makes real cross-origin browser requests to it — scope this down once
+  a real deployed dashboard origin exists. `apps/dashboard` gained campaign
+  list/create, a full brief editor (draft save + strict-schema submit), a
+  production-progress screen, and the Concept Review screen (strategy +
+  concept + timed script + approve/request-revision/reject, revision
+  comments required on a non-approve decision) — every screen calls
+  `apps/api` only, per a new `lib/api-client.ts`. There is still no
+  session/auth layer (§7.1 item 11's narrowing continues to apply): a
+  `lib/session.tsx` dev-only identity picker collects a `workspaceId`/
+  `userId` once per browser and threads it into every request exactly like
+  a real session would — explicitly not production authentication.
+  _Test:_ 6 focused tests on `runStrategyConceptScriptActivity` (the 3-agent
+  chain, idempotent retry, missing-brief, a second revision version,
+  budget-exceeded, schema-invalid — all mock-provider-only, no paid calls),
+  the `campaign-production-workflow` wiring suite extended to assert the new
+  Activity is called with the right `revisionAttempt` at the right points,
+  16 `apps/api` route tests (idempotent creation, workspace isolation,
+  duplicate-submission rejection, duplicate-start protection, RBAC on both
+  write and read routes), dashboard unit tests for the brief-editor's
+  pure form transforms and the API client's error handling, and a Playwright
+  suite exercising the real Concept Review screen — including the required
+  test that a forged, well-formed `POST .../approvals/concept` from a
+  `REVIEWER` role (lacking `APPROVE_CONCEPT`) is rejected server-side with
+  403 — against a real Fastify server backed by in-memory fakes
+  (`apps/api/src/dev-fake-server.ts`), since this environment has no live
+  Postgres/Temporal to run a fully real stack against (§7.1 item 11a's same
+  constraint, applied here to `apps/dashboard`'s e2e suite).
 - **M5 — Storage & media pipeline.** `packages/providers/storage` (MinIO),
   `packages/media` (ffmpeg probe/thumbnail/proxy). _Test:_ unit tests against
   local MinIO container and fixture video files, independent of any workflow.

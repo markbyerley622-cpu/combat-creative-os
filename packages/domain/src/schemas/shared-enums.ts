@@ -136,6 +136,21 @@ export const CREATIVE_VARIANT_STATUSES = ['PENDING', 'RENDERING', 'READY', 'FAIL
 export const CreativeVariantStatusSchema = z.enum(CREATIVE_VARIANT_STATUSES);
 export type CreativeVariantStatus = z.infer<typeof CreativeVariantStatusSchema>;
 
+/** Vertical/square/horizontal crop targets a campaign brief can request (M4). */
+export const ASPECT_RATIOS = ['9:16', '1:1', '4:5', '16:9'] as const;
+export const AspectRatioSchema = z.enum(ASPECT_RATIOS);
+export type AspectRatio = z.infer<typeof AspectRatioSchema>;
+
+/**
+ * Script & Timing Director's per-shot narrative-beat classification
+ * (packages/agents/src/script-timing-director/schema.ts's `ShotBeatSchema`,
+ * mirrored here so `packages/domain`'s `Shot`/database layer can persist it
+ * without the domain package depending on `packages/agents`).
+ */
+export const SHOT_BEATS = ['HOOK', 'PROMISE', 'FEATURE', 'CTA'] as const;
+export const ShotBeatSchema = z.enum(SHOT_BEATS);
+export type ShotBeat = z.infer<typeof ShotBeatSchema>;
+
 export const TRANSITION_AUDIT_RESULTS = [
   'APPLIED',
   'REJECTED_INVALID_TRANSITION',

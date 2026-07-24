@@ -5,6 +5,7 @@ import {
   applyAutoForwardResult,
   applyBoundExceeded,
   applyGateAdvanceResult,
+  applyRunStrategyConceptScriptResult,
   buildAutoForwardIdempotencyKey,
   buildGateIdempotencyKey,
   decideGateSignal,
@@ -73,6 +74,45 @@ describe('applyAutoForwardResult', () => {
     });
     expect(next.status).toBe('BLOCKED');
     expect(next.blockedReason).toBe('MISSING_PREREQUISITE: briefAccepted is false');
+  });
+});
+
+describe('applyRunStrategyConceptScriptResult', () => {
+  const base = initialCampaignProductionState('STRATEGY_REVIEW');
+
+  it('leaves state unchanged on success, so the caller proceeds to its normal auto-forward attempt', () => {
+    const next = applyRunStrategyConceptScriptResult(base, {
+      ok: true,
+      strategyId: randomUUID(),
+      conceptId: randomUUID(),
+      scriptId: randomUUID(),
+    });
+    expect(next).toBe(base);
+  });
+
+  it('escalates to BLOCKED with the failing agent name on AGENT_FAILED', () => {
+    const next = applyRunStrategyConceptScriptResult(base, {
+      ok: false,
+      reason: 'AGENT_FAILED',
+      agentName: 'creative-director',
+      detail: 'schema validation failed twice',
+    });
+    expect(next.status).toBe('BLOCKED');
+    expect(next.blockedReason).toBe(
+      'STRATEGY_REVIEW artifact generation failed (AGENT_FAILED): creative-director: schema validation failed twice',
+    );
+  });
+
+  it('escalates to BLOCKED on BRIEF_NOT_FOUND', () => {
+    const next = applyRunStrategyConceptScriptResult(base, {
+      ok: false,
+      reason: 'BRIEF_NOT_FOUND',
+      detail: 'Campaign c1 has no accepted CampaignBrief',
+    });
+    expect(next.status).toBe('BLOCKED');
+    expect(next.blockedReason).toBe(
+      'STRATEGY_REVIEW artifact generation failed (BRIEF_NOT_FOUND): Campaign c1 has no accepted CampaignBrief',
+    );
   });
 });
 

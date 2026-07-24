@@ -18,6 +18,7 @@ import {
   applyAutoForwardResult,
   applyBoundExceeded,
   applyGateAdvanceResult,
+  applyRunStrategyConceptScriptResult,
   buildAutoForwardIdempotencyKey,
   buildGateIdempotencyKey,
   decideGateSignal,
@@ -35,15 +36,21 @@ import {
  * campaign-production-workflow-state.ts's pure functions — this file is only
  * the Temporal-SDK plumbing around them.
  */
-const { advanceCampaignStageActivity, verifyHumanApprovalActivity } =
-  proxyActivities<CampaignProductionActivities>({
-    startToCloseTimeout: '30 seconds',
-    retry: {
-      initialInterval: '1 second',
-      backoffCoefficient: 2,
-      maximumAttempts: 5,
-    },
-  });
+const {
+  advanceCampaignStageActivity,
+  verifyHumanApprovalActivity,
+  runStrategyConceptScriptActivity,
+} = proxyActivities<CampaignProductionActivities>({
+  // Longer than the other two activities' effective budget: this one makes
+  // three sequential reasoning-provider calls plus their persistence writes,
+  // not one.
+  startToCloseTimeout: '2 minutes',
+  retry: {
+    initialInterval: '1 second',
+    backoffCoefficient: 2,
+    maximumAttempts: 5,
+  },
+});
 
 export async function campaignProductionWorkflow(
   input: CampaignProductionWorkflowInput,
@@ -70,6 +77,30 @@ export async function campaignProductionWorkflow(
 
   while (state.status === 'RUNNING' || state.status === 'AWAITING_APPROVAL') {
     if (state.status === 'RUNNING') {
+      // M4: STRATEGY_REVIEW is where the text-agent chain runs — Strategist,
+      // Creative Director, and Script & Timing Director all execute here
+      // (ahead of the CONCEPT gate) so the Concept Review screen can show
+      // strategy + concept + script together. This does not move or rename
+      // the CONCEPT gate itself, which remains exactly the documented
+      // CONCEPT_REVIEW -> SCRIPT_REVIEW edge (docs/domain-model.md §4.2) —
+      // it only decides when, within STRATEGY_REVIEW's dwell time, the
+      // agents run relative to the auto-forward attempt below. Runs on
+      // every visit (including a revision loop back from CONCEPT_REVIEW),
+      // since `state.revisionCounts.CONCEPT` is what makes each visit
+      // produce a genuinely new version rather than replaying a stale one.
+      if (state.currentStage === 'STRATEGY_REVIEW') {
+        const agentResult = await runStrategyConceptScriptActivity({
+          workspaceId: input.workspaceId,
+          campaignId: input.campaignId,
+          workflowRunId: input.workflowRunId,
+          revisionAttempt: state.revisionCounts.CONCEPT + 1,
+        });
+        state = applyRunStrategyConceptScriptResult(state, agentResult);
+        if (state.status !== 'RUNNING') {
+          continue;
+        }
+      }
+
       autoForwardAttempt += 1;
       const result = await advanceCampaignStageActivity({
         mode: 'AUTO_FORWARD',

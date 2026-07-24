@@ -1,5 +1,6 @@
 export * from './shared-enums';
 export * from './campaign';
+export * from './strategy';
 export * from './audience-profile';
 export * from './creative-concept';
 export * from './script';
