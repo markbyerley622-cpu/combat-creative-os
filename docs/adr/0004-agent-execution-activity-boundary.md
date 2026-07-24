@@ -20,7 +20,7 @@ and persists the outcome. It does **not** build `CampaignProductionWorkflow`
 or sequence any agent inside a real workflow — that remains M3/M4's
 sequencing work, out of this change's scope. This is the same kind of
 explicit, documented milestone-order exception ADR-0003 made, one layer up:
-the execution *boundary* now exists ahead of the full workflow that will
+the execution _boundary_ now exists ahead of the full workflow that will
 call it stage-by-stage.
 
 ## Decisions
@@ -33,7 +33,7 @@ call it stage-by-stage.
    `WorkflowRun` table exists in this schema (architecture.md's ER diagram's
    `WorkflowRun` is Postgres's future queryable mirror of Temporal state, not
    yet implemented; see `docs/domain-model.md`). `(campaignId,
-   idempotencyKey)` is unique, mirroring `CampaignTransitionAudit`'s existing
+idempotencyKey)` is unique, mirroring `CampaignTransitionAudit`'s existing
    idempotency mechanism. No live migration was created — this environment
    has no Docker/Postgres (see `docs/domain-model.md` §8); `pnpm db:generate`
    was run and succeeds without a live connection.
@@ -62,7 +62,7 @@ call it stage-by-stage.
    redelivered after a worker crash or timeout) idempotent: the caller
    supplies one idempotency key per logical invocation, and any number of
    physical retries of that same call collapse onto one persisted terminal
-   row. A workflow that wants to give an agent a *genuinely new* attempt
+   row. A workflow that wants to give an agent a _genuinely new_ attempt
    (e.g., after a retryable `PROVIDER_ERROR`) does so by calling the Activity
    again with a new idempotency key — a workflow-level decision, deferred to
    the M3/M4 sequencing work this ADR explicitly does not build.
@@ -78,7 +78,7 @@ call it stage-by-stage.
    not include these two. A request scoped to the wrong workspace, or naming
    a stage the campaign isn't actually in, is an orchestrator bug — retrying
    it can never succeed, and there is no well-formed `(workspaceId,
-   campaignId)` pairing to attribute an audit row to when the ownership
+campaignId)` pairing to attribute an audit row to when the ownership
    check itself is what failed. `CampaignNotFoundError`/
    `CampaignStageMismatchError` are thrown; a real Temporal Worker
    registering this Activity should wrap them as
@@ -125,12 +125,12 @@ call it stage-by-stage.
 ## Alternatives considered
 
 - **Bake Temporal's own attempt counter into the idempotency key** (`(...,
-  attempt)`), so every physical retry gets a fresh shot at the reasoning
+attempt)`), so every physical retry gets a fresh shot at the reasoning
   provider automatically. Rejected: this would mean a worker crash/timeout
   immediately after a successful-but-unacknowledged provider call could
   cause a second real (potentially paid) provider call on redelivery —
   exactly what CLAUDE.md's idempotency-key rule exists to prevent. Keying on
-  the caller-supplied key alone, with the workflow deciding when a *new*
+  the caller-supplied key alone, with the workflow deciding when a _new_
   attempt is warranted, is the safer default.
 - **Import `@combat/agents`'s `AGENT_REGISTRY` directly** instead of
   injecting it. Rejected: it would make every Activity-level test depend on

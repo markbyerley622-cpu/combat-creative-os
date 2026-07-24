@@ -21,14 +21,30 @@ const VALID_SAMPLES: Partial<Record<SpecialistAgentName, { input: unknown; resul
       priorLearnings: [],
     },
     result: {
-      audienceProfile: { name: 'fans', demographics: {}, psychographics: {}, painPoints: ['x'], platformBehavior: {} },
-      strategy: { positioning: 'p', targetAudienceSummary: 't', keyMessages: ['a'], toneGuidelines: ['b'] },
+      audienceProfile: {
+        name: 'fans',
+        demographics: {},
+        psychographics: {},
+        painPoints: ['x'],
+        platformBehavior: {},
+      },
+      strategy: {
+        positioning: 'p',
+        targetAudienceSummary: 't',
+        keyMessages: ['a'],
+        toneGuidelines: ['b'],
+      },
     },
   },
   'creative-director': {
     input: {
       brandName: 'Combat Reviews',
-      strategy: { positioning: 'p', targetAudienceSummary: 't', keyMessages: ['a'], toneGuidelines: ['b'] },
+      strategy: {
+        positioning: 'p',
+        targetAudienceSummary: 't',
+        keyMessages: ['a'],
+        toneGuidelines: ['b'],
+      },
       mandatories: [],
       durationsSeconds: [15],
     },
@@ -46,23 +62,40 @@ const VALID_SAMPLES: Partial<Record<SpecialistAgentName, { input: unknown; resul
     },
     result: {
       totalDurationFrames: 30,
-      shots: [{ index: 0, description: 'd', durationFrames: 30, beat: 'HOOK', dependsOnShotIndices: [] }],
+      shots: [
+        { index: 0, description: 'd', durationFrames: 30, beat: 'HOOK', dependsOnShotIndices: [] },
+      ],
     },
   },
   'shot-prompt-engineer': {
-    input: { shot: { index: 0, description: 'd', durationFrames: 30 }, visualDirection: 'v', providerId: 'mock' },
+    input: {
+      shot: { index: 0, description: 'd', durationFrames: 30 },
+      visualDirection: 'v',
+      providerId: 'mock',
+    },
     result: { providerId: 'mock', promptText: 'prompt', params: {} },
   },
   'visual-quality-controller': {
-    input: { shot: { index: 0, description: 'd', durationFrames: 30 }, providerId: 'mock', candidateRef: 'c1', frameCount: 3 },
-    result: { criterionScores: [{ criterionId: 'subject-fidelity', pass: true, score: 1 }], findings: [] },
+    input: {
+      shot: { index: 0, description: 'd', durationFrames: 30 },
+      providerId: 'mock',
+      candidateRef: 'c1',
+      frameCount: 3,
+    },
+    result: {
+      criterionScores: [{ criterionId: 'subject-fidelity', pass: true, score: 1 }],
+      findings: [],
+    },
   },
   'continuity-controller': {
     input: {
       scriptShots: [{ index: 0, description: 'd' }],
       selectedCandidateSummaries: [{ shotIndex: 0, providerId: 'mock', visualSummary: 's' }],
     },
-    result: { criterionScores: [{ criterionId: 'visual-consistency', pass: true, score: 1 }], conflicts: [] },
+    result: {
+      criterionScores: [{ criterionId: 'visual-consistency', pass: true, score: 1 }],
+      conflicts: [],
+    },
   },
   'edit-director': {
     input: {
@@ -70,7 +103,11 @@ const VALID_SAMPLES: Partial<Record<SpecialistAgentName, { input: unknown; resul
       selectedShots: [{ shotIndex: 0, durationFrames: 30 }],
       targetTotalDurationFrames: 30,
     },
-    result: { frameRate: 30, durationFrames: 30, entries: [{ shotIndex: 0, order: 0, startFrame: 0, durationFrames: 30 }] },
+    result: {
+      frameRate: 30,
+      durationFrames: 30,
+      entries: [{ shotIndex: 0, order: 0, startFrame: 0, durationFrames: 30 }],
+    },
   },
   'sound-director': {
     input: {
@@ -79,7 +116,11 @@ const VALID_SAMPLES: Partial<Record<SpecialistAgentName, { input: unknown; resul
       timelineEntries: [{ shotIndex: 0, startFrame: 0, durationFrames: 30 }],
       brandAudioGuidelines: [],
     },
-    result: { musicBrief: 'm', mixNotes: 'n', cues: [{ type: 'MUSIC', startFrame: 0, durationFrames: 30 }] },
+    result: {
+      musicBrief: 'm',
+      mixNotes: 'n',
+      cues: [{ type: 'MUSIC', startFrame: 0, durationFrames: 30 }],
+    },
   },
   'final-qa-controller': {
     input: {
@@ -98,7 +139,10 @@ const VALID_SAMPLES: Partial<Record<SpecialistAgentName, { input: unknown; resul
         targetLoudnessLufs: -14,
       },
     },
-    result: { criterionScores: [{ criterionId: 'technical-delivery-spec', pass: true, score: 1 }], findings: [] },
+    result: {
+      criterionScores: [{ criterionId: 'technical-delivery-spec', pass: true, score: 1 }],
+      findings: [],
+    },
   },
   'variant-generator': {
     input: {
@@ -114,10 +158,21 @@ const VALID_SAMPLES: Partial<Record<SpecialistAgentName, { input: unknown; resul
   'performance-analyst': {
     input: {
       metrics: [
-        { platform: 'TIKTOK', impressions: 1000, clicks: 50, conversions: 5, spendCents: 2000, ctr: 0.05 },
+        {
+          platform: 'TIKTOK',
+          impressions: 1000,
+          clicks: 50,
+          conversions: 5,
+          spendCents: 2000,
+          ctr: 0.05,
+        },
       ],
     },
-    result: { learnings: [{ insight: 'TikTok outperformed on CTR', appliesTo: 'strategy', tags: ['tiktok'] }] },
+    result: {
+      learnings: [
+        { insight: 'TikTok outperformed on CTR', appliesTo: 'strategy', tags: ['tiktok'] },
+      ],
+    },
   },
 };
 
@@ -125,7 +180,9 @@ describe('agent schema contracts', () => {
   const implementedNames = Object.keys(VALID_SAMPLES) as SpecialistAgentName[];
 
   it('covers every implemented agent with a valid sample', () => {
-    const implemented = Object.values(AGENT_REGISTRY).filter((d) => d.implemented).map((d) => d.name);
+    const implemented = Object.values(AGENT_REGISTRY)
+      .filter((d) => d.implemented)
+      .map((d) => d.name);
     expect(implementedNames.sort()).toEqual([...implemented].sort());
   });
 

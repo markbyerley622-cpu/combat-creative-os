@@ -12,7 +12,8 @@ export const VISUAL_QC_RUBRIC: QualityRubric = {
   criteria: [
     {
       id: 'subject-fidelity',
-      description: 'The generated frames depict the subject described in the shot, not something else.',
+      description:
+        'The generated frames depict the subject described in the shot, not something else.',
       weight: 1,
     },
     {
@@ -70,7 +71,8 @@ export const FINAL_QA_RUBRIC: QualityRubric = {
     },
     {
       id: 'edit-continuity',
-      description: 'Cuts and transitions are clean; no dropped frames, freezes, or audio/video desync.',
+      description:
+        'Cuts and transitions are clean; no dropped frames, freezes, or audio/video desync.',
       weight: 1,
     },
   ],

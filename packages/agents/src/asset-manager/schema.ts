@@ -8,7 +8,9 @@ import { z } from 'zod';
  * contract to build against rather than inventing one from scratch.
  */
 export const AssetManagerInputSchema = z.object({
-  shots: z.array(z.object({ index: z.number().int().nonnegative(), description: z.string().min(1) })).min(1),
+  shots: z
+    .array(z.object({ index: z.number().int().nonnegative(), description: z.string().min(1) }))
+    .min(1),
   brandAssetLibraryRefs: z.array(z.string().min(1)).default([]),
 });
 export type AssetManagerInput = z.infer<typeof AssetManagerInputSchema>;

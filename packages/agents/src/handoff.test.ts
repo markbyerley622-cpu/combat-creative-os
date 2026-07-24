@@ -23,7 +23,11 @@ function envelope<T>(input: T): AgentInput<T> {
     stage: 'STRATEGY',
     promptVersion: '1',
     input,
-    context: { campaignId: randomUUID(), priorArtifactRefs: [], budgetRemainingCents: COMBAT_REVIEWS_BRIEF.budgetCents },
+    context: {
+      campaignId: randomUUID(),
+      priorArtifactRefs: [],
+      budgetRemainingCents: COMBAT_REVIEWS_BRIEF.budgetCents,
+    },
   };
 }
 
@@ -39,10 +43,16 @@ function envelope<T>(input: T): AgentInput<T> {
 describe('Combat Reviews 15s ad — agent handoff', () => {
   it('carries hook / promise / feature-journey / CTA intact from brief through shot prompt', async () => {
     // Stage 1: Campaign Strategist
-    const strategistProvider = new QueuedReasoningProvider([{ result: COMBAT_REVIEWS_STRATEGY_RESULT }]);
-    const strategyRun = await executeAgent(campaignStrategistAgent, envelope(COMBAT_REVIEWS_BRIEF), {
-      reasoningProvider: strategistProvider,
-    });
+    const strategistProvider = new QueuedReasoningProvider([
+      { result: COMBAT_REVIEWS_STRATEGY_RESULT },
+    ]);
+    const strategyRun = await executeAgent(
+      campaignStrategistAgent,
+      envelope(COMBAT_REVIEWS_BRIEF),
+      {
+        reasoningProvider: strategistProvider,
+      },
+    );
     expect(strategyRun.status).toBe('SUCCEEDED');
     const strategy = strategyRun.result!.strategy;
     expect(strategy.keyMessages).toEqual(
@@ -57,7 +67,9 @@ describe('Combat Reviews 15s ad — agent handoff', () => {
       durationsSeconds: COMBAT_REVIEWS_BRIEF.durationsSeconds,
     };
     expect(() => creativeDirectorAgent.inputSchema.parse(creativeDirectorInput)).not.toThrow();
-    const conceptProvider = new QueuedReasoningProvider([{ result: COMBAT_REVIEWS_CONCEPT_RESULT }]);
+    const conceptProvider = new QueuedReasoningProvider([
+      { result: COMBAT_REVIEWS_CONCEPT_RESULT },
+    ]);
     const conceptRun = await executeAgent(creativeDirectorAgent, envelope(creativeDirectorInput), {
       reasoningProvider: conceptProvider,
     });
@@ -102,12 +114,18 @@ describe('Combat Reviews 15s ad — agent handoff', () => {
     // Stage 4: Shot Prompt Engineer — consumes one real shot from stage 3.
     const hookShot = shots[0]!;
     const shotPromptInput = {
-      shot: { index: hookShot.index, description: hookShot.description, durationFrames: hookShot.durationFrames },
+      shot: {
+        index: hookShot.index,
+        description: hookShot.description,
+        durationFrames: hookShot.durationFrames,
+      },
       visualDirection: concept.visualDirection,
       providerId: 'mock-video-gen',
     };
     expect(() => shotPromptEngineerAgent.inputSchema.parse(shotPromptInput)).not.toThrow();
-    const shotPromptProvider = new QueuedReasoningProvider([{ result: COMBAT_REVIEWS_SHOT_PROMPT_RESULT }]);
+    const shotPromptProvider = new QueuedReasoningProvider([
+      { result: COMBAT_REVIEWS_SHOT_PROMPT_RESULT },
+    ]);
     const shotPromptRun = await executeAgent(shotPromptEngineerAgent, envelope(shotPromptInput), {
       reasoningProvider: shotPromptProvider,
     });
@@ -117,7 +135,12 @@ describe('Combat Reviews 15s ad — agent handoff', () => {
     expect(shotPromptRun.result!.promptText.length).toBeGreaterThan(0);
 
     // Every stage's run recorded distinct invocation bookkeeping — no shared state leakage.
-    const invocationIds = new Set([strategyRun.invocationId, conceptRun.invocationId, scriptRun.invocationId, shotPromptRun.invocationId]);
+    const invocationIds = new Set([
+      strategyRun.invocationId,
+      conceptRun.invocationId,
+      scriptRun.invocationId,
+      shotPromptRun.invocationId,
+    ]);
     expect(invocationIds.size).toBe(4);
   });
 });

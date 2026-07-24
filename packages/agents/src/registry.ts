@@ -56,16 +56,24 @@ export function isSpecialistAgentName(value: string): value is SpecialistAgentNa
  * typed, registered, NOT_IMPLEMENTED placeholders pending later provider/
  * asset/compositing milestones — see each one's `agent.ts`.
  */
-export const AGENT_REGISTRY: Readonly<Record<SpecialistAgentName, AgentDefinition<unknown, unknown>>> = {
+export const AGENT_REGISTRY: Readonly<
+  Record<SpecialistAgentName, AgentDefinition<unknown, unknown>>
+> = {
   'campaign-strategist': campaignStrategistAgent as AgentDefinition<unknown, unknown>,
   'creative-director': creativeDirectorAgent as AgentDefinition<unknown, unknown>,
   'script-timing-director': scriptTimingDirectorAgent as AgentDefinition<unknown, unknown>,
   'asset-manager': assetManagerAgent as AgentDefinition<unknown, unknown>,
   'shot-prompt-engineer': shotPromptEngineerAgent as AgentDefinition<unknown, unknown>,
-  'video-generation-coordinator': videoGenerationCoordinatorAgent as AgentDefinition<unknown, unknown>,
+  'video-generation-coordinator': videoGenerationCoordinatorAgent as AgentDefinition<
+    unknown,
+    unknown
+  >,
   'visual-quality-controller': visualQualityControllerAgent as AgentDefinition<unknown, unknown>,
   'continuity-controller': continuityControllerAgent as AgentDefinition<unknown, unknown>,
-  'motion-compositing-coordinator': motionCompositingCoordinatorAgent as AgentDefinition<unknown, unknown>,
+  'motion-compositing-coordinator': motionCompositingCoordinatorAgent as AgentDefinition<
+    unknown,
+    unknown
+  >,
   'edit-director': editDirectorAgent as AgentDefinition<unknown, unknown>,
   'sound-director': soundDirectorAgent as AgentDefinition<unknown, unknown>,
   'final-qa-controller': finalQaControllerAgent as AgentDefinition<unknown, unknown>,

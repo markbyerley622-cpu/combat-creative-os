@@ -75,7 +75,8 @@ export class InMemoryAgentExecutionStore
       this.budgetLedgerEntries.filter((e) => e.budgetPolicyId === where.budgetPolicyId),
     findFirst: async ({ where }) =>
       this.budgetLedgerEntries.find(
-        (e) => e.budgetPolicyId === where.budgetPolicyId && e.idempotencyKey === where.idempotencyKey,
+        (e) =>
+          e.budgetPolicyId === where.budgetPolicyId && e.idempotencyKey === where.idempotencyKey,
       ) ?? null,
     create: async ({ data }) => {
       const exists = this.budgetLedgerEntries.some(

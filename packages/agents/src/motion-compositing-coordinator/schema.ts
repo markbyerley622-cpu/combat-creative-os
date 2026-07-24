@@ -11,11 +11,15 @@ export const MotionCompositingCoordinatorInputSchema = z.object({
   selectedCandidateRef: z.string().min(1),
   brandTemplateRefs: z.array(z.string().min(1)).default([]),
 });
-export type MotionCompositingCoordinatorInput = z.infer<typeof MotionCompositingCoordinatorInputSchema>;
+export type MotionCompositingCoordinatorInput = z.infer<
+  typeof MotionCompositingCoordinatorInputSchema
+>;
 
 export const MotionCompositingCoordinatorResultSchema = z.object({
   aeTemplate: z.string().min(1),
   dataBindings: z.record(z.string(), z.unknown()).default({}),
   figmaOverlays: z.array(z.string().min(1)).default([]),
 });
-export type MotionCompositingCoordinatorResult = z.infer<typeof MotionCompositingCoordinatorResultSchema>;
+export type MotionCompositingCoordinatorResult = z.infer<
+  typeof MotionCompositingCoordinatorResultSchema
+>;

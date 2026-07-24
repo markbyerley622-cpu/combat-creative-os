@@ -1,4 +1,8 @@
-import type { ReasoningInvokeInput, ReasoningModelMeta, ReasoningProvider } from '@combat/providers';
+import type {
+  ReasoningInvokeInput,
+  ReasoningModelMeta,
+  ReasoningProvider,
+} from '@combat/providers';
 
 /**
  * Deterministic mock-agent responses for tests (requirement 6). Unlike
@@ -33,7 +37,9 @@ export class QueuedReasoningProvider implements ReasoningProvider {
     this.queue = [...responses];
   }
 
-  async invoke(input: ReasoningInvokeInput): Promise<{ raw: string; modelMeta: ReasoningModelMeta }> {
+  async invoke(
+    input: ReasoningInvokeInput,
+  ): Promise<{ raw: string; modelMeta: ReasoningModelMeta }> {
     this.calls.push(input);
     const next = this.queue[this.cursor];
     if (!next) {

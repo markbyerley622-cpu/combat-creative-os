@@ -25,7 +25,12 @@ import {
 } from './errors';
 
 const OUTPUT_TOOL_NAME = 'submit_agent_output';
-const ZERO_MODEL_META: ReasoningModelMeta = { model: 'n/a', tokensIn: 0, tokensOut: 0, latencyMs: 0 };
+const ZERO_MODEL_META: ReasoningModelMeta = {
+  model: 'n/a',
+  tokensIn: 0,
+  tokensOut: 0,
+  latencyMs: 0,
+};
 
 /**
  * The one place every specialist agent's reasoning call goes through
@@ -47,7 +52,10 @@ export async function executeAgent<TInput, TResult>(
   const inputHash = stableHash(input.input);
 
   if (!definition.implemented) {
-    throw new AgentNotImplementedError(definition.name, definition.futureMilestone ?? 'unscheduled');
+    throw new AgentNotImplementedError(
+      definition.name,
+      definition.futureMilestone ?? 'unscheduled',
+    );
   }
   if (definition.disabledByDefault) {
     throw new AgentDisabledError(definition.name);
@@ -90,23 +98,37 @@ export async function executeAgent<TInput, TResult>(
           ? inputText
           : [
               { type: 'text', text: inputText },
-              ...attachments.map(
-                (attachment): ReasoningContentBlock => ({
-                  type: 'image',
-                  mediaType: attachment.mediaType,
-                  base64Data: attachment.base64Data,
-                }),
-              ),
+              ...attachments.map((attachment): ReasoningContentBlock => ({
+                type: 'image',
+                mediaType: attachment.mediaType,
+                base64Data: attachment.base64Data,
+              })),
             ],
     },
   ];
 
   try {
-    const first = await callProvider(ctx.reasoningProvider, definition, input, jsonSchema, baseMessages);
+    const first = await callProvider(
+      ctx.reasoningProvider,
+      definition,
+      input,
+      jsonSchema,
+      baseMessages,
+    );
     const parsedFirst = envelopeSchema.safeParse(safeJsonParse(first.raw));
     if (parsedFirst.success) {
       const success = parsedFirst.data as EnvelopeResult<TResult>;
-      return finish(definition, input, ctx, startedAt, now(), inputHash, success, null, first.modelMeta);
+      return finish(
+        definition,
+        input,
+        ctx,
+        startedAt,
+        now(),
+        inputHash,
+        success,
+        null,
+        first.modelMeta,
+      );
     }
 
     // One bounded corrective re-prompt (architecture.md §6) — never an
@@ -132,7 +154,17 @@ export async function executeAgent<TInput, TResult>(
     const parsedSecond = envelopeSchema.safeParse(safeJsonParse(second.raw));
     if (parsedSecond.success) {
       const success = parsedSecond.data as EnvelopeResult<TResult>;
-      return finish(definition, input, ctx, startedAt, now(), inputHash, success, null, second.modelMeta);
+      return finish(
+        definition,
+        input,
+        ctx,
+        startedAt,
+        now(),
+        inputHash,
+        success,
+        null,
+        second.modelMeta,
+      );
     }
 
     return finish(
@@ -148,7 +180,17 @@ export async function executeAgent<TInput, TResult>(
     );
   } catch (error) {
     if (error instanceof AgentExecutionError) {
-      return finish(definition, input, ctx, startedAt, now(), inputHash, null, error, ZERO_MODEL_META);
+      return finish(
+        definition,
+        input,
+        ctx,
+        startedAt,
+        now(),
+        inputHash,
+        null,
+        error,
+        ZERO_MODEL_META,
+      );
     }
     return finish(
       definition,

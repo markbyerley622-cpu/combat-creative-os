@@ -1,4 +1,9 @@
-import { DEFAULT_MODEL_POLICY, DEFAULT_TOKEN_BUDGET, NO_TOOL_POLICY, defineAgent } from '@combat/agent-runtime';
+import {
+  DEFAULT_MODEL_POLICY,
+  DEFAULT_TOKEN_BUDGET,
+  NO_TOOL_POLICY,
+  defineAgent,
+} from '@combat/agent-runtime';
 import { VariantGeneratorInputSchema, VariantGeneratorResultSchema } from './schema';
 import { V1 } from './prompts/v1';
 

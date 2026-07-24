@@ -28,7 +28,7 @@ full history.
 | Budget ledger                                                               | `packages/database/src/repositories/budget-repository.ts`           |
 | Asset lineage                                                               | `packages/database/src/repositories/asset-repository.ts`            |
 | Prompt versioning                                                           | `packages/database/src/repositories/prompt-repository.ts`           |
-| Specialist-agent invocation outcomes (ADR-0004)                            | `packages/database/src/repositories/agent-invocation-repository.ts` |
+| Specialist-agent invocation outcomes (ADR-0004)                             | `packages/database/src/repositories/agent-invocation-repository.ts` |
 | Human approval (immutable)                                                  | `packages/database/src/repositories/human-approval-repository.ts`   |
 
 Every Zod schema has an inferred `type X = z.infer<typeof XSchema>` — there is
@@ -399,7 +399,7 @@ infrastructure/docker-compose.yml up -d postgres` and then `pnpm db:migrate`
   to create and apply the initial migration once Postgres is available.
 - **`AgentInvocation` (ADR-0004)** was added to the schema alongside this
   milestone's Temporal Activity boundary (`packages/workflows/src/activities/
-  execute-specialist-agent-activity.ts`) but is not one of this document's
+execute-specialist-agent-activity.ts`) but is not one of this document's
   original 24 schemas/three supporting tables — it belongs to
   `docs/architecture.md` §4.1's execution-entity list. `workflowRunId` is a
   plain indexed string, not a foreign key, since no `WorkflowRun` table

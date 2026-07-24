@@ -1,4 +1,9 @@
-import { DEFAULT_MODEL_POLICY, DEFAULT_TOKEN_BUDGET, NO_TOOL_POLICY, defineAgent } from '@combat/agent-runtime';
+import {
+  DEFAULT_MODEL_POLICY,
+  DEFAULT_TOKEN_BUDGET,
+  NO_TOOL_POLICY,
+  defineAgent,
+} from '@combat/agent-runtime';
 import { definePlaceholderPrompt } from '../shared/placeholder-prompt';
 import { AssetManagerInputSchema, AssetManagerResultSchema } from './schema';
 
@@ -15,7 +20,8 @@ const FUTURE_MILESTONE =
 export const assetManagerAgent = defineAgent({
   name: 'asset-manager',
   displayName: 'Asset Manager',
-  description: 'Plans required brand/licensed assets per shot. Not implemented — see futureMilestone.',
+  description:
+    'Plans required brand/licensed assets per shot. Not implemented — see futureMilestone.',
   implemented: false,
   disabledByDefault: true,
   futureMilestone: FUTURE_MILESTONE,

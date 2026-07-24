@@ -82,7 +82,7 @@ Separately, the request's list of eleven agents didn't match
   to match; a real `ClaudeReasoningProvider` (`reasoning.claude.ts`) was
   added alongside it, gated behind an explicit `ANTHROPIC_API_KEY` via
   `@combat/config`'s new `reasoningEnvSchema` (default `REASONING_PROVIDER=
-  mock`, so local dev/CI still need zero paid API keys).
+mock`, so local dev/CI still need zero paid API keys).
 - No Temporal workflow, Activity, or database repository was added or
   changed to call these agents — that remains M3/M4/M6/M7/M9/M10/M11/M12/
   M13's workflow-wiring scope, not this change's. `AgentRun` (this

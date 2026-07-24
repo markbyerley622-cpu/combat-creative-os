@@ -13,22 +13,22 @@ input/output schemas, and tests. Three are typed, registered
 `NOT_IMPLEMENTED` placeholders pending later provider/asset/compositing
 milestones (see "Placeholders" below).
 
-| Canonical id (registry key)      | Display label              | Status | Rubric? |
-| --------------------------------- | --------------------------- | ------ | ------- |
-| `campaign-strategist`             | Campaign Strategist         | ✅     |         |
-| `creative-director`               | Creative Director           | ✅     |         |
-| `script-timing-director`          | Script Director             | ✅     |         |
-| `asset-manager`                   | Asset Manager                | ⏳ placeholder |   |
-| `shot-prompt-engineer`            | Shot Prompt Engineer        | ✅     |         |
-| `video-generation-coordinator`    | Video Generation Coordinator | ⏳ placeholder |   |
-| `visual-quality-controller`       | Visual QA Controller        | ✅     | ✅      |
-| `continuity-controller`           | Continuity Controller       | ✅     | ✅      |
-| `motion-compositing-coordinator`  | Motion-Compositing Coordinator | ⏳ placeholder | |
-| `edit-director`                   | Edit Director                | ✅     |         |
-| `sound-director`                  | Sound Director               | ✅     |         |
-| `final-qa-controller`             | Final QA Controller          | ✅     | ✅      |
-| `variant-generator`               | Variant Generator            | ✅     |         |
-| `performance-analyst`             | Performance Analyst          | ✅     |         |
+| Canonical id (registry key)      | Display label                  | Status         | Rubric? |
+| -------------------------------- | ------------------------------ | -------------- | ------- |
+| `campaign-strategist`            | Campaign Strategist            | ✅             |         |
+| `creative-director`              | Creative Director              | ✅             |         |
+| `script-timing-director`         | Script Director                | ✅             |         |
+| `asset-manager`                  | Asset Manager                  | ⏳ placeholder |         |
+| `shot-prompt-engineer`           | Shot Prompt Engineer           | ✅             |         |
+| `video-generation-coordinator`   | Video Generation Coordinator   | ⏳ placeholder |         |
+| `visual-quality-controller`      | Visual QA Controller           | ✅             | ✅      |
+| `continuity-controller`          | Continuity Controller          | ✅             | ✅      |
+| `motion-compositing-coordinator` | Motion-Compositing Coordinator | ⏳ placeholder |         |
+| `edit-director`                  | Edit Director                  | ✅             |         |
+| `sound-director`                 | Sound Director                 | ✅             |         |
+| `final-qa-controller`            | Final QA Controller            | ✅             | ✅      |
+| `variant-generator`              | Variant Generator              | ✅             |         |
+| `performance-analyst`            | Performance Analyst            | ✅             |         |
 
 `script-timing-director` and `visual-quality-controller` are the canonical
 registry identifiers, preserved from the approved architecture; "Script
@@ -86,7 +86,7 @@ reasoning call goes through:
    malformed input before any provider call (requirement 1).
 2. Forces a strict, schema-validated structured output from the reasoning
    provider via a single mandatory tool call (`tool_choice` forced, `strict:
-   true`) — requirement 3.
+true`) — requirement 3.
 3. Validates the response against `resultSchema` wrapped with a shared
    `ReasoningBreakdown` (facts/decisions/assumptions/recommendations —
    requirement 11). On failure, retries **once** with a corrective re-prompt
@@ -156,9 +156,9 @@ an existing agent:
    §6.1 originally specified.
 3. **Every prompt must contain these sections**, checked by
    `src/prompts.snapshot.test.ts`: `# Role`, `# Objective`, `# Input
-   Contract`, `# Output Contract`, `# Decision Rules`, `# Rejection Rules`,
+Contract`, `# Output Contract`, `# Decision Rules`, `# Rejection Rules`,
    `# Escalation Rules`, `# Quality Rubric`, `# Prohibited Behavior`, `#
-   Reasoning Discipline`.
+Reasoning Discipline`.
 4. **QA-category agents** (anything that evaluates another agent's creative
    output) must set `rubric` (a `QualityRubric` from
    `packages/agents/src/shared/rubrics.ts` or a new one) and
@@ -168,7 +168,7 @@ an existing agent:
    rubric and every non-QA agent doesn't (requirement 13).
 5. **Add the agent to `registry.ts`** — `AGENT_REGISTRY`, the re-export
    list, and (if genuinely new, not a placeholder graduating) `docs/
-   architecture.md` §6.1's table and the package tree in §1.
+architecture.md` §6.1's table and the package tree in §1.
 6. **Add schema-contract coverage**: one valid input/result sample in
    `src/schema-contract.test.ts`'s `VALID_SAMPLES`, and — if the agent sits
    in a handoff chain worth exercising end-to-end — extend

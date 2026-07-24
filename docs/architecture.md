@@ -669,7 +669,7 @@ this table's shape for the eleven built agents, field-for-field consistent
 with the domain entities each stage eventually persists (`CreativeConcept`,
 `Script`/`Shot`, `GenerationPrompt`, `QualityAssessment`/`QualityFailure`,
 `Timeline`/`TimelineEntry`, `SoundCue`, `CreativeVariant`) but scoped to
-*content only* — no `id`/`workspaceId`/foreign keys, which a future Activity
+_content only_ — no `id`/`workspaceId`/foreign keys, which a future Activity
 assigns at persistence time (agents don't write to the database).
 `RevisionFeedback` above is `packages/agents/src/shared/quality-finding.ts`'s
 `QualityFindingSchema`, reusing `@combat/domain`'s `QualityFailureCategory`/
@@ -771,7 +771,7 @@ architecture change, not a correction of this document.
      without a database connection and what remains to be run.
 9. **Specialist-agent execution framework, implemented 2026-07-24
    (ADR-0003) — an explicit milestone-order exception.** `packages/agent-
-   runtime` (the harness) and eleven of the fourteen `packages/agents`
+runtime` (the harness) and eleven of the fourteen `packages/agents`
    specialist agents were implemented ahead of the linear M2/M4/M6/M7/M9/
    M10/M11/M12/M13 order, on direct request. All fourteen canonical agent
    names from §6.1 are preserved unchanged; `asset-manager`,
@@ -855,7 +855,7 @@ standing in for anything not yet built. No milestone requires paid API credentia
   contract and golden-fixture handoff tests in `packages/agents`. The
   originally-scoped "one integration test gated behind a real API key" was
   **not** added — `ClaudeReasoningProvider` (`packages/providers/src/
-  reasoning.claude.ts`) is unit-tested with an injected fake client instead,
+reasoning.claude.ts`) is unit-tested with an injected fake client instead,
   so no automated test path can spend money even if a key is present; a
   real-key-gated integration test remains a candidate follow-up, not a gap
   in this milestone's own test requirements (CLAUDE.md: "Do not call paid

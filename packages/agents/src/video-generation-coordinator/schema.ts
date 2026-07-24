@@ -31,4 +31,6 @@ export const VideoGenerationCoordinatorResultSchema = z.object({
     }),
   ),
 });
-export type VideoGenerationCoordinatorResult = z.infer<typeof VideoGenerationCoordinatorResultSchema>;
+export type VideoGenerationCoordinatorResult = z.infer<
+  typeof VideoGenerationCoordinatorResultSchema
+>;

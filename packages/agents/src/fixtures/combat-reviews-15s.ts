@@ -36,11 +36,15 @@ export const COMBAT_REVIEWS_STRATEGY_RESULT: CampaignStrategistResult = {
       'Following MMA, boxing, and other combat sports means juggling several apps and sites.',
       "It's hard to know what's even on this weekend across every promotion.",
     ],
-    platformBehavior: { TIKTOK: 'short highlight-driven clips', INSTAGRAM_REELS: 'fast-cut hook-first content' },
+    platformBehavior: {
+      TIKTOK: 'short highlight-driven clips',
+      INSTAGRAM_REELS: 'fast-cut hook-first content',
+    },
   },
   strategy: {
     positioning: 'Combat Reviews is the single home base for every combat sport, every weekend.',
-    targetAudienceSummary: 'Combat-sports fans who currently follow multiple promotions across scattered apps.',
+    targetAudienceSummary:
+      'Combat-sports fans who currently follow multiple promotions across scattered apps.',
     keyMessages: ['12 Fight Events This Weekend', 'Every Combat Sport. One App.'],
     toneGuidelines: [
       'High-energy, short declarative sentences.',
@@ -63,28 +67,32 @@ export const COMBAT_REVIEWS_SCRIPT_RESULT: ScriptTimingDirectorResult = {
   shots: [
     {
       index: 0,
-      description: 'Fast-cut montage of fight cards with an on-screen counter ticking up to "12 Fight Events This Weekend".',
+      description:
+        'Fast-cut montage of fight cards with an on-screen counter ticking up to "12 Fight Events This Weekend".',
       durationFrames: 90,
       beat: 'HOOK',
       dependsOnShotIndices: [],
     },
     {
       index: 1,
-      description: 'Split-screen of different combat sports (MMA, boxing, kickboxing) unifying into the Combat Reviews app icon, text "Every Combat Sport. One App."',
+      description:
+        'Split-screen of different combat sports (MMA, boxing, kickboxing) unifying into the Combat Reviews app icon, text "Every Combat Sport. One App."',
       durationFrames: 90,
       beat: 'PROMISE',
       dependsOnShotIndices: [0],
     },
     {
       index: 2,
-      description: 'Phone screen recording: user browsing the event-discovery feed for this weekend\'s cards.',
+      description:
+        "Phone screen recording: user browsing the event-discovery feed for this weekend's cards.",
       durationFrames: 60,
       beat: 'FEATURE',
       dependsOnShotIndices: [1],
     },
     {
       index: 3,
-      description: 'Phone screen recording: user tapping into fighter/event information detail page.',
+      description:
+        'Phone screen recording: user tapping into fighter/event information detail page.',
       durationFrames: 45,
       beat: 'FEATURE',
       dependsOnShotIndices: [2],
@@ -98,14 +106,16 @@ export const COMBAT_REVIEWS_SCRIPT_RESULT: ScriptTimingDirectorResult = {
     },
     {
       index: 5,
-      description: 'Phone screen recording: user posting in the fight-discussion thread as replies stack up.',
+      description:
+        'Phone screen recording: user posting in the fight-discussion thread as replies stack up.',
       durationFrames: 45,
       beat: 'FEATURE',
       dependsOnShotIndices: [4],
     },
     {
       index: 6,
-      description: 'App logo full-screen with bold on-screen text "Download Free" and app-store badges.',
+      description:
+        'App logo full-screen with bold on-screen text "Download Free" and app-store badges.',
       durationFrames: 75,
       beat: 'CTA',
       dependsOnShotIndices: [5],

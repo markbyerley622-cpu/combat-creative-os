@@ -9,7 +9,12 @@ export const VariantGeneratorInputSchema = z.object({
   platform: DeliveryPlatformSchema,
   /** Frame ranges the Script Director marked HOOK/CTA — must survive every cutdown. */
   mustKeepFrameRanges: z
-    .array(z.object({ startFrame: z.number().int().nonnegative(), endFrame: z.number().int().positive() }))
+    .array(
+      z.object({
+        startFrame: z.number().int().nonnegative(),
+        endFrame: z.number().int().positive(),
+      }),
+    )
     .default([]),
 });
 export type VariantGeneratorInput = z.infer<typeof VariantGeneratorInputSchema>;

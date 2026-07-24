@@ -1,5 +1,11 @@
 import type { AgentDefinition, AgentRun } from '@combat/agent-runtime';
-import { computeCost, executeAgent, redact, stableHash, toAgentFailure } from '@combat/agent-runtime';
+import {
+  computeCost,
+  executeAgent,
+  redact,
+  stableHash,
+  toAgentFailure,
+} from '@combat/agent-runtime';
 import type {
   AgentInvocationDataSource,
   AgentInvocationRecord,
@@ -252,7 +258,13 @@ export function createExecuteSpecialistAgentActivity(
         campaignId,
       });
       if (!budgetResult.ok) {
-        await releaseReservations(reservations, workspaceId, campaignId, estimatedCents, idempotencyKey);
+        await releaseReservations(
+          reservations,
+          workspaceId,
+          campaignId,
+          estimatedCents,
+          idempotencyKey,
+        );
         return persistFailure(input, {
           reason: 'BUDGET_EXCEEDED',
           retryable: false,
@@ -289,7 +301,13 @@ export function createExecuteSpecialistAgentActivity(
       // NOT_IMPLEMENTED (placeholder agents) and DISABLED are thrown by
       // `executeAgent` before any provider call — caught here so they still
       // become a persisted, typed AgentInvocation (requirement 6).
-      await releaseReservations(reservations, workspaceId, campaignId, estimatedCents, idempotencyKey);
+      await releaseReservations(
+        reservations,
+        workspaceId,
+        campaignId,
+        estimatedCents,
+        idempotencyKey,
+      );
       return persistFailure(input, toAgentFailure(error), definition.promptVersion.version);
     }
 

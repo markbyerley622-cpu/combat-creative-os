@@ -1,6 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { executeAgent, AgentNotImplementedError, type AgentDefinition } from '@combat/agent-runtime';
+import {
+  executeAgent,
+  AgentNotImplementedError,
+  type AgentDefinition,
+} from '@combat/agent-runtime';
 import type { AgentInput } from '@combat/domain';
 import { QueuedReasoningProvider } from '@combat/agent-runtime';
 import {
@@ -38,7 +42,11 @@ describe('placeholder agents refuse to execute', () => {
     [
       'video-generation-coordinator',
       videoGenerationCoordinatorAgent as unknown as AnyAgentDefinition,
-      { shotPrompts: [{ shotIndex: 0, providerId: 'mock', promptText: 'x' }], candidateCountPerShot: 1, budgetRemainingCents: 0 },
+      {
+        shotPrompts: [{ shotIndex: 0, providerId: 'mock', promptText: 'x' }],
+        candidateCountPerShot: 1,
+        budgetRemainingCents: 0,
+      },
     ],
     [
       'motion-compositing-coordinator',
@@ -47,14 +55,17 @@ describe('placeholder agents refuse to execute', () => {
     ],
   ];
 
-  it.each(cases)('%s throws AgentNotImplementedError and never calls the reasoning provider', async (_name, agent, input) => {
-    const provider = new QueuedReasoningProvider([]);
+  it.each(cases)(
+    '%s throws AgentNotImplementedError and never calls the reasoning provider',
+    async (_name, agent, input) => {
+      const provider = new QueuedReasoningProvider([]);
 
-    await expect(executeAgent(agent, buildInput(input), { reasoningProvider: provider })).rejects.toBeInstanceOf(
-      AgentNotImplementedError,
-    );
-    expect(provider.calls).toHaveLength(0);
-  });
+      await expect(
+        executeAgent(agent, buildInput(input), { reasoningProvider: provider }),
+      ).rejects.toBeInstanceOf(AgentNotImplementedError);
+      expect(provider.calls).toHaveLength(0);
+    },
+  );
 
   it('reports the future milestone responsible for each deferred agent in the thrown error', async () => {
     const provider = new QueuedReasoningProvider([]);

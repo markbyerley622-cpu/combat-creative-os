@@ -20,7 +20,12 @@ describe('redact', () => {
   });
 
   it('leaves ordinary structured data untouched', () => {
-    const input = { model: 'claude-opus-4-8', tokensIn: 10, tags: ['a', 'b'], when: new Date('2026-01-01') };
+    const input = {
+      model: 'claude-opus-4-8',
+      tokensIn: 10,
+      tags: ['a', 'b'],
+      when: new Date('2026-01-01'),
+    };
     expect(redact(input)).toEqual(input);
   });
 

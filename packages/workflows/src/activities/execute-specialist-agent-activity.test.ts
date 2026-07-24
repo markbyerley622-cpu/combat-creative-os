@@ -34,7 +34,11 @@ function buildTestAgentDefinition(
     disabledByDefault: false,
     inputSchema: TestAgentInputSchema,
     resultSchema: TestAgentResultSchema,
-    promptVersion: definePromptTemplate({ version: 3, changelog: 'initial', systemPrompt: 'Be a test agent.' }),
+    promptVersion: definePromptTemplate({
+      version: 3,
+      changelog: 'initial',
+      systemPrompt: 'Be a test agent.',
+    }),
     modelPolicy: DEFAULT_MODEL_POLICY,
     tokenBudget: DEFAULT_TOKEN_BUDGET,
     toolPolicy: NO_TOOL_POLICY,
@@ -109,7 +113,10 @@ describe('executeSpecialistAgentActivity', () => {
     const store = new InMemoryAgentExecutionStore();
     const campaign = store.seedCampaign();
     const provider = createQueuedReasoningProvider([
-      { result: { headline: 'Every fight, one app' }, modelMeta: { model: 'claude-opus-4-8', tokensIn: 100, tokensOut: 50 } },
+      {
+        result: { headline: 'Every fight, one app' },
+        modelMeta: { model: 'claude-opus-4-8', tokensIn: 100, tokensOut: 50 },
+      },
     ]);
     const activity = createExecuteSpecialistAgentActivity(buildDeps(store, provider));
 
@@ -261,9 +268,15 @@ describe('executeSpecialistAgentActivity', () => {
 
     const output = await activity(buildInput(campaign));
     const record = store.agentInvocations[0]!;
-    const expectedCents = Math.ceil(computeCost('claude-sonnet-5', 200, 80).costMicroCents / 1_000_000);
+    const expectedCents = Math.ceil(
+      computeCost('claude-sonnet-5', 200, 80).costMicroCents / 1_000_000,
+    );
 
-    expect(output.modelMeta).toMatchObject({ model: 'claude-sonnet-5', tokensIn: 200, tokensOut: 80 });
+    expect(output.modelMeta).toMatchObject({
+      model: 'claude-sonnet-5',
+      tokensIn: 200,
+      tokensOut: 80,
+    });
     expect(output.costCents).toBe(expectedCents);
     expect(record.tokensIn).toBe(200);
     expect(record.tokensOut).toBe(80);
@@ -296,7 +309,10 @@ describe('executeSpecialistAgentActivity', () => {
     const leakyProvider = {
       name: 'leaky-test-provider',
       invoke: async () => {
-        throw { message: 'upstream rejected the request', apiKey: 'sk-ant-supersecretvalue1234567890' };
+        throw {
+          message: 'upstream rejected the request',
+          apiKey: 'sk-ant-supersecretvalue1234567890',
+        };
       },
     };
     const activity = createExecuteSpecialistAgentActivity(buildDeps(store, leakyProvider));

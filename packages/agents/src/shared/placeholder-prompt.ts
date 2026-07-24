@@ -8,7 +8,10 @@ import { definePromptTemplate, type PromptTemplate } from '@combat/agent-runtime
  * ever sent anywhere — it exists only so the definition type-checks and so
  * the eventual real implementation has an obvious file to replace.
  */
-export function definePlaceholderPrompt(agentName: string, futureMilestone: string): PromptTemplate {
+export function definePlaceholderPrompt(
+  agentName: string,
+  futureMilestone: string,
+): PromptTemplate {
   return definePromptTemplate({
     version: 1,
     changelog: 'placeholder — not implemented',

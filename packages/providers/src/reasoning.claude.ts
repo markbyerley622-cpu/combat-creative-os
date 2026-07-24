@@ -56,7 +56,9 @@ export class ClaudeReasoningProvider implements ReasoningProvider {
 
   constructor(private readonly client: AnthropicMessagesClient) {}
 
-  async invoke(input: ReasoningInvokeInput): Promise<{ raw: string; modelMeta: ReasoningModelMeta }> {
+  async invoke(
+    input: ReasoningInvokeInput,
+  ): Promise<{ raw: string; modelMeta: ReasoningModelMeta }> {
     const start = Date.now();
     const tool = {
       name: input.outputSchema.name,
@@ -69,7 +71,8 @@ export class ClaudeReasoningProvider implements ReasoningProvider {
       model: input.modelPolicy.model,
       max_tokens: input.maxOutputTokens,
       system: input.systemPrompt,
-      thinking: input.modelPolicy.thinking === 'adaptive' ? { type: 'adaptive' } : { type: 'disabled' },
+      thinking:
+        input.modelPolicy.thinking === 'adaptive' ? { type: 'adaptive' } : { type: 'disabled' },
       output_config: { effort: input.modelPolicy.effort },
       messages: input.messages.map(toAnthropicMessage),
       tools: [tool],
@@ -123,7 +126,9 @@ function toAnthropicContentBlock(block: ReasoningContentBlock): Record<string, u
  * kept isolated so `ClaudeReasoningProvider` itself stays testable without a
  * network dependency (see `AnthropicMessagesClient` above).
  */
-export async function createClaudeReasoningProvider(apiKey: string): Promise<ClaudeReasoningProvider> {
+export async function createClaudeReasoningProvider(
+  apiKey: string,
+): Promise<ClaudeReasoningProvider> {
   const { default: Anthropic } = await import('@anthropic-ai/sdk');
   const client = new Anthropic({ apiKey });
   // The real SDK's `messages.create` overloads require a fully-typed params

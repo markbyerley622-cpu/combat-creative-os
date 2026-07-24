@@ -1,6 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import type { CampaignStage } from '@combat/domain';
-import type { AgentInvocationDataSource, AgentInvocationRecord } from '../agent-invocation-repository';
+import type {
+  AgentInvocationDataSource,
+  AgentInvocationRecord,
+} from '../agent-invocation-repository';
 import type { AssetDataSource, AssetProvenanceRecord, AssetRecord } from '../asset-repository';
 import type {
   BudgetDataSource,

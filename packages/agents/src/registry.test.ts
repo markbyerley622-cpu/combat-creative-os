@@ -7,7 +7,11 @@ const PLACEHOLDER_AGENTS = new Set([
   'motion-compositing-coordinator',
 ]);
 
-const QA_AGENTS = new Set(['visual-quality-controller', 'continuity-controller', 'final-qa-controller']);
+const QA_AGENTS = new Set([
+  'visual-quality-controller',
+  'continuity-controller',
+  'final-qa-controller',
+]);
 
 describe('SPECIALIST_AGENT_NAMES', () => {
   it('lists all fourteen specialist agents from the architecture', () => {

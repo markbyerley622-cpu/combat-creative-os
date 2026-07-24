@@ -24,7 +24,11 @@ function buildDefinition(overrides: Partial<Parameters<typeof defineAgent>[0]> =
     disabledByDefault: false,
     inputSchema: TestInputSchema,
     resultSchema: TestResultSchema,
-    promptVersion: definePromptTemplate({ version: 1, changelog: 'initial', systemPrompt: 'Be a test agent.' }),
+    promptVersion: definePromptTemplate({
+      version: 1,
+      changelog: 'initial',
+      systemPrompt: 'Be a test agent.',
+    }),
     modelPolicy: DEFAULT_MODEL_POLICY,
     tokenBudget: DEFAULT_TOKEN_BUDGET,
     toolPolicy: NO_TOOL_POLICY,
@@ -50,9 +54,14 @@ function buildInput(topic = 'combat sports'): AgentInput<{ topic: string }> {
 describe('executeAgent', () => {
   it('returns a SUCCEEDED run with cost/hash/latency populated on a valid first response', async () => {
     const provider = new QueuedReasoningProvider([
-      { result: { headline: 'Every fight, one app' }, reasoning: { facts: ['12 events this weekend'] } },
+      {
+        result: { headline: 'Every fight, one app' },
+        reasoning: { facts: ['12 events this weekend'] },
+      },
     ]);
-    const run = await executeAgent(buildDefinition(), buildInput(), { reasoningProvider: provider });
+    const run = await executeAgent(buildDefinition(), buildInput(), {
+      reasoningProvider: provider,
+    });
 
     expect(run.status).toBe('SUCCEEDED');
     expect(run.result).toEqual({ headline: 'Every fight, one app' });
@@ -70,7 +79,9 @@ describe('executeAgent', () => {
       { result: { headline: '' } as unknown as { headline: string } }, // fails min(1)
       { result: { headline: 'Fixed on retry' } },
     ]);
-    const run = await executeAgent(buildDefinition(), buildInput(), { reasoningProvider: provider });
+    const run = await executeAgent(buildDefinition(), buildInput(), {
+      reasoningProvider: provider,
+    });
 
     expect(run.status).toBe('SUCCEEDED');
     expect(run.result).toEqual({ headline: 'Fixed on retry' });
@@ -83,7 +94,9 @@ describe('executeAgent', () => {
       { result: { headline: '' } as unknown as { headline: string } },
       { result: { headline: '' } as unknown as { headline: string } },
     ]);
-    const run = await executeAgent(buildDefinition(), buildInput(), { reasoningProvider: provider });
+    const run = await executeAgent(buildDefinition(), buildInput(), {
+      reasoningProvider: provider,
+    });
 
     expect(run.status).toBe('FAILED');
     expect(run.result).toBeNull();
@@ -108,7 +121,9 @@ describe('executeAgent', () => {
         throw new Error('upstream 500');
       },
     };
-    const run = await executeAgent(buildDefinition(), buildInput(), { reasoningProvider: throwingProvider });
+    const run = await executeAgent(buildDefinition(), buildInput(), {
+      reasoningProvider: throwingProvider,
+    });
 
     expect(run.status).toBe('FAILED');
     expect(run.failure).toMatchObject({ reason: 'PROVIDER_ERROR', retryable: true });
@@ -139,7 +154,11 @@ describe('executeAgent', () => {
 
   it('throws AgentDisabledError for an implemented-but-disabled agent', async () => {
     const provider = new QueuedReasoningProvider([{ result: { headline: 'unused' } }]);
-    const disabled = buildDefinition({ implemented: true, disabledByDefault: true, futureMilestone: 'later' });
+    const disabled = buildDefinition({
+      implemented: true,
+      disabledByDefault: true,
+      futureMilestone: 'later',
+    });
 
     await expect(
       executeAgent(disabled, buildInput(), { reasoningProvider: provider }),
@@ -170,14 +189,23 @@ describe('executeAgent', () => {
 
     const sentContent = provider.calls[0]!.messages[0]!.content;
     expect(Array.isArray(sentContent)).toBe(true);
-    expect(sentContent).toContainEqual({ type: 'image', mediaType: 'image/png', base64Data: 'ZmFrZQ==' });
+    expect(sentContent).toContainEqual({
+      type: 'image',
+      mediaType: 'image/png',
+      base64Data: 'ZmFrZQ==',
+    });
   });
 
   it('computes cost as zero-priced but pricingKnown=false for an unrecognized model', async () => {
     const provider = new QueuedReasoningProvider([
-      { result: { headline: 'ok' }, modelMeta: { model: 'some-future-model', tokensIn: 10, tokensOut: 10 } },
+      {
+        result: { headline: 'ok' },
+        modelMeta: { model: 'some-future-model', tokensIn: 10, tokensOut: 10 },
+      },
     ]);
-    const run = await executeAgent(buildDefinition(), buildInput(), { reasoningProvider: provider });
+    const run = await executeAgent(buildDefinition(), buildInput(), {
+      reasoningProvider: provider,
+    });
     expect(run.cost.pricingKnown).toBe(false);
     expect(run.cost.costMicroCents).toBeGreaterThan(0);
   });

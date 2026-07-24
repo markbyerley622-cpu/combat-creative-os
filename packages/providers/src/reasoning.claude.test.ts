@@ -24,7 +24,14 @@ describe('ClaudeReasoningProvider', () => {
     const create = vi.fn().mockResolvedValue({
       model: 'claude-opus-4-8',
       usage: { input_tokens: 42, output_tokens: 7 },
-      content: [{ type: 'tool_use', id: 'toolu_1', name: 'submit_agent_output', input: { result: { ok: true }, reasoning: {} } }],
+      content: [
+        {
+          type: 'tool_use',
+          id: 'toolu_1',
+          name: 'submit_agent_output',
+          input: { result: { ok: true }, reasoning: {} },
+        },
+      ],
     });
     const client: AnthropicMessagesClient = { messages: { create } };
     const provider = new ClaudeReasoningProvider(client);
@@ -32,7 +39,12 @@ describe('ClaudeReasoningProvider', () => {
     const { raw, modelMeta } = await provider.invoke(buildInput());
 
     expect(JSON.parse(raw)).toEqual({ result: { ok: true }, reasoning: {} });
-    expect(modelMeta).toEqual({ model: 'claude-opus-4-8', tokensIn: 42, tokensOut: 7, latencyMs: expect.any(Number) });
+    expect(modelMeta).toEqual({
+      model: 'claude-opus-4-8',
+      tokensIn: 42,
+      tokensOut: 7,
+      latencyMs: expect.any(Number),
+    });
 
     const callArgs = create.mock.calls[0]![0] as Record<string, unknown>;
     expect(callArgs['tool_choice']).toEqual({ type: 'tool', name: 'submit_agent_output' });
