@@ -390,27 +390,24 @@ describe('advanceCampaignStageActivity — AUTO_RETRY from FINAL_QA (M11)', () =
     ['COMPOSITING_TECHNICAL', 'COMPOSITING'],
     ['EDIT_TIMING', 'ROUGH_CUT'],
     ['AUDIO_TECHNICAL', 'SOUND_DESIGN'],
-  ] as const)(
-    'routes a %s Final QA failure to %s',
-    async (category, repairTarget) => {
-      const store = new InMemoryTransitionStore();
-      const campaign = store.seedCampaign({ currentStage: 'FINAL_QA' });
-      seedFailedFinalQa(store, category);
-      const activity = createAdvanceCampaignStageActivity({ campaignTransitionDb: store });
+  ] as const)('routes a %s Final QA failure to %s', async (category, repairTarget) => {
+    const store = new InMemoryTransitionStore();
+    const campaign = store.seedCampaign({ currentStage: 'FINAL_QA' });
+    seedFailedFinalQa(store, category);
+    const activity = createAdvanceCampaignStageActivity({ campaignTransitionDb: store });
 
-      const result = await activity({
-        mode: 'AUTO_RETRY',
-        workspaceId: campaign.workspaceId,
-        campaignId: campaign.id,
-        fromStage: 'FINAL_QA',
-        repairTarget,
-        idempotencyKey: randomUUID(),
-      });
+    const result = await activity({
+      mode: 'AUTO_RETRY',
+      workspaceId: campaign.workspaceId,
+      campaignId: campaign.id,
+      fromStage: 'FINAL_QA',
+      repairTarget,
+      idempotencyKey: randomUUID(),
+    });
 
-      expect(result).toEqual({ ok: true, toStage: repairTarget });
-      expect(store.campaigns[0]!.currentStage).toBe(repairTarget);
-    },
-  );
+    expect(result).toEqual({ ok: true, toStage: repairTarget });
+    expect(store.campaigns[0]!.currentStage).toBe(repairTarget);
+  });
 
   it('refuses an ambiguous FINAL_QA retry with no repairTarget rather than guessing an edge', async () => {
     const store = new InMemoryTransitionStore();

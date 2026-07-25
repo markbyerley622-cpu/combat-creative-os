@@ -51,7 +51,11 @@ const DEFAULT_TARGET_LOUDNESS_LUFS = -14;
  * to be redone. Mirrors `CAMPAIGN_TRANSITIONS`' three `from: 'FINAL_QA'`
  * REVISION edges — all non-gated, so this never selects a human-gated edge.
  */
-const FINAL_QA_REPAIR_TARGETS: readonly CampaignStage[] = ['COMPOSITING', 'ROUGH_CUT', 'SOUND_DESIGN'];
+const FINAL_QA_REPAIR_TARGETS: readonly CampaignStage[] = [
+  'COMPOSITING',
+  'ROUGH_CUT',
+  'SOUND_DESIGN',
+];
 
 export interface FinalQaTechnicalProbe {
   readonly durationSeconds: number;

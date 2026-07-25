@@ -174,6 +174,45 @@ describe('createApiClient — M10 sound design', () => {
   });
 });
 
+describe('createApiClient — M12 delivery variants', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('GETs the variant list scoped to workspace + user', async () => {
+    const fetchMock = mockFetchOnce(200, { variants: [] });
+    vi.stubGlobal('fetch', fetchMock);
+    const client = createApiClient('ws-1', 'user-1', { baseUrl: 'http://api.test' });
+    await client.getVariants('camp-1');
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://api.test/workspaces/ws-1/campaigns/camp-1/variants?userId=user-1',
+      expect.anything(),
+    );
+  });
+
+  it('GETs a signed variant preview URL by asset id', async () => {
+    const fetchMock = mockFetchOnce(200, { hasMedia: false, url: null });
+    vi.stubGlobal('fetch', fetchMock);
+    const client = createApiClient('ws-1', 'user-1', { baseUrl: 'http://api.test' });
+    await client.getVariantPreview('camp-1', 'asset-1');
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://api.test/workspaces/ws-1/campaigns/camp-1/variants/asset-1/preview?userId=user-1',
+      expect.anything(),
+    );
+  });
+
+  it('POSTs a variant cancellation', async () => {
+    const fetchMock = mockFetchOnce(202, { cancelRequested: true });
+    vi.stubGlobal('fetch', fetchMock);
+    const client = createApiClient('ws-1', 'user-1', { baseUrl: 'http://api.test' });
+    await client.cancelVariants('camp-1');
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://api.test/workspaces/ws-1/campaigns/camp-1/variants/cancel',
+      expect.objectContaining({ method: 'POST', body: JSON.stringify({ userId: 'user-1' }) }),
+    );
+  });
+});
+
 describe('createApiClient — M11 final QA + final approval', () => {
   afterEach(() => {
     vi.unstubAllGlobals();

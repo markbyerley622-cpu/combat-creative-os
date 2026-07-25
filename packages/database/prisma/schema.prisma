@@ -49,6 +49,7 @@ model Workspace {
   budgetPolicies           BudgetPolicy[]
   campaignTransitionAudits CampaignTransitionAudit[]
   agentInvocations         AgentInvocation[]
+  deliveryProfiles         DeliveryProfile[]
 
   @@map("workspaces")
 }
@@ -292,6 +293,37 @@ enum CreativeVariantStatus {
   FAILED
 }
 
+/// M12 — variant-render job/attempt lifecycle. Mirrors the M9 composition
+/// enums; kept separate so the two lifecycles can diverge independently.
+enum VariantGenerationJobStatus {
+  PENDING
+  DISPATCHED
+  SUCCEEDED
+  FAILED
+  BUDGET_EXCEEDED
+  CANCELLED
+}
+
+enum VariantGenerationAttemptStatus {
+  QUEUED
+  SUBMITTED
+  POLLING
+  SUCCEEDED
+  FAILED
+  TIMED_OUT
+  CANCELLED
+}
+
+enum VariantGenerationFailureReason {
+  UNSUPPORTED_CAPABILITY
+  PROVIDER_TIMEOUT
+  PROVIDER_REJECTED
+  PROVIDER_ERROR
+  BUDGET_EXCEEDED
+  INVALID_CUT
+  STALE_MASTER
+}
+
 enum TransitionAuditResult {
   APPLIED
   REJECTED_INVALID_TRANSITION
@@ -337,9 +369,11 @@ model Campaign {
   assets               Asset[]
   renderJobs           RenderJob[]
   editDecisionLists    EditDecisionList[]
-  deliverySpecs        DeliverySpecification[]
-  creativeVariants     CreativeVariant[]
-  humanApprovals       HumanApproval[]
+  deliverySpecs          DeliverySpecification[]
+  creativeVariants       CreativeVariant[]
+  variantSpecifications  VariantSpecification[]
+  variantGenerationJobs  VariantGenerationJob[]
+  humanApprovals         HumanApproval[]
   transitionAudits     CampaignTransitionAudit[]
   agentInvocations     AgentInvocation[]
 
@@ -964,6 +998,7 @@ model Asset {
   soundCues            SoundCue[]
   editDecisionEntries  EditDecisionEntry[]
   creativeVariants     CreativeVariant[]
+  variantSpecsAsParent VariantSpecification[] @relation("VariantParentMaster")
 
   // Dedup key for "detects duplicate uploads using workspace, checksum and
   // asset type" — deliberately excludes campaignId (a re-upload of the same
@@ -1265,18 +1300,180 @@ model CreativeVariant {
   workspaceId             String
   campaignId              String
   deliverySpecificationId String
+  /// M12 — the immutable cut recipe this rendered variant came from. Nullable
+  /// only because rows predating M12 have no specification behind them.
+  variantSpecificationId  String?
   durationSeconds         Int
   assetId                 String?
   status                  CreativeVariantStatus @default(PENDING)
+  /// M12 — the FINAL_QA re-run over this variant (see runVariantFinalQaActivity).
+  qualityAssessmentId     String?
   createdAt               DateTime              @default(now())
 
   campaign              Campaign               @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   deliverySpecification DeliverySpecification  @relation(fields: [deliverySpecificationId], references: [id], onDelete: Restrict)
+  variantSpecification  VariantSpecification?  @relation(fields: [variantSpecificationId], references: [id], onDelete: SetNull)
   asset                 Asset?                 @relation(fields: [assetId], references: [id], onDelete: SetNull)
   performanceMetrics    PerformanceMetrics[]
 
   @@index([workspaceId])
+  @@index([variantSpecificationId])
   @@map("creative_variants")
+}
+
+/// M12 — the named, versioned delivery profile a campaign's variants are cut
+/// and judged against (resolves docs/architecture.md §7.2 open question 5).
+/// Immutable: a changed requirement is a new version, never an edit.
+model DeliveryProfile {
+  id                      String   @id @default(uuid())
+  workspaceId             String
+  key                     String
+  version                 Int
+  displayName             String
+  platforms               DeliveryPlatform[]
+  aspectRatio             String
+  resolutionWidth         Int
+  resolutionHeight        Int
+  frameRate               Int
+  durationsSeconds        Int[]
+  captionBurnRequired     Boolean
+  safeAreas               TextSafeArea[]
+  ctaTailSeconds          Int?
+  ctaMinimumDurationSeconds Int?
+  durationToleranceFrames Int      @default(0)
+  createdAt               DateTime @default(now())
+
+  workspace             Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  variantSpecifications VariantSpecification[]
+
+  @@unique([workspaceId, key, version])
+  @@index([workspaceId])
+  @@map("delivery_profiles")
+}
+
+/// M12 — the canonical, immutable, versioned recipe for one delivery variant:
+/// which frames of the approved FINAL_MASTER survive, in what order, with which
+/// cues, captions and CTA. Pins the full upstream provenance chain so a variant
+/// is always traceable to the exact approved artifacts behind it. Immutable
+/// once `approvedForExportAt` is set.
+model VariantSpecification {
+  id          String @id @default(uuid())
+  workspaceId String
+  campaignId  String
+  version     Int
+
+  parentMasterAssetId          String
+  parentFinalQaAssessmentId    String
+  timelineId                   String
+  timelineVersion              Int
+  creativeConceptId            String
+  creativeConceptVersion       Int
+  scriptId                     String
+  scriptVersion                Int
+  shotSelectionSetId           String
+  shotSelectionSetVersion      Int
+  roughEditSpecificationId     String
+  roughEditSpecificationVersion Int
+  soundDesignPlanId            String
+  soundDesignPlanVersion       Int
+
+  deliveryProfileId       String
+  deliveryProfileKey      String
+  deliveryProfileVersion  Int
+  deliverySpecificationId String
+  platform                DeliveryPlatform
+  targetDurationSeconds   Int
+  targetDurationFrames    Int
+  aspectRatio             String
+  resolutionWidth         Int
+  resolutionHeight        Int
+  frameRate               Int
+
+  /// Validated nested structures (canonical, not free-form JSON) — same
+  /// approach RoughEditSpecification uses for its tracks/overlays.
+  cutPoints         Json
+  retainedClips     Json
+  retainedCues      Json  @default("[]")
+  retainedCaptions  Json  @default("[]")
+  ctaPlacement      Json
+  captionBurnRequired Boolean
+  safeAreas         TextSafeArea[]
+
+  cutRationale      String
+  removedRationale  String[]
+  qualityRubric     String[]
+
+  promptVersionId            String
+  createdByAgentInvocationId String
+  approvedForExportAt        DateTime?
+  supersededAt               DateTime?
+  createdAt                  DateTime  @default(now())
+
+  campaign        Campaign        @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  deliveryProfile DeliveryProfile @relation(fields: [deliveryProfileId], references: [id], onDelete: Restrict)
+  parentMaster    Asset           @relation("VariantParentMaster", fields: [parentMasterAssetId], references: [id], onDelete: Restrict)
+
+  generationJobs   VariantGenerationJob[]
+  creativeVariants CreativeVariant[]
+
+  @@unique([campaignId, parentMasterAssetId, targetDurationSeconds, version])
+  @@index([workspaceId])
+  @@index([campaignId])
+  @@map("variant_specifications")
+}
+
+/// M12 — groups the bounded-retry render attempts for one VariantSpecification.
+/// Mutable status row (same split as ShotGenerationJob/CompositionJob).
+model VariantGenerationJob {
+  id                     String                     @id @default(uuid())
+  workspaceId            String
+  campaignId             String
+  variantSpecificationId String
+  status                 VariantGenerationJobStatus @default(PENDING)
+  maxAttempts            Int
+  attemptCount           Int                        @default(0)
+  createdAt              DateTime                   @default(now())
+  updatedAt              DateTime                   @updatedAt
+
+  campaign             Campaign                  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  variantSpecification VariantSpecification      @relation(fields: [variantSpecificationId], references: [id], onDelete: Cascade)
+  attempts             VariantGenerationAttempt[]
+
+  @@unique([variantSpecificationId])
+  @@index([workspaceId])
+  @@index([campaignId])
+  @@map("variant_generation_jobs")
+}
+
+/// M12 — one immutable, append-only variant-render attempt. `idempotencyKey` is
+/// unique per job so a replayed Activity call never double-submits or
+/// double-reserves budget.
+model VariantGenerationAttempt {
+  id                     String                         @id @default(uuid())
+  workspaceId            String
+  variantGenerationJobId String
+  attemptNumber          Int
+  idempotencyKey         String
+  providerId             String
+  providerProjectId      String?
+  providerJobId          String?
+  status                 VariantGenerationAttemptStatus @default(QUEUED)
+  budgetReservationId    String?
+  estimatedCostCents     Int?
+  actualCostCents        Int?
+  outputAssetId          String?
+  failureReason          VariantGenerationFailureReason?
+  failureRetryable       Boolean?
+  failureMessage         String?
+  startedAt              DateTime                       @default(now())
+  completedAt            DateTime?
+  createdAt              DateTime                       @default(now())
+
+  variantGenerationJob VariantGenerationJob @relation(fields: [variantGenerationJobId], references: [id], onDelete: Cascade)
+
+  @@unique([variantGenerationJobId, idempotencyKey])
+  @@index([workspaceId])
+  @@map("variant_generation_attempts")
 }
 
 model PerformanceMetrics {

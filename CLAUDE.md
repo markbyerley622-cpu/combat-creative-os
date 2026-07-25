@@ -4,50 +4,65 @@ This file is the operating contract for anyone (human or agent) working in
 this repository. It is deliberately short — for the full design rationale
 see `docs/architecture.md` and `docs/adr/`.
 
-Current milestone: **M11, Final QA & Final Approval gate, done** — the
-existing `final-qa-controller` agent is wired into `CampaignProductionWorkflow`
-at FINAL_QA through `runFinalQaControllerActivity` (`packages/workflows`), which
-registers the campaign's `FINAL_MASTER` asset (deterministic checksum, no bytes,
-real provenance chain `FINAL_MASTER -> ROUGH_CUT + SOUND_STEM[]`), derives the
-master's technical probe and delivery specification from persisted production
-facts, runs the agent through the same `executeSpecialistAgentActivity` boundary
-every other agent uses (agents never touch repositories/providers/other agents),
-and persists the verdict as the system's first **asset-based**
-`QualityAssessment` (`subjectStage: 'FINAL_QA'`, immutable + idempotent per
-`(assetId, subjectStage)` via `createQualityAssessmentForAsset`) plus one typed
-`QualityFailure` per finding — exactly the rows `finalQAPassed` /
-`finalQARepairTargetIs*` / `finalQAAudioFailure` already read. On a pass the
-workflow auto-forwards FINAL_QA → FINAL_APPROVAL, where the **FINAL human gate
-still applies unchanged** (only `apps/api`'s `POST .../approvals/final` records
-the approval and signals; the workflow re-verifies it). On a failure it issues a
-**repair-targeted `AUTO_RETRY`** to the most upstream of COMPOSITING |
-ROUGH_CUT | SOUND_DESIGN, selected from the findings' categories via
-`QUALITY_FAILURE_ROUTING`; `advanceCampaignStageActivity`'s AUTO_RETRY mode
-gained a `repairTarget` for this and still filters to **non-gated** edges only,
-refusing an ambiguous multi-edge retry — no automated retry can cross a human
-gate. An unroutable failure escalates to BLOCKED. `apps/api` gained one
-read-only `GET .../final-qa` route (verdict + findings + master + delivery
-context + budget + whether the caller holds `APPROVE_FINAL_MASTER`);
-`apps/dashboard` gained a Final Approval screen calling the existing approval
-endpoint. An approved master advances to **VARIANT_GENERATION, where it reaches
-BLOCKED** (no Variant Generator until M12) — the exact M11 stopping point. All
-three human gates remain unbypassable. See `docs/architecture.md` §8's M11 entry
-for the full accounting and interim decisions (the technical probe is **derived,
-not ffprobe'd** — duration/resolution/captions come from the persisted
-Timeline + rough edit and are genuine checks, but **loudness is nominal, not
-measured**, since no master bytes exist; no `DeliverySpecification` row is
-created — per-platform rules are §7.2 open question 5, blocking M12; the
-`FINAL_MASTER` is a mock asset with no bytes; **Final QA performs no licensing
-check** — §7.2 open question 1). Still no variants/export/distribution, no real
-caller authentication, no real Veo/Runway/ComfyUI adapter (only the
-deterministic mock — do not connect one or spend money without an explicit,
-separate decision), and no live-Postgres/Temporal/MinIO/ffmpeg environment in
-this session — `apps/api/src/dev-fake-server.ts` (in-memory-backed) is what both
-`apps/api`'s own tests and `apps/dashboard`'s Playwright suite run against
-instead. Anthropic is reachable via `@combat/providers`'s
-`ClaudeReasoningProvider`, but only when explicitly configured
-(`REASONING_PROVIDER=claude` + `ANTHROPIC_API_KEY`); the default `mock`
-provider is what every automated test uses.
+Current milestone: **M12, delivery variants, done** — the existing
+`variant-generator` agent is wired into a new deterministic `VariantWorkflow`
+child of `CampaignProductionWorkflow` (one per VARIANT_GENERATION visit), which
+cuts one delivery variant per duration in the campaign's `DeliveryProfile`,
+renders each through the existing `MotionGraphicsProvider`, and **re-runs Final
+QA over every completed variant**.
+
+**Delivery-profile decision (resolves `docs/architecture.md` §7.2 open question
+5):** `VERTICAL_SHORT_FORM_V1` — Instagram Reels / TikTok / YouTube Shorts share
+one vertical contract, so one profile covers all three: 1080×1920, 9:16, 30fps,
+burned-in captions required, configurable safe-area metadata, durations
+15s/10s/6s, and the CTA must remain visible in the final two seconds for any
+variant of at least 10s (the 6s cutdown is exempt — "where duration permits").
+It is an immutable, versioned `DeliveryProfile` entity, not a constant; every
+`VariantSpecification` pins the exact profile key+version it was cut against.
+
+`runVariantGeneratorActivity` **refuses any master that did not pass Final QA**,
+then hands the agent only the legal cut boundaries derived from the persisted
+`Timeline`, the discrete SFX/VO and caption spans it may not split, the parent
+CTA span, and the profile's requirements — never a repository, storage key,
+provider or other agent. Its answer is checked by the pure `validateVariantCut`
+**before anything is written** (duration-vs-target, boundaries on real
+`TimelineEntry` edges, no split clip/caption/CTA/audio cue, narrative order,
+gapless variant timeline, CTA retention + tail rule, caption and safe-area
+requirements); an illegal cut is a typed `INVALID_CUT` failure, not a persisted
+row. Source-asset pins are derived from the rough edit rather than trusted from
+the agent. Four new versioned, workspace-scoped entities — `DeliveryProfile`,
+`VariantSpecification` (**frozen once approved for export**; supersession is the
+only way to change a cut), `VariantGenerationJob`/`VariantGenerationAttempt` —
+carry the full provenance chain, budget reservation/actual usage and retry
+history. Only the Final QA re-run may promote a variant to `READY`, so a render
+alone can never satisfy `variantQAPassed`.
+
+Approved FINAL_APPROVAL still enters VARIANT_GENERATION through the untouched
+FINAL human gate. On success the workflow advances VARIANT_GENERATION →
+VARIANT_QA → **EXPORTING, where it reaches BLOCKED** (no export implementation)
+— the exact M12 stopping point. A failing variant routes back through the
+documented VARIANT_QA → VARIANT_GENERATION edge via a bounded AUTO_RETRY
+(`maxVariantRepairAttempts`, since `variantQAFailed` is not exhaustible);
+exhausting it escalates to BLOCKED. `apps/api` gained a read-only
+`GET .../variants`, a signed-preview endpoint and one RBAC-gated
+`POST .../variants/cancel`; `apps/dashboard` gained a variant comparison screen.
+**No export, download or publish surface exists** — asserted by test. All three
+human gates remain unbypassable. See `docs/architecture.md` §8's M12 entry for
+the full accounting and interim decisions (variant renders reuse
+`MotionGraphicsProvider` and write **no real video bytes**, though the
+`VARIANT -> FINAL_MASTER + retained sources` provenance is real; a continuous
+MUSIC bed is deliberately not a hard cut boundary — it is re-mixed to length, so
+only discrete SFX/VO cues bound a cut; variant-QA loudness is nominal, not
+measured). Still no export/distribution, no real caller authentication, no real
+Veo/Runway/ComfyUI adapter (only the deterministic mock — do not connect one or
+spend money without an explicit, separate decision), **Final QA still performs
+no licensing check** (§7.2 open question 1), and no
+live-Postgres/Temporal/MinIO/ffmpeg environment in this session —
+`apps/api/src/dev-fake-server.ts` (in-memory-backed) is what both `apps/api`'s
+own tests and `apps/dashboard`'s Playwright suite run against instead. Anthropic
+is reachable via `@combat/providers`'s `ClaudeReasoningProvider`, but only when
+explicitly configured (`REASONING_PROVIDER=claude` + `ANTHROPIC_API_KEY`); the
+default `mock` provider is what every automated test uses.
 
 ## Context and token efficiency
 

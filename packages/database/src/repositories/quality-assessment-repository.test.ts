@@ -333,7 +333,9 @@ describe('quality-assessment-repository — asset-based (M11)', () => {
 
     await createQualityAssessmentForAsset(store, workspaceA, buildAssetInput({ assetId }));
 
-    expect(await getQualityAssessmentForAsset(store, workspaceB, assetId, 'FINAL_QA')).toBeUndefined();
+    expect(
+      await getQualityAssessmentForAsset(store, workspaceB, assetId, 'FINAL_QA'),
+    ).toBeUndefined();
     const { alreadyExisted } = await createQualityAssessmentForAsset(
       store,
       workspaceB,
@@ -350,9 +352,9 @@ describe('quality-assessment-repository — asset-based (M11)', () => {
 
     const { assessment } = await createQualityAssessmentForAsset(store, workspaceId, input);
 
-    expect(await getQualityAssessmentForAsset(store, workspaceId, input.assetId, 'FINAL_QA')).toEqual(
-      assessment,
-    );
+    expect(
+      await getQualityAssessmentForAsset(store, workspaceId, input.assetId, 'FINAL_QA'),
+    ).toEqual(assessment);
     expect(
       await getQualityAssessmentForAsset(store, workspaceId, randomUUID(), 'FINAL_QA'),
     ).toBeUndefined();

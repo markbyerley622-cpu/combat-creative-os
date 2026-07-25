@@ -121,6 +121,8 @@ describe('campaignProductionWorkflow — VISUAL_QA/CONTINUITY_QA wiring (M7)', (
       initialStage: 'VISUAL_QA',
       maxRevisionsPerGate: 3,
       videoProviderId: 'mock-video-generation',
+      deliveryProfileKey: 'VERTICAL_SHORT_FORM_V1',
+      maxVariantRepairAttempts: 2,
     });
 
     await vi.waitFor(() => expect(runQuery('getPendingGate')).toBe('SHOT_SELECTION'));
@@ -207,6 +209,8 @@ describe('campaignProductionWorkflow — VISUAL_QA/CONTINUITY_QA wiring (M7)', (
       initialStage: 'VISUAL_QA',
       maxRevisionsPerGate: 3,
       videoProviderId: 'mock-video-generation',
+      deliveryProfileKey: 'VERTICAL_SHORT_FORM_V1',
+      maxVariantRepairAttempts: 2,
     });
 
     await vi.waitFor(() => expect(runQuery('getPendingGate')).toBe('SHOT_SELECTION'));
@@ -265,6 +269,8 @@ describe('campaignProductionWorkflow — VISUAL_QA/CONTINUITY_QA wiring (M7)', (
       initialStage: 'VISUAL_QA',
       maxRevisionsPerGate: 3,
       videoProviderId: 'mock-video-generation',
+      deliveryProfileKey: 'VERTICAL_SHORT_FORM_V1',
+      maxVariantRepairAttempts: 2,
     });
 
     await vi.waitFor(() => expect(runQuery('getPendingGate')).toBe('SHOT_SELECTION'));
@@ -299,6 +305,8 @@ describe('campaignProductionWorkflow — VISUAL_QA/CONTINUITY_QA wiring (M7)', (
       initialStage: 'VISUAL_QA',
       maxRevisionsPerGate: 3,
       videoProviderId: 'mock-video-generation',
+      deliveryProfileKey: 'VERTICAL_SHORT_FORM_V1',
+      maxVariantRepairAttempts: 2,
     });
 
     expect(result.status).toBe('BLOCKED');
@@ -337,6 +345,8 @@ describe('campaignProductionWorkflow — VISUAL_QA/CONTINUITY_QA wiring (M7)', (
       initialStage: 'VISUAL_QA',
       maxRevisionsPerGate: 3,
       videoProviderId: 'mock-video-generation',
+      deliveryProfileKey: 'VERTICAL_SHORT_FORM_V1',
+      maxVariantRepairAttempts: 2,
     });
 
     expect(result.status).toBe('BLOCKED');

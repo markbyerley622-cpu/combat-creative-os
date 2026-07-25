@@ -51,6 +51,17 @@ import type {
   QualityFailureRecord,
 } from '../quality-assessment-repository';
 import type {
+  DeliveryProfileDataSource,
+  DeliveryProfileRecord,
+} from '../delivery-profile-repository';
+import type {
+  CreativeVariantRecord,
+  VariantDataSource,
+  VariantGenerationAttemptRecord,
+  VariantGenerationJobRecord,
+  VariantSpecificationRecord,
+} from '../variant-repositories';
+import type {
   ShotSelectionDataSource,
   ShotSelectionRecord,
   ShotSelectionReplacementRecord,
@@ -145,7 +156,9 @@ export class InMemoryCampaignStore
     RenderJobDataSource,
     EditDecisionListDataSource,
     TimelineDataSource,
-    SoundDesignDataSource
+    SoundDesignDataSource,
+    DeliveryProfileDataSource,
+    VariantDataSource
 {
   campaigns: CampaignRecord[] = [];
   audits: CampaignTransitionAuditRecord[] = [];
@@ -183,6 +196,11 @@ export class InMemoryCampaignStore
   roughEditSpecificationRecords: RoughEditSpecificationRecord[] = [];
   compositionJobRecords: CompositionJobRecord[] = [];
   compositionAttemptRecords: CompositionAttemptRecord[] = [];
+  deliveryProfileRecords: DeliveryProfileRecord[] = [];
+  variantSpecificationRecords: VariantSpecificationRecord[] = [];
+  variantGenerationJobRecords: VariantGenerationJobRecord[] = [];
+  variantGenerationAttemptRecords: VariantGenerationAttemptRecord[] = [];
+  creativeVariantRecords: CreativeVariantRecord[] = [];
   renderJobRecords: RenderJobRecord[] = [];
   editDecisionListRecords: EditDecisionListRecord[] = [];
   editDecisionEntryRecords: EditDecisionEntryRecord[] = [];
@@ -952,8 +970,200 @@ export class InMemoryCampaignStore
   deliverySpecification: TransitionFactsDataSource['deliverySpecification'] = {
     findMany: async () => this.deliverySpecifications,
   };
-  creativeVariant: TransitionFactsDataSource['creativeVariant'] = {
-    findMany: async () => this.creativeVariants,
+  /**
+   * Merges the legacy fact-row fixtures with M12 full records, satisfying both
+   * the transition-facts read shape (`variantsGenerated`/`variantQAPassed`/
+   * `variantQAFailed`) and the M12 `VariantDataSource` — same rationale as
+   * renderJob/editDecisionList/timeline above.
+   */
+  creativeVariant: TransitionFactsDataSource['creativeVariant'] &
+    VariantDataSource['creativeVariant'] = {
+    create: async ({ data }) => {
+      const record: CreativeVariantRecord = { id: randomUUID(), createdAt: new Date(), ...data };
+      this.creativeVariantRecords.push(record);
+      return record;
+    },
+    findFirst: async ({ where }: { where: Record<string, unknown> }) => {
+      if ('id' in where) {
+        return (
+          this.creativeVariantRecords.find(
+            (v) => v.id === where.id && v.workspaceId === where.workspaceId,
+          ) ?? null
+        );
+      }
+      return (
+        this.creativeVariantRecords.find(
+          (v) =>
+            v.variantSpecificationId === where.variantSpecificationId &&
+            (where.workspaceId === undefined || v.workspaceId === where.workspaceId),
+        ) ?? null
+      );
+    },
+    findMany: (async ({ where }: { where?: Record<string, unknown> } = {}) => {
+      if (where && 'workspaceId' in where) {
+        return this.creativeVariantRecords.filter(
+          (v) =>
+            v.workspaceId === where.workspaceId &&
+            (where.campaignId === undefined || v.campaignId === where.campaignId),
+        );
+      }
+      // Fact-row read: legacy fixtures plus every persisted M12 variant.
+      return [
+        ...this.creativeVariants,
+        ...this.creativeVariantRecords.map((v) => ({
+          id: v.id,
+          assetId: v.assetId ?? null,
+          status: v.status as string,
+        })),
+      ];
+    }) as never,
+    update: async ({ where, data }) => {
+      const variant = this.creativeVariantRecords.find((v) => v.id === where.id);
+      if (!variant) throw new Error(`creative variant ${where.id} not found`);
+      Object.assign(variant, data);
+      return variant;
+    },
+  };
+
+  deliveryProfile: DeliveryProfileDataSource['deliveryProfile'] = {
+    create: async ({ data }) => {
+      const record: DeliveryProfileRecord = { id: randomUUID(), createdAt: new Date(), ...data };
+      this.deliveryProfileRecords.push(record);
+      return record;
+    },
+    findFirst: async ({ where }) => {
+      if ('id' in where) {
+        return (
+          this.deliveryProfileRecords.find(
+            (p) => p.id === where.id && p.workspaceId === where.workspaceId,
+          ) ?? null
+        );
+      }
+      return (
+        this.deliveryProfileRecords.find(
+          (p) =>
+            p.key === where.key &&
+            p.version === where.version &&
+            p.workspaceId === where.workspaceId,
+        ) ?? null
+      );
+    },
+    findMany: async ({ where }) =>
+      this.deliveryProfileRecords.filter(
+        (p) =>
+          p.workspaceId === where.workspaceId && (where.key === undefined || p.key === where.key),
+      ),
+  };
+
+  variantSpecification: VariantDataSource['variantSpecification'] = {
+    create: async ({ data }) => {
+      const record: VariantSpecificationRecord = {
+        id: randomUUID(),
+        createdAt: new Date(),
+        ...data,
+      };
+      this.variantSpecificationRecords.push(record);
+      return record;
+    },
+    findFirst: async ({ where }) =>
+      this.variantSpecificationRecords.find(
+        (v) => v.id === where.id && v.workspaceId === where.workspaceId,
+      ) ?? null,
+    findMany: async ({ where }) =>
+      this.variantSpecificationRecords.filter(
+        (v) =>
+          v.workspaceId === where.workspaceId &&
+          (where.campaignId === undefined || v.campaignId === where.campaignId) &&
+          (where.parentMasterAssetId === undefined ||
+            v.parentMasterAssetId === where.parentMasterAssetId),
+      ),
+    update: async ({ where, data }) => {
+      const spec = this.variantSpecificationRecords.find((v) => v.id === where.id);
+      if (!spec) throw new Error(`variant specification ${where.id} not found`);
+      Object.assign(spec, data);
+      return spec;
+    },
+  };
+
+  variantGenerationJob: VariantDataSource['variantGenerationJob'] = {
+    create: async ({ data }) => {
+      const now = new Date();
+      const record: VariantGenerationJobRecord = {
+        id: randomUUID(),
+        createdAt: now,
+        updatedAt: now,
+        ...data,
+      };
+      this.variantGenerationJobRecords.push(record);
+      return record;
+    },
+    findFirst: async ({ where }) => {
+      if ('id' in where) {
+        return (
+          this.variantGenerationJobRecords.find(
+            (j) => j.id === where.id && j.workspaceId === where.workspaceId,
+          ) ?? null
+        );
+      }
+      return (
+        this.variantGenerationJobRecords.find(
+          (j) =>
+            j.variantSpecificationId === where.variantSpecificationId &&
+            (where.workspaceId === undefined || j.workspaceId === where.workspaceId),
+        ) ?? null
+      );
+    },
+    findMany: async ({ where }) =>
+      this.variantGenerationJobRecords.filter(
+        (j) =>
+          j.workspaceId === where.workspaceId &&
+          (where.campaignId === undefined || j.campaignId === where.campaignId),
+      ),
+    update: async ({ where, data }) => {
+      const job = this.variantGenerationJobRecords.find((j) => j.id === where.id);
+      if (!job) throw new Error(`variant generation job ${where.id} not found`);
+      Object.assign(job, data);
+      job.updatedAt = new Date();
+      return job;
+    },
+  };
+
+  variantGenerationAttempt: VariantDataSource['variantGenerationAttempt'] = {
+    create: async ({ data }) => {
+      const record: VariantGenerationAttemptRecord = {
+        id: randomUUID(),
+        createdAt: new Date(),
+        ...data,
+      };
+      this.variantGenerationAttemptRecords.push(record);
+      return record;
+    },
+    findFirst: async ({ where }) => {
+      if ('id' in where) {
+        return (
+          this.variantGenerationAttemptRecords.find(
+            (a) => a.id === where.id && a.workspaceId === where.workspaceId,
+          ) ?? null
+        );
+      }
+      return (
+        this.variantGenerationAttemptRecords.find(
+          (a) =>
+            a.variantGenerationJobId === where.variantGenerationJobId &&
+            a.idempotencyKey === where.idempotencyKey,
+        ) ?? null
+      );
+    },
+    findMany: async ({ where }) =>
+      this.variantGenerationAttemptRecords.filter(
+        (a) => a.variantGenerationJobId === where.variantGenerationJobId,
+      ),
+    update: async ({ where, data }) => {
+      const attempt = this.variantGenerationAttemptRecords.find((a) => a.id === where.id);
+      if (!attempt) throw new Error(`variant generation attempt ${where.id} not found`);
+      Object.assign(attempt, data);
+      return attempt;
+    },
   };
   // Merges the legacy fact-row fixtures with M10 full records (same rationale
   // as renderJob/editDecisionList above), satisfying both the transition-facts

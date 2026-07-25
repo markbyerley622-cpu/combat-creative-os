@@ -6,6 +6,7 @@ import { WorkflowExecutionAlreadyStartedError } from '@temporalio/client';
 import {
   CampaignBriefContentSchema,
   DEFAULT_MAX_REVISIONS_PER_GATE,
+  DEFAULT_MAX_VARIANT_REPAIR_ATTEMPTS,
   roleHasPermission,
   type RoleName,
 } from '@combat/domain';
@@ -247,6 +248,11 @@ export function registerCampaignRoutes(
               // campaign-production-workflow-contracts.ts's doc comment) —
               // every campaign targets the deterministic mock provider.
               videoProviderId: 'mock-video-generation',
+              // M12: the resolved delivery profile drives which variant
+              // durations VARIANT_GENERATION cuts (docs/architecture.md §7.2
+              // open question 5, resolved in M12).
+              deliveryProfileKey: 'VERTICAL_SHORT_FORM_V1',
+              maxVariantRepairAttempts: DEFAULT_MAX_VARIANT_REPAIR_ATTEMPTS,
             },
           ],
         });

@@ -39,7 +39,9 @@ function passingResult() {
 
 /** A defective master whose findings carry `categories`, driving repair routing. */
 function failingResult(
-  categories: readonly ('COMPOSITING_TECHNICAL' | 'EDIT_TIMING' | 'AUDIO_TECHNICAL' | 'TECHNICAL')[],
+  categories: readonly (
+    'COMPOSITING_TECHNICAL' | 'EDIT_TIMING' | 'AUDIO_TECHNICAL' | 'TECHNICAL'
+  )[],
 ) {
   return {
     criterionScores: [
@@ -120,8 +122,20 @@ async function seedFinalQaReady(store: InMemoryCampaignStore, opts: SeedOptions 
     version: 1,
     totalDurationFrames: 450,
     shots: [
-      { index: 0, description: 'Shot 0', durationFrames: 225, beat: 'HOOK', dependsOnShotIndices: [] },
-      { index: 1, description: 'Shot 1', durationFrames: 225, beat: 'CTA', dependsOnShotIndices: [0] },
+      {
+        index: 0,
+        description: 'Shot 0',
+        durationFrames: 225,
+        beat: 'HOOK',
+        dependsOnShotIndices: [],
+      },
+      {
+        index: 1,
+        description: 'Shot 1',
+        durationFrames: 225,
+        beat: 'CTA',
+        dependsOnShotIndices: [0],
+      },
     ],
   });
 

@@ -16,6 +16,7 @@ import {
 } from './campaign-production-workflow-signals';
 import type { shotGenerationWorkflow } from './shot-generation-workflow';
 import type { compositingWorkflow } from './compositing-workflow';
+import type { variantWorkflow } from './variant-workflow';
 import {
   applyAutoForwardResult,
   applyAutoRetryResult,
@@ -31,6 +32,8 @@ import {
   applyRunStrategyConceptScriptResult,
   applyRunVisualQualityAssessmentsResult,
   applyShotGenerationWorkflowResult,
+  applyVariantRepairBoundExceeded,
+  applyVariantWorkflowResult,
   buildAutoForwardIdempotencyKey,
   buildAutoRetryIdempotencyKey,
   buildGateIdempotencyKey,
@@ -95,6 +98,10 @@ export async function campaignProductionWorkflow(
   setHandler(getRevisionCountQuery, (gate) => state.revisionCounts[gate]);
 
   let autoForwardAttempt = 0;
+  // M12: how many times the VARIANT_QA -> VARIANT_GENERATION repair edge has
+  // been taken. `variantQAFailed` never becomes false on its own, so this is
+  // what bounds the loop.
+  let variantRepairAttempt = 0;
 
   while (state.status === 'RUNNING' || state.status === 'AWAITING_APPROVAL') {
     if (state.status === 'RUNNING') {
@@ -395,6 +402,95 @@ export async function campaignProductionWorkflow(
           state = applyAutoRetryResult(state, retryResult);
           continue;
         }
+      }
+
+      // M12: VARIANT_GENERATION runs the VariantWorkflow child — Variant
+      // Generator -> one immutable VariantSpecification per delivery-profile
+      // duration -> bounded-retry render -> a Final QA re-run per variant. The
+      // child refuses to start from a master that did not pass Final QA, and
+      // validates every cut against the persisted Timeline before persisting
+      // it, so an illegal cut never reaches a renderer. On COMPLETED the normal
+      // AUTO_FORWARD below finds `variantsGenerated` true and advances to
+      // VARIANT_QA. The child id is derived from the campaign key (matches
+      // `variantChildWorkflowId` in @combat/domain, which apps/api's cancel
+      // endpoint targets) — constructed inline because workflow files may not
+      // import a value from @combat/domain (CLAUDE.md "Architecture boundaries").
+      if (state.currentStage === 'VARIANT_GENERATION') {
+        const childResult = await executeChild<typeof variantWorkflow>('variantWorkflow', {
+          // Stable per campaign (NOT per repair attempt) so apps/api's cancel
+          // endpoint can always target the live child — same contract as
+          // `compositingChildWorkflowId`. A repair revisit reuses the id after
+          // the prior child closed; `revisionAttempt` below is what makes the
+          // re-cut produce a new specification version rather than replaying.
+          workflowId: `variants:${input.campaignId}`,
+          args: [
+            {
+              workspaceId: input.workspaceId,
+              campaignId: input.campaignId,
+              workflowRunId: input.workflowRunId,
+              deliveryProfileKey: input.deliveryProfileKey,
+              revisionAttempt: variantRepairAttempt + 1,
+              motionGraphicsProviderId: 'mock-motion-graphics',
+              // Matches variant-workflow-contracts.ts's
+              // DEFAULT_MAX_VARIANT_ATTEMPTS/DEFAULT_VARIANT_POLL_INTERVAL_MS —
+              // supplied explicitly for the same reason the compositing child's
+              // are (no value import from @combat/domain in a workflow file).
+              maxAttempts: 3,
+              pollIntervalMs: 2000,
+            },
+          ],
+        });
+        state = applyVariantWorkflowResult(state, childResult);
+        if (state.status !== 'RUNNING') {
+          continue;
+        }
+      }
+
+      // M12: VARIANT_QA is where the campaign decides whether every required
+      // variant cleared its Final QA re-run. The verdicts are already persisted
+      // (the child ran them), so this stage never re-assesses — it only routes.
+      // `variantQAPassed` (every CreativeVariant READY) lets the AUTO_FORWARD
+      // below advance to EXPORTING, which legitimately BLOCKS: there is no
+      // export implementation in M12. Any failing variant routes back through
+      // the documented VARIANT_QA -> VARIANT_GENERATION revision edge, bounded
+      // by `maxVariantRepairAttempts` — an automated retry that can never cross
+      // a human gate, since AUTO_RETRY only traverses non-gated edges.
+      if (state.currentStage === 'VARIANT_QA') {
+        const forwardResult = await advanceCampaignStageActivity({
+          mode: 'AUTO_FORWARD',
+          workspaceId: input.workspaceId,
+          campaignId: input.campaignId,
+          fromStage: state.currentStage,
+          idempotencyKey: buildAutoForwardIdempotencyKey(
+            input.workflowRunId,
+            state.currentStage,
+            autoForwardAttempt,
+          ),
+        });
+        if (forwardResult.ok || forwardResult.reason !== 'MISSING_PREREQUISITE') {
+          state = applyAutoForwardResult(state, forwardResult);
+          autoForwardAttempt += 1;
+          continue;
+        }
+        // Not every variant passed — take the bounded repair edge.
+        if (variantRepairAttempt >= input.maxVariantRepairAttempts) {
+          state = applyVariantRepairBoundExceeded(state, input.maxVariantRepairAttempts);
+          continue;
+        }
+        variantRepairAttempt += 1;
+        const retryResult = await advanceCampaignStageActivity({
+          mode: 'AUTO_RETRY',
+          workspaceId: input.workspaceId,
+          campaignId: input.campaignId,
+          fromStage: state.currentStage,
+          idempotencyKey: buildAutoRetryIdempotencyKey(
+            input.workflowRunId,
+            state.currentStage,
+            variantRepairAttempt,
+          ),
+        });
+        state = applyAutoRetryResult(state, retryResult);
+        continue;
       }
 
       const result = await advanceCampaignStageActivity({

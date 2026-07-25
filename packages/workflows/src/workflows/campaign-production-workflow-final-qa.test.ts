@@ -43,6 +43,8 @@ function run(runId: string) {
     initialStage: 'FINAL_QA',
     maxRevisionsPerGate: 3,
     videoProviderId: 'mock-video-generation',
+    deliveryProfileKey: 'VERTICAL_SHORT_FORM_V1',
+    maxVariantRepairAttempts: 2,
   });
 }
 
@@ -104,11 +106,14 @@ describe('campaignProductionWorkflow — FINAL_QA wiring (M11)', () => {
         targetStage: 'VARIANT_GENERATION',
       })
       .mockResolvedValueOnce({ ok: true, toStage: 'VARIANT_GENERATION' })
-      // VARIANT_GENERATION legitimately blocks — no Variant Generator until M12.
+      // M12: the variant child runs, then VARIANT_GENERATION -> VARIANT_QA.
+      .mockResolvedValueOnce({ ok: true, toStage: 'VARIANT_QA' })
+      // VARIANT_QA -> EXPORTING, which legitimately blocks (no export in M12).
+      .mockResolvedValueOnce({ ok: true, toStage: 'EXPORTING' })
       .mockResolvedValueOnce({
         ok: false,
         reason: 'MISSING_PREREQUISITE',
-        detail: 'variantsGenerated is false',
+        detail: 'exportRenderComplete is false',
       });
     const finalQa = vi.fn<FinalQaFn>().mockResolvedValue(passingQa());
     const verify = vi.fn();
@@ -117,6 +122,13 @@ describe('campaignProductionWorkflow — FINAL_QA wiring (M11)', () => {
       advanceCampaignStageActivity: advance as never,
       runFinalQaControllerActivity: finalQa as never,
       verifyHumanApprovalActivity: verify as never,
+    });
+    setFakeChildWorkflowImpls({
+      variantWorkflow: vi.fn().mockResolvedValue({
+        status: 'COMPLETED',
+        allVariantsPassed: true,
+        variants: [{ targetDurationSeconds: 15, qaPassed: true }],
+      }) as never,
     });
 
     const resultPromise = run('run-final-qa-1');
@@ -141,64 +153,63 @@ describe('campaignProductionWorkflow — FINAL_QA wiring (M11)', () => {
       expectedGate: 'FINAL',
     });
     expect(result.status).toBe('BLOCKED');
-    expect(result.finalStage).toBe('VARIANT_GENERATION');
-    expect(result.blockedReason).toContain('variantsGenerated');
+    expect(result.finalStage).toBe('EXPORTING');
+    expect(result.blockedReason).toContain('exportRenderComplete');
   });
 
-  it.each([
-    ['COMPOSITING'],
-    ['ROUGH_CUT'],
-    ['SOUND_DESIGN'],
-  ] as const)('routes a failing master back to %s via a repair-targeted AUTO_RETRY', async (repairTarget) => {
-    const advance = vi
-      .fn<AdvanceFn>()
-      .mockResolvedValueOnce({ ok: true, toStage: repairTarget })
-      // The repair stage's own forward attempt — stop the loop there.
-      .mockResolvedValueOnce({
-        ok: false,
-        reason: 'MISSING_PREREQUISITE',
-        detail: 'repair not yet complete',
-      });
-    const finalQa = vi.fn<FinalQaFn>().mockResolvedValue({
-      ok: true,
-      pass: false,
-      assessmentId: 'qa-1',
-      finalMasterAssetId: 'master-1',
-      overallScore: 0.25,
-      blockingFindingCount: 1,
-      repairTarget,
-    });
-
-    setFakeActivityImpls({
-      advanceCampaignStageActivity: advance as never,
-      runFinalQaControllerActivity: finalQa as never,
-      // COMPOSITING and SOUND_DESIGN have their own stage hooks; stub them so a
-      // repair landing there exercises the real re-entry rather than throwing.
-      runSoundDirectorActivity: vi.fn().mockResolvedValue({
+  it.each([['COMPOSITING'], ['ROUGH_CUT'], ['SOUND_DESIGN']] as const)(
+    'routes a failing master back to %s via a repair-targeted AUTO_RETRY',
+    async (repairTarget) => {
+      const advance = vi
+        .fn<AdvanceFn>()
+        .mockResolvedValueOnce({ ok: true, toStage: repairTarget })
+        // The repair stage's own forward attempt — stop the loop there.
+        .mockResolvedValueOnce({
+          ok: false,
+          reason: 'MISSING_PREREQUISITE',
+          detail: 'repair not yet complete',
+        });
+      const finalQa = vi.fn<FinalQaFn>().mockResolvedValue({
         ok: true,
-        soundDesignPlanId: 'sdp-1',
-        timelineId: 't-1',
-        version: 1,
-        cueCount: 1,
-      }) as never,
-      verifyShotSelectionActivity: vi
-        .fn()
-        .mockResolvedValue({ valid: true, setId: 'sel-1', detail: '' }) as never,
-    });
-    setFakeChildWorkflowImpls({
-      compositingWorkflow: vi.fn().mockResolvedValue({ status: 'COMPLETED' }) as never,
-    });
+        pass: false,
+        assessmentId: 'qa-1',
+        finalMasterAssetId: 'master-1',
+        overallScore: 0.25,
+        blockingFindingCount: 1,
+        repairTarget,
+      });
 
-    const result = await run(`run-final-qa-repair-${repairTarget}`);
+      setFakeActivityImpls({
+        advanceCampaignStageActivity: advance as never,
+        runFinalQaControllerActivity: finalQa as never,
+        // COMPOSITING and SOUND_DESIGN have their own stage hooks; stub them so a
+        // repair landing there exercises the real re-entry rather than throwing.
+        runSoundDirectorActivity: vi.fn().mockResolvedValue({
+          ok: true,
+          soundDesignPlanId: 'sdp-1',
+          timelineId: 't-1',
+          version: 1,
+          cueCount: 1,
+        }) as never,
+        verifyShotSelectionActivity: vi
+          .fn()
+          .mockResolvedValue({ valid: true, setId: 'sel-1', detail: '' }) as never,
+      });
+      setFakeChildWorkflowImpls({
+        compositingWorkflow: vi.fn().mockResolvedValue({ status: 'COMPLETED' }) as never,
+      });
 
-    const retryCall = advance.mock.calls[0]![0];
-    expect(retryCall).toMatchObject({
-      mode: 'AUTO_RETRY',
-      fromStage: 'FINAL_QA',
-      repairTarget,
-    });
-    expect(result.finalStage).toBe(repairTarget);
-  });
+      const result = await run(`run-final-qa-repair-${repairTarget}`);
+
+      const retryCall = advance.mock.calls[0]![0];
+      expect(retryCall).toMatchObject({
+        mode: 'AUTO_RETRY',
+        fromStage: 'FINAL_QA',
+        repairTarget,
+      });
+      expect(result.finalStage).toBe(repairTarget);
+    },
+  );
 
   it('escalates to BLOCKED at FINAL_QA (no advance) when Final QA cannot be assessed', async () => {
     const advance = vi.fn<AdvanceFn>();
@@ -288,6 +299,13 @@ describe('campaignProductionWorkflow — FINAL_QA wiring (M11)', () => {
       advanceCampaignStageActivity: advance as never,
       runFinalQaControllerActivity: vi.fn<FinalQaFn>().mockResolvedValue(passingQa()) as never,
       verifyHumanApprovalActivity: verify as never,
+    });
+    setFakeChildWorkflowImpls({
+      variantWorkflow: vi.fn().mockResolvedValue({
+        status: 'COMPLETED',
+        allVariantsPassed: true,
+        variants: [{ targetDurationSeconds: 15, qaPassed: true }],
+      }) as never,
     });
 
     const resultPromise = run('run-final-qa-5');

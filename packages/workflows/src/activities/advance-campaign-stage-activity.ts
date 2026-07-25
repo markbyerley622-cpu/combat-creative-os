@@ -91,6 +91,11 @@ const AUTO_RETRY_ELIGIBLE_STAGES: ReadonlySet<CampaignStage> = new Set([
   // COMPOSITING | ROUGH_CUT | SOUND_DESIGN — selected by the failure category
   // via the input's `repairTarget`.
   'FINAL_QA',
+  // M12: VARIANT_QA has a single automated revision edge back to
+  // VARIANT_GENERATION (`variantQAFailed`), so it needs no `repairTarget`.
+  // The loop is bounded by the workflow's `maxVariantRepairAttempts`, since
+  // `variantQAFailed` is not itself an exhaustible fact.
+  'VARIANT_QA',
 ]);
 
 export type AdvanceCampaignStageOutput =

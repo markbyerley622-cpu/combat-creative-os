@@ -7,3 +7,5 @@ export * from './candidate-eligibility';
 export * from './campaign-production-workflow-contracts';
 export * from './shot-generation-workflow-contracts';
 export * from './compositing-workflow-contracts';
+export * from './variant-workflow-contracts';
+export * from './variant-cut-validation';

@@ -145,6 +145,8 @@ describe('campaignProductionWorkflow — PROMPTING/SHOT_GENERATION wiring', () =
       initialStage: 'PROMPTING',
       maxRevisionsPerGate: 3,
       videoProviderId: 'mock-video-generation',
+      deliveryProfileKey: 'VERTICAL_SHORT_FORM_V1',
+      maxVariantRepairAttempts: 2,
     });
 
     await vi.waitFor(() => expect(shotGenerationWorkflowImpl).toHaveBeenCalledTimes(1));
@@ -240,6 +242,8 @@ describe('campaignProductionWorkflow — PROMPTING/SHOT_GENERATION wiring', () =
       initialStage: 'PROMPTING',
       maxRevisionsPerGate: 3,
       videoProviderId: 'mock-video-generation',
+      deliveryProfileKey: 'VERTICAL_SHORT_FORM_V1',
+      maxVariantRepairAttempts: 2,
     });
 
     expect(result.status).toBe('BLOCKED');
@@ -302,6 +306,8 @@ describe('campaignProductionWorkflow — PROMPTING/SHOT_GENERATION wiring', () =
       initialStage: 'PROMPTING',
       maxRevisionsPerGate: 3,
       videoProviderId: 'mock-video-generation',
+      deliveryProfileKey: 'VERTICAL_SHORT_FORM_V1',
+      maxVariantRepairAttempts: 2,
     });
 
     expect(result.status).toBe('BLOCKED');

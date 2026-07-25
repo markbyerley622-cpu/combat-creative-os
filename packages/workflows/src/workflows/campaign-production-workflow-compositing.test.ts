@@ -42,6 +42,8 @@ function run(runId: string) {
     initialStage: 'COMPOSITING',
     maxRevisionsPerGate: 3,
     videoProviderId: 'mock-video-generation',
+    deliveryProfileKey: 'VERTICAL_SHORT_FORM_V1',
+    maxVariantRepairAttempts: 2,
   });
 }
 

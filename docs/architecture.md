@@ -906,7 +906,7 @@ depend on them (noted per item).
    Combat Reviews' legal input before Final QA's licensing check can be
    meaningfully strict rather than a rubber stamp. **M11 shipped without it**:
    the Final QA Controller's rubric covers technical delivery, captions, brand
-   safety and edit continuity, but performs *no* licensing check, so the claim
+   safety and edit continuity, but performs _no_ licensing check, so the claim
    under `Asset`/`LicensingMetadata` below ("Final QA checks for its presence
    before allowing `FINAL_APPROVAL` to be requested") is not yet true — a
    FINAL_MASTER with no `LicensingMetadata` reaches the FINAL gate today, and
@@ -924,10 +924,21 @@ depend on them (noted per item).
    doesn't act on a pending gate for N days? Temporal workflows can wait
    indefinitely, but indefinite is probably not the intended product behavior.
    _Blocks: M14 (hardening)._
-5. **Target platforms/aspect ratios** (TikTok/IG Reels/YouTube Shorts) aren't
-   specified beyond the three durations. Affects `Variant` schema (aspect ratio,
-   safe-area, caption-burn requirements per platform) and Final QA's checklist.
-   _Blocks: M12._
+5. **Target platforms/aspect ratios** — **RESOLVED (M12, 2026-07-26)** as the
+   `VERTICAL_SHORT_FORM_V1` delivery profile: Instagram Reels / TikTok /
+   YouTube Shorts share one vertical contract, so one profile covers all three
+   rather than three near-identical rows — 1080×1920, 9:16, 30fps, burned-in
+   captions required, configurable safe-area metadata (`TOP`/`BOTTOM`/`CENTER`),
+   durations 15s/10s/6s, and the CTA must remain visible in the final two
+   seconds for any variant of at least 10s ("where duration permits" — the 6s
+   cutdown is exempt via `ctaMinimumDurationSeconds`). Modeled as the immutable,
+   versioned `DeliveryProfile` entity (`packages/domain/src/schemas/
+delivery-profile.ts` + Prisma); the existing `DeliverySpecification` remains the
+   per-platform row derived from it, so `CreativeVariant`'s FK is unchanged. Every
+   `VariantSpecification` pins the exact profile `key`+`version` its cut points
+   were computed against. A changed requirement is a new version, never an edit.
+   Final QA's checklist still does **not** include a licensing check — that is
+   item 1 above, and remains open.
 6. **Storage cost/retention policy** for multiple generation candidates per shot
    — at scale this is a lot of video. Needs a retention/lifecycle policy (e.g.,
    non-selected candidates purged after N days) before production launch.
@@ -1508,9 +1519,109 @@ subjectStage])` idempotency constraint. `createQualityAssessmentForCandidate`
   `apps/api` route tests including the RBAC matrix confirming only
   `CREATIVE_DIRECTOR`/`OWNER_ADMIN` may approve; 3 dashboard api-client tests.
   No paid API calls, no real media.
-- **M12 — Variants.** Variant Generator (15/10/6s), variant QA reusing Final QA
-  logic. _Test:_ cut-point correctness against fixture timelines; QA re-run per
-  variant.
+
+- **M12 — Delivery variants. Done (2026-07-26), with the interim decisions this
+  item records.** The existing `variant-generator` agent is wired into a new
+  deterministic `VariantWorkflow` child of `CampaignProductionWorkflow` (one per
+  VARIANT_GENERATION visit, `variantChildWorkflowId(campaignId)`), which cuts one
+  delivery variant per duration in the campaign's `DeliveryProfile`, renders each
+  through the existing `MotionGraphicsProvider`, and **re-runs Final QA over every
+  completed variant**.
+
+  **The delivery-profile decision** (§7.2 item 5, now resolved) is
+  `VERTICAL_SHORT_FORM_V1` — see that item for the full contract. It is a real,
+  immutable, versioned entity, not a constant buried in an Activity.
+
+  **Variant generation.** `runVariantGeneratorActivity` refuses to start from a
+  master that did not pass Final QA (it re-reads the M11 `subjectStage:
+'FINAL_QA'` assessment and requires `pass`), then hands the agent **only** the
+  legal cut boundaries derived from the persisted `Timeline`'s entries, the
+  discrete SFX/VO cue spans and caption spans it may not split, the parent's CTA
+  span, and the profile's requirements — never a repository, storage key,
+  provider or other agent. The agent's answer is checked by the pure
+  `validateVariantCut` (`packages/domain/src/workflow/variant-cut-validation.ts`)
+  **before anything is written**: an illegal cut is a typed `INVALID_CUT` failure,
+  not a persisted specification. The mechanical pins (`retainedClips`' source
+  assets and transitions, `retainedCues`) are derived here from the rough edit and
+  sound-design plan rather than trusted from the agent, so a variant always
+  references the exact approved source assets. The agent contract was widened for
+  this (V1 → V2): the M0 shape (`mustKeepFrameRanges` → bare frame ranges) could
+  not express a legal cut — same "the agent's real output is the fuller shape"
+  supersession M6 applied to `ShotPrompt` → `ShotSpecification`.
+
+  **Persistence.** Four new versioned, workspace-scoped entities:
+  `DeliveryProfile`, `VariantSpecification` (immutable + versioned per
+  `(campaign, parentMaster, targetDuration)`, pinning the full upstream
+  provenance chain — parent master, its FINAL_QA assessment, and the timeline /
+  concept / script / shot-selection / rough-edit / sound-design versions —
+  **frozen outright once `approvedForExportAt` is set**, with supersession the
+  only way to change a cut), and `VariantGenerationJob`/`VariantGenerationAttempt`
+  (the same "mutable job status + immutable append-only attempt history" split
+  `CompositionJob` establishes, carrying provider ids, budget reservation and
+  actual usage, and typed failure). `CreativeVariant` gained
+  `variantSpecificationId` + `qualityAssessmentId`.
+
+  **Cut-point correctness** is deterministic and checks: duration matches target
+  within the profile's tolerance (0 frames — cuts come from real frame
+  boundaries, so anything else is a defect not rounding); every boundary
+  coincides with a real `TimelineEntry` edge; no clip, caption, CTA or discrete
+  audio cue is split; segments do not overlap and narrative order is preserved;
+  the variant's own timeline is gapless from 0; retained clips are genuine spans
+  of the parent timeline; the CTA is retained and still sits in the profile's
+  tail window where duration permits; captions and safe-area metadata satisfy the
+  profile.
+
+  **Campaign integration.** An approved FINAL_APPROVAL enters VARIANT_GENERATION
+  exactly as before — the FINAL human gate is untouched and still the only way
+  in. On a COMPLETED child the normal AUTO_FORWARD finds `variantsGenerated` true
+  and advances to VARIANT_QA; `variantQAPassed` (every `CreativeVariant` READY)
+  then advances to **EXPORTING, where it legitimately reaches BLOCKED** — the
+  exact M12 stopping point, since no export implementation exists. A failing
+  variant routes back through the documented VARIANT_QA → VARIANT_GENERATION
+  revision edge via AUTO_RETRY (a single non-gated edge, so no `repairTarget` is
+  needed), bounded by the workflow's `maxVariantRepairAttempts` because
+  `variantQAFailed` is not an exhaustible fact; exhausting it escalates to
+  BLOCKED. `apps/api` gained a read-only `GET .../variants` (specifications, cut
+  points, captions, CTA, safe areas, QA verdicts, job/attempt state, budget), a
+  signed-preview endpoint, and one RBAC-gated `POST .../variants/cancel`;
+  `apps/dashboard` gained a variant comparison screen. **No export, download or
+  publish surface exists** — asserted by test.
+
+  **Interim decisions**: (1) variant renders go through the existing
+  `MotionGraphicsProvider` — a variant is the same kind of timeline render over a
+  shorter timeline, so M12 adds no provider category; against the deterministic
+  mock this writes **no real video bytes** (`sizeBytes: 0`), though the provenance
+  chain `VARIANT -> FINAL_MASTER + retained sources` is real. (2) A continuous
+  MUSIC bed is deliberately **not** a hard cut boundary — it spans the whole
+  master and is re-mixed to length, so treating it as one would make every
+  cutdown illegal by construction; only discrete SFX/VOICEOVER cues bound a cut.
+  (3) Variant QA's technical probe is derived from the variant's own
+  specification and, as in M11, **loudness is nominal rather than measured** (no
+  audio bytes exist). (4) The variant Final QA re-run records its `AgentInvocation`
+  at stage VARIANT_GENERATION (where the campaign actually is while the child
+  runs) while the assessment's `subjectStage` is VARIANT_QA (what is judged) —
+  the same split by which a `RoughEditSpecification` is written during COMPOSITING
+  but describes the ROUGH_CUT. No export, no distribution, no real providers; no
+  live Postgres/Temporal/MinIO/ffmpeg (the four new models are unmigrated in this
+  environment — see docs/domain-model.md §8). _Test:_ 20 cut-validation tests over
+  fixture timelines (all three durations legal, plus mid-clip / mid-caption /
+  mid-CTA / mid-audio-cue / reordered / overlapping / gapped / CTA-dropped /
+  CTA-out-of-tail / captions-absent / safe-area-missing rejections); 22 variant
+  Activity tests (structured output for all three durations, cut-point rejection
+  without persistence, stale/failed-master refusal, workspace isolation,
+  idempotent dispatch, budget reserve/charge/release, provider failure,
+  cancellation, and the Final QA re-run promoting/failing a variant); 14 variant
+  repository tests (versioning, supersession, export-freeze immutability,
+  workspace scoping); 10 `VariantWorkflow` tests (happy path across all three,
+  bounded retry, non-retryable capability rejection, budget refusal, QA failure,
+  cancellation, replay safety); 6 parent-wiring tests (stopping point at
+  EXPORTING, bounded repair loop, repair-bound exhaustion, and that the FINAL gate
+  still blocks any variant work); 15 `apps/api` route tests including the RBAC
+  matrix and a no-export-surface assertion; 3 dashboard api-client tests and 6
+  Playwright e2e tests (three-way comparison, placeholder flow, no export
+  control, reviewer cannot cancel, two forged-request refusals). No paid API
+  calls, no real media.
+
 - **M13 — Performance Analyst loop.** Separate `PerformanceAnalysisWorkflow`,
   `Learning` ingestion, wired as optional context into Strategist/Creative
   Director. _Test:_ fixture performance data produces expected `Learning`

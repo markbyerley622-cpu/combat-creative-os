@@ -318,6 +318,60 @@ export function applyRunFinalQaControllerResult(
 }
 
 /**
+ * Applies the result of the `VariantWorkflow` child run for one
+ * VARIANT_GENERATION visit (M12). COMPLETED means every required variant was
+ * cut, rendered AND passed its Final QA re-run — the normal AUTO_FORWARD then
+ * finds `variantsGenerated` true and advances to VARIANT_QA. A BLOCKED child
+ * leaves state RUNNING when at least one variant exists, so the parent can
+ * route the documented VARIANT_QA -> VARIANT_GENERATION repair edge; a child
+ * that produced nothing at all (an illegal cut, a stale master, a budget
+ * refusal) escalates straight to BLOCKED, because there is nothing to repair.
+ */
+export function applyVariantWorkflowResult(
+  state: CampaignProductionWorkflowState,
+  result: {
+    status: 'COMPLETED' | 'BLOCKED' | 'CANCELLED';
+    allVariantsPassed?: boolean;
+    variants?: readonly { qaPassed: boolean }[];
+    failureReason?: string;
+    failureMessage?: string;
+  },
+): CampaignProductionWorkflowState {
+  if (result.status === 'COMPLETED') {
+    return state;
+  }
+  if (result.status === 'BLOCKED' && (result.variants?.length ?? 0) > 0) {
+    // Variants exist but not all passed — repairable through the transition table.
+    return state;
+  }
+  return {
+    ...state,
+    status: 'BLOCKED',
+    blockedReason: `VARIANT_GENERATION child workflow ended ${result.status}: ${
+      result.failureMessage ?? result.failureReason ?? 'no detail'
+    }`,
+  };
+}
+
+/**
+ * Applies the bound on the automated VARIANT_QA -> VARIANT_GENERATION repair
+ * loop (M12). `variantQAFailed` stays true for as long as a failing variant
+ * row exists, so unlike the shot-generation retries this loop cannot exhaust
+ * itself — the bound has to live here, and exceeding it escalates to a human
+ * state rather than retrying forever (CLAUDE.md workflow-idempotency rule).
+ */
+export function applyVariantRepairBoundExceeded(
+  state: CampaignProductionWorkflowState,
+  maxVariantRepairAttempts: number,
+): CampaignProductionWorkflowState {
+  return {
+    ...state,
+    status: 'BLOCKED',
+    blockedReason: `VARIANT_QA repair bound exceeded (${maxVariantRepairAttempts} re-cut attempts) — a human must intervene`,
+  };
+}
+
+/**
  * Applies the SHOT_SELECTION-gate re-verification at COMPOSITING entry — the
  * persisted selection set must still be valid before the CompositingWorkflow
  * starts. An invalid set escalates to BLOCKED (a human must re-approve).

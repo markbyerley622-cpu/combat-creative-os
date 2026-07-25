@@ -18,6 +18,15 @@ import { CampaignStageSchema } from './campaign-stage';
 /** Bounded revision retries per gate (CLAUDE.md workflow-idempotency rule: "Bound retries explicitly ... escalate to a human state rather than retrying forever"). */
 export const DEFAULT_MAX_REVISIONS_PER_GATE = 3;
 
+/**
+ * M12 — bound on the automated VARIANT_QA -> VARIANT_GENERATION repair loop.
+ * Unlike the shot-generation retries, `variantQAFailed` is not itself an
+ * exhaustible fact (a failing variant keeps the fact true forever), so the
+ * bound lives in the workflow: after this many re-cut attempts the campaign
+ * escalates to BLOCKED rather than looping.
+ */
+export const DEFAULT_MAX_VARIANT_REPAIR_ATTEMPTS = 2;
+
 export const CampaignProductionWorkflowInputSchema = z.object({
   workspaceId: z.string().uuid(),
   campaignId: z.string().uuid(),
@@ -35,6 +44,18 @@ export const CampaignProductionWorkflowInputSchema = z.object({
    * simplification rather than a hidden constant.
    */
   videoProviderId: z.string().min(1).default('mock-video-generation'),
+  /**
+   * M12: the delivery profile whose durations drive how many variants the
+   * VARIANT_GENERATION stage cuts. Defaults to the resolved M12 profile
+   * (docs/architecture.md §7.2 open question 5).
+   */
+  deliveryProfileKey: z.string().min(1).default('VERTICAL_SHORT_FORM_V1'),
+  /** M12: bound on the automated VARIANT_QA -> VARIANT_GENERATION repair loop. */
+  maxVariantRepairAttempts: z
+    .number()
+    .int()
+    .nonnegative()
+    .default(DEFAULT_MAX_VARIANT_REPAIR_ATTEMPTS),
 });
 export type CampaignProductionWorkflowInput = z.infer<typeof CampaignProductionWorkflowInputSchema>;
 

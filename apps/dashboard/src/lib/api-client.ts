@@ -363,7 +363,6 @@ export interface SoundDesignView {
   budget: { workspace: BudgetStatusView | null; campaign: BudgetStatusView | null };
 }
 
-
 // --- M11 final QA + final approval ---
 
 export interface FinalQaFindingView {
@@ -408,6 +407,98 @@ export interface FinalQaView {
 /** The three non-gated stages a rejected final master may be sent back to. */
 export const FINAL_REPAIR_TARGET_OPTIONS = ['COMPOSITING', 'ROUGH_CUT', 'SOUND_DESIGN'] as const;
 export type FinalRepairTarget = (typeof FINAL_REPAIR_TARGET_OPTIONS)[number];
+
+// --- M12 delivery variants ---
+
+export interface VariantCutPointView {
+  order: number;
+  sourceStartFrame: number;
+  sourceEndFrame: number;
+  variantStartFrame: number;
+}
+
+export interface VariantRetainedClipView {
+  order: number;
+  shotId: string;
+  shotIndex: number;
+  beat?: string;
+  sourceStartFrame: number;
+  sourceEndFrame: number;
+}
+
+export interface VariantCaptionView {
+  text: string;
+  variantStartFrame: number;
+  variantEndFrame: number;
+  safeArea: string;
+}
+
+export interface VariantQaFindingView {
+  id: string;
+  category: string;
+  severity: string;
+  description: string;
+  suggestedAction: string | null;
+}
+
+export interface VariantRowView {
+  specification: {
+    id: string;
+    version: number;
+    targetDurationSeconds: number;
+    targetDurationFrames: number;
+    platform: string;
+    aspectRatio: string;
+    resolutionWidth: number;
+    resolutionHeight: number;
+    frameRate: number;
+    deliveryProfileKey: string;
+    deliveryProfileVersion: number;
+    parentMasterAssetId: string;
+    cutPoints: VariantCutPointView[];
+    retainedClips: VariantRetainedClipView[];
+    retainedCues: unknown[];
+    retainedCaptions: VariantCaptionView[];
+    ctaPlacement: { present: boolean; variantStartFrame?: number; variantEndFrame?: number };
+    captionBurnRequired: boolean;
+    safeAreas: string[];
+    cutRationale: string;
+    removedRationale: string[];
+    approvedForExport: boolean;
+    superseded: boolean;
+  };
+  variant: {
+    id: string;
+    status: string;
+    assetId: string | null;
+    /** Always false — mock renders carry no video; render a placeholder. */
+    hasMedia: false;
+  } | null;
+  qa: {
+    id: string;
+    pass: boolean;
+    overallScore: number;
+    scores: Record<string, number>;
+    findings: VariantQaFindingView[];
+  } | null;
+  job: { id: string; status: string; attemptCount: number; maxAttempts: number } | null;
+  attempts: {
+    attemptNumber: number;
+    status: string;
+    estimatedCostCents: number | null;
+    actualCostCents: number | null;
+    failureReason: string | null;
+    failureMessage: string | null;
+  }[];
+}
+
+export interface VariantsView {
+  campaign: { currentStage: string; isVariantStage: boolean };
+  /** Advisory only — the cancel endpoint re-checks the permission server-side. */
+  caller: { role: string; canCancel: boolean };
+  variants: VariantRowView[];
+  budget: { workspace: BudgetStatusView | null; campaign: BudgetStatusView | null };
+}
 
 export interface ApiClientOptions {
   baseUrl?: string;
@@ -623,6 +714,27 @@ export function createApiClient(
       request<{ approvalId: string; replayed: boolean }>(
         `/workspaces/${workspaceId}/campaigns/${campaignId}/approvals/final`,
         { method: 'POST', body: JSON.stringify({ userId, ...input }) },
+        baseUrl,
+      ),
+    getVariants: (campaignId: string) =>
+      request<VariantsView>(
+        `/workspaces/${workspaceId}/campaigns/${campaignId}/variants?userId=${userId}`,
+        undefined,
+        baseUrl,
+      ),
+
+    /** Signed, time-limited preview URL — null while the mock renderer produces no bytes. */
+    getVariantPreview: (campaignId: string, assetId: string) =>
+      request<{ hasMedia: boolean; url: string | null }>(
+        `/workspaces/${workspaceId}/campaigns/${campaignId}/variants/${assetId}/preview?userId=${userId}`,
+        undefined,
+        baseUrl,
+      ),
+
+    cancelVariants: (campaignId: string) =>
+      request<{ cancelRequested: boolean }>(
+        `/workspaces/${workspaceId}/campaigns/${campaignId}/variants/cancel`,
+        { method: 'POST', body: JSON.stringify({ userId }) },
         baseUrl,
       ),
   };

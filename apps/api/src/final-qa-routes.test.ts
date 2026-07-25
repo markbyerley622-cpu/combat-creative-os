@@ -196,14 +196,17 @@ describe('final-qa routes', () => {
     ['REVIEWER', false],
     ['PRODUCTION_OPERATOR', false],
     ['ANALYST', false],
-  ] as const)('reports whether role %s may approve the final master (canApprove=%s)', async (role, canApprove) => {
-    const store = new InMemoryCampaignStore();
-    const s = await seed(store, { role });
-    const res = await buildApp(store).inject({ method: 'GET', url: url(s, s.memberId) });
+  ] as const)(
+    'reports whether role %s may approve the final master (canApprove=%s)',
+    async (role, canApprove) => {
+      const store = new InMemoryCampaignStore();
+      const s = await seed(store, { role });
+      const res = await buildApp(store).inject({ method: 'GET', url: url(s, s.memberId) });
 
-    expect(res.statusCode).toBe(200);
-    expect(res.json().caller).toMatchObject({ role, canApprove });
-  });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().caller).toMatchObject({ role, canApprove });
+    },
+  );
 
   it('403s a non-member', async () => {
     const store = new InMemoryCampaignStore();

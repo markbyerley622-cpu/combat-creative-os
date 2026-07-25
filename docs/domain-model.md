@@ -67,8 +67,12 @@ shape.
 | RoughEditSpecification   | `schemas/rough-edit-specification.ts` | M9 — the Edit Director's canonical, **immutable**, versioned rough-edit brief (timeline tracks/clips/transitions + overlays as validated nested structures); pins the approved ShotSelectionSet + concept/script versions + prompt/agent provenance                      |
 | CompositionJob           | `schemas/composition-job.ts`          | M9 — mutable status row grouping the bounded-retry render attempts for one RoughEditSpecification (same split as ShotGenerationJob)                                                                                                                                      |
 | CompositionAttempt       | `schemas/composition-job.ts`          | M9 — immutable append-only render attempt; provider project/job ids, budget reservation + actual usage, typed failure                                                                                                                                                    |
-| DeliverySpecification    | `schemas/delivery-specification.ts`   | per platform/aspect-ratio                                                                                                                                                                                                                                                |
-| CreativeVariant          | `schemas/creative-variant.ts`         | a rendered delivery-spec-conformant cut                                                                                                                                                                                                                                  |
+| DeliveryProfile          | `schemas/delivery-profile.ts`         | M12 — the named, **immutable**, versioned delivery contract variants are cut and judged against (`VERTICAL_SHORT_FORM_V1`); resolves architecture.md §7.2 item 5                                                                                                         |
+| DeliverySpecification    | `schemas/delivery-specification.ts`   | per platform/aspect-ratio; derived from a DeliveryProfile                                                                                                                                                                                                                |
+| VariantSpecification     | `schemas/variant-specification.ts`    | M12 — the canonical, **immutable**, versioned cut recipe (exact cut points + retained clips/cues/captions + CTA placement); pins the parent FINAL_MASTER, its FINAL_QA assessment, and every upstream version. Frozen once approved for export                           |
+| VariantGenerationJob     | `schemas/variant-generation-job.ts`   | M12 — mutable status row grouping the bounded-retry render attempts for one VariantSpecification (same split as CompositionJob)                                                                                                                                          |
+| VariantGenerationAttempt | `schemas/variant-generation-job.ts`   | M12 — immutable append-only render attempt; provider ids, budget reservation + actual usage, typed failure                                                                                                                                                               |
+| CreativeVariant          | `schemas/creative-variant.ts`         | a rendered delivery-spec-conformant cut; M12 links it to its VariantSpecification and its VARIANT_QA assessment                                                                                                                                                          |
 | PerformanceMetrics       | `schemas/performance-metrics.ts`      | per CreativeVariant, per platform                                                                                                                                                                                                                                        |
 | PromptTemplate           | `schemas/prompt-template.ts`          | one per agent/purpose                                                                                                                                                                                                                                                    |
 | PromptVersion            | `schemas/prompt-template.ts`          | monotonically versioned; pinned by ShotSpecification                                                                                                                                                                                                                     |
@@ -433,7 +437,29 @@ carrying that `repairTarget`. The retry is still gated by the persisted
 traverses **non-gated** revision edges — a failing master can never cross the
 FINAL gate, and a multi-edge stage that supplies no `repairTarget` is refused
 rather than defaulted. A failure whose findings carry no routable category
-escalates to BLOCKED. M11 stops at VARIANT_GENERATION (BLOCKED, no Variant
+M12 populates `variantsGenerated`, `variantQAPassed` and `variantQAFailed`.
+The `VariantWorkflow` child cuts one `VariantSpecification` per
+`DeliveryProfile` duration from the approved, Final-QA-passed `FINAL_MASTER`,
+renders each, and re-runs Final QA over every completed variant — persisting
+each verdict as an asset-based `QualityAssessment` with `subjectStage:
+'VARIANT_QA'` over the variant's own asset, and promoting the `CreativeVariant`
+to `READY` only on a pass. Those `CreativeVariant.status` values are exactly
+what the three facts read: `variantsGenerated` (any variant row),
+`variantQAPassed` (every row READY), `variantQAFailed` (any row FAILED).
+
+Because only the QA re-run may set `READY`, a render alone can never satisfy
+`variantQAPassed`. A failing variant takes the documented VARIANT_QA →
+VARIANT_GENERATION revision edge via a bounded `AUTO_RETRY` — a single
+non-gated edge, so no `repairTarget` is needed. Unlike the shot-generation
+retries, `variantQAFailed` never becomes false on its own, so the bound lives
+in the workflow (`maxVariantRepairAttempts`); exhausting it escalates to
+BLOCKED rather than looping. Cut legality is enforced _before_ persistence by
+the pure `validateVariantCut`, against the persisted `Timeline` entries, the
+`RoughEditSpecification`'s caption overlays and the `SoundDesignPlan`'s discrete
+cues — never against a duration guess. M12 stops at EXPORTING (BLOCKED, no
+export implementation).
+
+M11 stops at VARIANT_GENERATION (BLOCKED, no Variant
 Generator until M12).
 
 These will be tightened once the workflows/activities milestones (M6–M12,

@@ -56,6 +56,9 @@ function ProductionProgress({ campaignId }: { campaignId: string }) {
   const showsSoundDesign = status.currentStage === 'SOUND_DESIGN';
   // M11: the Final QA verdict and the FINAL gate live on one screen — visible
   // from FINAL_QA (verdict only) through FINAL_APPROVAL (verdict + gate).
+  // M12: delivery variants are visible from VARIANT_GENERATION through VARIANT_QA.
+  const showsVariants =
+    status.currentStage === 'VARIANT_GENERATION' || status.currentStage === 'VARIANT_QA';
   const showsFinalApproval =
     status.currentStage === 'FINAL_QA' || status.currentStage === 'FINAL_APPROVAL';
 
@@ -100,6 +103,11 @@ function ProductionProgress({ campaignId }: { campaignId: string }) {
       {showsFinalApproval && (
         <p>
           <Link href={`/campaigns/${campaignId}/final-approval`}>Final QA &amp; approval →</Link>
+        </p>
+      )}
+      {showsVariants && (
+        <p>
+          <Link href={`/campaigns/${campaignId}/variants`}>View delivery variants →</Link>
         </p>
       )}
       {status.workflow?.status === 'BLOCKED' && (

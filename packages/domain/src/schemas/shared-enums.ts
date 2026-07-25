@@ -248,6 +248,53 @@ export const CREATIVE_VARIANT_STATUSES = ['PENDING', 'RENDERING', 'READY', 'FAIL
 export const CreativeVariantStatusSchema = z.enum(CREATIVE_VARIANT_STATUSES);
 export type CreativeVariantStatus = z.infer<typeof CreativeVariantStatusSchema>;
 
+/**
+ * M12 — the variant-render job/attempt lifecycle. Mirrors the M9 composition
+ * enums exactly (a variant render is the same kind of bounded-retry
+ * motion-graphics dispatch, over a shorter timeline), kept as its own enum so
+ * the two lifecycles can diverge without a migration on the other.
+ */
+export const VARIANT_GENERATION_JOB_STATUSES = [
+  'PENDING',
+  'DISPATCHED',
+  'SUCCEEDED',
+  'FAILED',
+  'BUDGET_EXCEEDED',
+  'CANCELLED',
+] as const;
+export const VariantGenerationJobStatusSchema = z.enum(VARIANT_GENERATION_JOB_STATUSES);
+export type VariantGenerationJobStatus = z.infer<typeof VariantGenerationJobStatusSchema>;
+
+export const VARIANT_GENERATION_ATTEMPT_STATUSES = [
+  'QUEUED',
+  'SUBMITTED',
+  'POLLING',
+  'SUCCEEDED',
+  'FAILED',
+  'TIMED_OUT',
+  'CANCELLED',
+] as const;
+export const VariantGenerationAttemptStatusSchema = z.enum(VARIANT_GENERATION_ATTEMPT_STATUSES);
+export type VariantGenerationAttemptStatus = z.infer<typeof VariantGenerationAttemptStatusSchema>;
+
+/**
+ * Mirrored from `@combat/providers`'s `MotionGraphicsFailureReason` (same
+ * "mirror rather than depend" rationale as the composition enum), plus the two
+ * failure modes that are specific to cutting a variant rather than rendering
+ * one: an illegal cut and a parent master that is no longer usable.
+ */
+export const VARIANT_GENERATION_FAILURE_REASONS = [
+  'UNSUPPORTED_CAPABILITY',
+  'PROVIDER_TIMEOUT',
+  'PROVIDER_REJECTED',
+  'PROVIDER_ERROR',
+  'BUDGET_EXCEEDED',
+  'INVALID_CUT',
+  'STALE_MASTER',
+] as const;
+export const VariantGenerationFailureReasonSchema = z.enum(VARIANT_GENERATION_FAILURE_REASONS);
+export type VariantGenerationFailureReason = z.infer<typeof VariantGenerationFailureReasonSchema>;
+
 /** Vertical/square/horizontal crop targets a campaign brief can request (M4). */
 export const ASPECT_RATIOS = ['9:16', '1:1', '4:5', '16:9'] as const;
 export const AspectRatioSchema = z.enum(ASPECT_RATIOS);

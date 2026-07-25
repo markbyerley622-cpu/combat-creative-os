@@ -122,6 +122,8 @@ describe('campaignProductionWorkflow (wired via fake @temporalio/workflow runtim
       initialStage: 'DRAFT',
       maxRevisionsPerGate: 3,
       videoProviderId: 'mock-video-generation',
+      deliveryProfileKey: 'VERTICAL_SHORT_FORM_V1',
+      maxVariantRepairAttempts: 2,
     });
 
     await vi.waitFor(() => expect(runQuery<string | null>('getPendingGate')).toBe('CONCEPT'));
@@ -209,6 +211,8 @@ describe('campaignProductionWorkflow (wired via fake @temporalio/workflow runtim
       initialStage: 'CONCEPT_REVIEW',
       maxRevisionsPerGate: 3,
       videoProviderId: 'mock-video-generation',
+      deliveryProfileKey: 'VERTICAL_SHORT_FORM_V1',
+      maxVariantRepairAttempts: 2,
     });
 
     await vi.waitFor(() => expect(runQuery('getPendingGate')).toBe('CONCEPT'));
@@ -290,6 +294,8 @@ describe('campaignProductionWorkflow (wired via fake @temporalio/workflow runtim
       initialStage: 'CONCEPT_REVIEW',
       maxRevisionsPerGate: 1,
       videoProviderId: 'mock-video-generation',
+      deliveryProfileKey: 'VERTICAL_SHORT_FORM_V1',
+      maxVariantRepairAttempts: 2,
     });
 
     await vi.waitFor(() => expect(runQuery('getPendingGate')).toBe('CONCEPT'));
@@ -357,6 +363,8 @@ describe('campaignProductionWorkflow (wired via fake @temporalio/workflow runtim
       initialStage: 'CONCEPT_REVIEW',
       maxRevisionsPerGate: 3,
       videoProviderId: 'mock-video-generation',
+      deliveryProfileKey: 'VERTICAL_SHORT_FORM_V1',
+      maxVariantRepairAttempts: 2,
     });
 
     await vi.waitFor(() => expect(runQuery('getPendingGate')).toBe('CONCEPT'));
@@ -425,6 +433,8 @@ describe('campaignProductionWorkflow (wired via fake @temporalio/workflow runtim
       initialStage: 'CONCEPT_REVIEW',
       maxRevisionsPerGate: 3,
       videoProviderId: 'mock-video-generation',
+      deliveryProfileKey: 'VERTICAL_SHORT_FORM_V1',
+      maxVariantRepairAttempts: 2,
     });
 
     await vi.waitFor(() => expect(runQuery('getPendingGate')).toBe('CONCEPT'));

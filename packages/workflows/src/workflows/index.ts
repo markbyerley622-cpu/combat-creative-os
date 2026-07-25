@@ -14,3 +14,8 @@ export * from './compositing-workflow-signals';
 // reducers (applyCancelled/applyDispatchResult/toProgress/…) collide by name
 // with shot-generation-workflow-state's, and are only ever imported directly
 // by compositing-workflow.ts and its unit test, never through the package index.
+export * from './variant-workflow';
+export * from './variant-workflow-activities';
+export * from './variant-workflow-signals';
+// variant-workflow-state is intentionally NOT re-exported here — same
+// name-collision rationale as compositing-workflow-state above.
