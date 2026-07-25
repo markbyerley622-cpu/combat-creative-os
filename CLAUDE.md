@@ -5,7 +5,10 @@ this repository. It is deliberately short — for the full design rationale
 see `docs/architecture.md` and `docs/adr/`.
 
 Current state: **M14 (production hardening) done, plus the post-M14 foundation
-audit repair** — corrective maintenance, not a feature milestone.
+audit repair** — corrective maintenance, not a feature milestone. **AAMP-0
+(architecture and delivery blueprint) is documented** in
+`docs/aamp-architecture.md` and `docs/adr/0005-aamp-creative-memory-and-real-media-architecture.md`;
+no AAMP implementation milestone has started.
 
 ## Post-M14 audit repair (current HEAD)
 
@@ -111,6 +114,77 @@ enforced in code versus deferred. `apps/api/src/dev-fake-server.ts`
 Playwright suite run against. Anthropic is reachable via `@combat/providers`'s
 `ClaudeReasoningProvider`, but only when explicitly configured; the default
 `mock` provider is what every automated test uses.
+
+## AAMP — permanent engineering rules
+
+These rules govern **every** AAMP milestone (AAMP-1 live infrastructure, AAMP-2
+Creative Memory, AAMP-3 real generation, AAMP-4 real composition/export, AAMP-5
+human review and campaign proof, and the deferred creator-distribution work).
+They sit alongside — never above — the boundary, security, migration,
+provider-adapter and workflow-idempotency rules below. Full blueprint:
+`docs/aamp-architecture.md`; rationale: `docs/adr/0005-aamp-creative-memory-and-real-media-architecture.md`.
+
+### Boundaries
+
+- Preserve existing domain, provider, activity, workflow, approval, budget,
+  provenance and tenancy boundaries unless a documented ADR deliberately
+  changes one.
+- Introduce real integrations **behind existing provider interfaces** wherever
+  technically valid — a new capability is an adapter plus, at most, additive
+  optional fields, not a new seam.
+- Agents never call providers, databases, storage, workflows or other agents
+  directly. Creative Memory results reach an agent only as Activity-resolved
+  `AgentInput.context` material — never as an agent-initiated query or tool.
+- Preserve all three existing human gates, unchanged and non-bypassable:
+  concept approval, shot selection, final approval.
+- Every external operation must have typed input/output, idempotency,
+  provenance, bounded retries, structured failure handling, deterministic mock
+  tests and explicit cost/storage controls.
+
+### Cost, credentials and mock mode
+
+- Do not introduce paid APIs, real credentials, model downloads or
+  infrastructure until the relevant implementation milestone explicitly
+  authorises them.
+- Every real-media milestone must preserve mock mode, so CI and local tests run
+  with no GPU access, no external services and no paid credentials.
+
+### Output quality
+
+- Final-output quality is a **hybrid** system:
+  - licensed/original footage and Combat Reviews app assets where appropriate;
+  - AI-generated visuals for concepts, transitions, controlled shots and
+    variants;
+  - deterministic rendering for app overlays, typography, captions, CTA, timing
+    and delivery.
+- Never call output agency-grade or production-ready solely because a video
+  model generated it.
+- Evaluate quality against actual frames, audio, timing, brand rules,
+  licensing, delivery specifications and human approval — measurements from the
+  produced file are binding; an agent's assessment is advisory.
+
+### Reference material and licensing
+
+- Never treat copyright-protected reference footage as reusable output
+  material.
+- Reference material may be analysed for pacing, hook structure, visual
+  language, caption rhythm, editing patterns, storytelling structure and CTA
+  treatment.
+- Only owned, licensed, public-domain or explicitly authorised assets may enter
+  final output.
+- Every retrieved reference must preserve source, licence, rights, expiry,
+  attribution and usage restrictions.
+
+### End of every AAMP milestone
+
+- Update relevant documentation.
+- Review the complete diff.
+- Run milestone-relevant tests.
+- Run full repository validation only once at the end, and only when
+  application code changed.
+- Commit separately.
+- Report only: commit hash, files changed, tests run, remaining limitations,
+  and the exact next milestone.
 
 ## Context and token efficiency
 
