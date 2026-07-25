@@ -59,7 +59,17 @@ export interface BudgetDataSource {
   };
 }
 
-/** Sum of RESERVATION + CHARGE, minus RELEASE — never a stored/decremented field. */
+/**
+ * Sum of RESERVATION + CHARGE, minus RELEASE — never a stored/decremented field.
+ *
+ * The consequence worth stating explicitly, because getting it wrong is what
+ * the post-M14 audit caught (finding C-2): a RESERVATION keeps counting
+ * against the cap until it is closed out by a RELEASE of **its own full
+ * amount**. Charging a completed job without releasing its reservation leaves
+ * both rows standing, so `spentCents` reports roughly twice the money actually
+ * spent. Every settlement path therefore goes through
+ * `settleBudgetReservation` below rather than writing a CHARGE on its own.
+ */
 export function computeSpentCents(entries: BudgetLedgerEntryRecord[]): number {
   return entries.reduce((total, entry) => {
     if (entry.entryType === 'RELEASE') return total - entry.amountCents;
@@ -236,42 +246,146 @@ export async function checkAndReserveBudget(
   return { ok: true, policy, reservation };
 }
 
-/** Closes out a RESERVATION as a confirmed spend — same idempotency key, new ledger row. */
+export interface BudgetLedgerWriteInput {
+  amountCents: number;
+  idempotencyKey: string;
+  campaignId?: string;
+  shotId?: string;
+}
+
+/**
+ * Writes one ledger row, resolving to the existing row when its
+ * `(budgetPolicyId, idempotencyKey)` pair has already been written.
+ *
+ * Activity retries and workflow replays re-run settlement from the top, so a
+ * CHARGE or RELEASE can legitimately be attempted twice for the same job. The
+ * unique constraint is the authority on which write won; this resolves to it
+ * rather than propagating the violation, exactly as `checkAndReserveBudget`
+ * does for RESERVATION. The pre-read is the common path and the catch handles
+ * the concurrent-writer race the pre-read cannot.
+ */
+async function writeLedgerEntryOnce(
+  db: BudgetDataSource,
+  policyId: string,
+  workspaceId: string,
+  entryType: BudgetLedgerEntryType,
+  input: BudgetLedgerWriteInput,
+): Promise<BudgetLedgerEntryRecord> {
+  const existing = await db.budgetLedgerEntry.findFirst({
+    where: { budgetPolicyId: policyId, idempotencyKey: input.idempotencyKey },
+  });
+  if (existing) return existing;
+
+  try {
+    return await db.budgetLedgerEntry.create({
+      data: {
+        workspaceId,
+        budgetPolicyId: policyId,
+        entryType,
+        amountCents: input.amountCents,
+        idempotencyKey: input.idempotencyKey,
+        campaignId: input.campaignId,
+        shotId: input.shotId,
+      },
+    });
+  } catch (error) {
+    const winner = await db.budgetLedgerEntry.findFirst({
+      where: { budgetPolicyId: policyId, idempotencyKey: input.idempotencyKey },
+    });
+    if (winner) return winner;
+    throw error;
+  }
+}
+
+/**
+ * Records a confirmed spend. Idempotent on `(policyId, idempotencyKey)`.
+ *
+ * This does **not** on its own close out the RESERVATION it corresponds to —
+ * see `computeSpentCents`. Prefer `settleBudgetReservation`, which pairs the
+ * charge with the matching release; this remains exported for the ledger-level
+ * tests and for a charge that never had a reservation behind it.
+ */
 export async function chargeBudget(
   db: BudgetDataSource,
   policyId: string,
   workspaceId: string,
-  input: { amountCents: number; idempotencyKey: string; campaignId?: string; shotId?: string },
+  input: BudgetLedgerWriteInput,
 ): Promise<BudgetLedgerEntryRecord> {
-  return db.budgetLedgerEntry.create({
-    data: {
-      workspaceId,
-      budgetPolicyId: policyId,
-      entryType: 'CHARGE',
-      amountCents: input.amountCents,
-      idempotencyKey: input.idempotencyKey,
-      campaignId: input.campaignId,
-      shotId: input.shotId,
-    },
-  });
+  return writeLedgerEntryOnce(db, policyId, workspaceId, 'CHARGE', input);
 }
 
-/** Closes out a RESERVATION on failure/cancellation, freeing the reserved amount. */
+/** Closes out a RESERVATION, freeing the reserved amount. Idempotent on `(policyId, idempotencyKey)`. */
 export async function releaseBudget(
   db: BudgetDataSource,
   policyId: string,
   workspaceId: string,
-  input: { amountCents: number; idempotencyKey: string; campaignId?: string; shotId?: string },
+  input: BudgetLedgerWriteInput,
 ): Promise<BudgetLedgerEntryRecord> {
-  return db.budgetLedgerEntry.create({
-    data: {
-      workspaceId,
-      budgetPolicyId: policyId,
-      entryType: 'RELEASE',
-      amountCents: input.amountCents,
-      idempotencyKey: input.idempotencyKey,
-      campaignId: input.campaignId,
-      shotId: input.shotId,
-    },
-  });
+  return writeLedgerEntryOnce(db, policyId, workspaceId, 'RELEASE', input);
+}
+
+export interface BudgetSettlementInput {
+  /** The amount the pre-dispatch RESERVATION put on the ledger, which this settlement must fully close out. */
+  readonly reservedCents: number;
+  /** The provider's actual reported cost. May exceed `reservedCents` when the estimate was low. */
+  readonly actualCents: number;
+  /** The reservation's own key; the CHARGE and RELEASE rows derive their keys from it. */
+  readonly reservationIdempotencyKey: string;
+  readonly campaignId?: string;
+  readonly shotId?: string;
+}
+
+export interface BudgetSettlement {
+  readonly charge?: BudgetLedgerEntryRecord;
+  readonly release?: BudgetLedgerEntryRecord;
+}
+
+/**
+ * The single settlement path for a job that reached a terminal provider
+ * outcome: charge what was actually spent, and release the reservation in
+ * **full**.
+ *
+ * Post-M14 audit finding C-2. The three poll Activities each charged the
+ * actual cost and released only `estimated − actual`, leaving the original
+ * RESERVATION row standing alongside its CHARGE. Because `computeSpentCents`
+ * counts both, a successful job inflated `spentCents` to roughly twice its
+ * real cost — under-estimated jobs inflated it further still (no remainder
+ * meant no release at all), so a workspace could be locked out of budget it
+ * had never spent. Releasing the whole reservation nets the ledger to exactly
+ * `actualCents`, which is the accounting invariant `budget-integrity.test.ts`
+ * now asserts directly.
+ *
+ * Both writes are idempotent, so a retried Activity that already settled
+ * observes the same ledger rather than double-charging. A zero-amount row is
+ * skipped rather than written — an uncapped level never reaches here (its
+ * caller finds no policy), but a job with no estimate or no cost otherwise
+ * would litter the ledger with meaningless rows.
+ */
+export async function settleBudgetReservation(
+  db: BudgetDataSource,
+  policyId: string,
+  workspaceId: string,
+  input: BudgetSettlementInput,
+): Promise<BudgetSettlement> {
+  const common = { campaignId: input.campaignId, shotId: input.shotId };
+
+  const charge =
+    input.actualCents > 0
+      ? await chargeBudget(db, policyId, workspaceId, {
+          amountCents: input.actualCents,
+          idempotencyKey: `${input.reservationIdempotencyKey}:charge`,
+          ...common,
+        })
+      : undefined;
+
+  const release =
+    input.reservedCents > 0
+      ? await releaseBudget(db, policyId, workspaceId, {
+          amountCents: input.reservedCents,
+          idempotencyKey: `${input.reservationIdempotencyKey}:release`,
+          ...common,
+        })
+      : undefined;
+
+  return { charge, release };
 }

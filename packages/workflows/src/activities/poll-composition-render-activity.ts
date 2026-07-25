@@ -7,7 +7,6 @@ import type {
   RoughEditSpecificationDataSource,
 } from '@combat/database';
 import {
-  chargeBudget,
   createAssetWithProvenance,
   createEditDecisionList,
   createRenderJob,
@@ -17,6 +16,7 @@ import {
   getRoughEditSpecification,
   listRenderJobsForCampaign,
   releaseBudget,
+  settleBudgetReservation,
   updateCompositionAttempt,
   updateCompositionJob,
 } from '@combat/database';
@@ -63,9 +63,10 @@ export interface PollCompositionRenderActivityDeps {
  * (`AssetKind.ROUGH_CUT`, deduped by checksum), a SUCCEEDED COMPOSITING
  * `RenderJob` (deduped by providerJobRef — this is what `compositingComplete`
  * reads), and the derived `EditDecisionList` (idempotent per spec version —
- * what `roughCutAssembled` reads), then charges the provider's actual usage and
- * releases the remainder; FAILED/TIMED_OUT/CANCELLED release the full
- * reservation. Re-polling an already-terminal attempt replays its outcome
+ * what `roughCutAssembled` reads), then settles the budget — charging the
+ * provider's actual usage and releasing the reservation in full, so
+ * `spentCents` reflects the real cost and nothing else; FAILED/TIMED_OUT/
+ * CANCELLED release the reservation without a charge. Re-polling an already-terminal attempt replays its outcome
  * without calling the provider or touching the ledger again.
  */
 export function createPollCompositionRenderActivity(
@@ -266,21 +267,15 @@ async function chargeAcrossLevels(
       where: { workspaceId: ctx.workspaceId, level, scopeId },
     });
     if (!policy) continue;
+    // Charge the real cost AND release the whole reservation — see
+    // settleBudgetReservation's doc comment (post-M14 audit finding C-2).
     // eslint-disable-next-line no-await-in-loop -- sequential ledger writes
-    await chargeBudget(deps.budgetDb, policy.id, ctx.workspaceId, {
-      amountCents: amounts.actualCents,
-      idempotencyKey: `${idempotencyKey}:charge`,
+    await settleBudgetReservation(deps.budgetDb, policy.id, ctx.workspaceId, {
+      reservedCents: amounts.estimatedCents,
+      actualCents: amounts.actualCents,
+      reservationIdempotencyKey: idempotencyKey,
       campaignId: ctx.campaignId,
     });
-    const remainder = amounts.estimatedCents - amounts.actualCents;
-    if (remainder > 0) {
-      // eslint-disable-next-line no-await-in-loop -- same rationale
-      await releaseBudget(deps.budgetDb, policy.id, ctx.workspaceId, {
-        amountCents: remainder,
-        idempotencyKey: `${idempotencyKey}:release`,
-        campaignId: ctx.campaignId,
-      });
-    }
   }
 }
 

@@ -1,5 +1,5 @@
 import { proxyActivities } from '@temporalio/workflow';
-import type * as activities from '../activities';
+import type { PingActivities } from './ping-workflow-activities';
 
 /**
  * Deterministic workflow code only — no I/O, no fetch, no Date.now(), no
@@ -8,7 +8,7 @@ import type * as activities from '../activities';
  * @temporalio/worker bundles into the workflow sandbox; see
  * ping-workflow.bundle.test.ts, which fails if that boundary is violated.
  */
-const { pingActivity } = proxyActivities<typeof activities>({
+const { pingActivity } = proxyActivities<PingActivities>({
   startToCloseTimeout: '10 seconds',
   retry: {
     initialInterval: '1 second',

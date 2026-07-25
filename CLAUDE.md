@@ -4,9 +4,54 @@ This file is the operating contract for anyone (human or agent) working in
 this repository. It is deliberately short — for the full design rationale
 see `docs/architecture.md` and `docs/adr/`.
 
-Current milestone: **M14, production hardening & operational safety, done** —
-not a feature milestone. It closes the gap between "works" and "safe to run",
-and turns several previously-documented responsibilities into enforced code.
+Current state: **M14 (production hardening) done, plus the post-M14 foundation
+audit repair** — corrective maintenance, not a feature milestone.
+
+## Post-M14 audit repair (current HEAD)
+
+A read-only audit of the M14 tree returned FAIL. Six findings, all repaired.
+Full accounting in `docs/architecture.md` §8's post-M14 entry.
+
+**C-1 — the Worker registered no usable activity.** `apps/worker` passed
+`@combat/workflows`' `activities` namespace to `Worker.create`, but that
+namespace exports `create*Activity(deps)` _factories_, so not one proxied name
+was registered and every workflow would have failed on its first Activity task
+against a real Temporal server. Each workflow contract now also exports a
+runtime name tuple, compile-time proven to cover its interface exactly
+(`workflows/activity-name-contract.ts`); `createWorkerActivities(deps)`
+(`packages/workflows/src/worker`) builds the real registration object from those
+same contracts; `apps/worker` wires the concrete dependencies. There is no
+second activity-name list anywhere. A conformance test asserts exact coverage in
+both directions with named diagnostics — a future missing registration fails
+before merge.
+
+**C-2 — `spentCents` reported roughly double the real spend.** All three
+settlement paths charged the actual cost but released only `estimated − actual`,
+leaving the RESERVATION row standing beside its CHARGE; an under-estimated job
+released nothing at all. `settleBudgetReservation` is now the single settlement
+path — charge actual, release the reservation in full — and `chargeBudget` /
+`releaseBudget` are idempotent on `(policyId, idempotencyKey)`. The test that
+encoded the wrong total was corrected.
+
+**C-3 — registry conformance was cosmetic.** The M14 check matched only each
+audited path's last URL segment against the router dump, plus a hardcoded route
+count. `route-inventory.ts` now parses `printRoutes({ includeHooks: false })`
+into full `(method, path)` pairs and compares them to `MUTATING_ROUTES` as exact
+sets both ways. Every registry entry also gets a permission probe: accepted for
+a role holding the audited permission with valid resource ownership, 403 with no
+side effects for the most-privileged role lacking it.
+
+**H-1** — the in-memory store now mirrors every `(campaignId, version)` family,
+every per-job idempotency-key constraint and the one-job-per-specification
+constraints, not just the three it had. **H-2** — `.github/workflows/ci.yml`
+runs the documented validation commands; nothing else. **H-3** —
+`dev-fake-server.ts` gained campaigns parked at `HUMAN_SHOT_SELECTION` and
+`FINAL_APPROVAL`, and the Playwright suite covers both gates: the UI is
+reachable, gate-advancing controls stay disabled until the required state
+exists, and the request behind each control is refused server-side when sent
+directly.
+
+## M14 — production hardening & operational safety
 
 **Authorization audit.** All 18 mutating `apps/api` endpoints are enumerated in
 a typed registry (`apps/api/src/route-authorization.ts`) carrying the exact
@@ -48,10 +93,13 @@ strings, auth headers and model payloads, while leaving correlation identifiers
 readable. The in-memory store now mirrors the `Asset` uniqueness constraint, so
 a missing checksum-dedup can no longer pass tests while failing on Postgres.
 
-**Remaining production blockers — unchanged by M14.** There is still **no real
-caller authentication**: the request-supplied `userId` remains the documented
-temporary development identity, and M14 hardens what an identity may _do_, never
-proves _who_ it is. Also outstanding: applied database migrations (no live
+**Remaining production blockers — unchanged by M14 or by the audit repair.**
+There is still **no real caller authentication**: the request-supplied `userId`
+remains the documented temporary development identity, and M14 hardens what an
+identity may _do_, never proves _who_ it is. The audit repair makes the Worker's
+activity _registration_ correct and provable without a Temporal server; it does
+not prove the Worker runs against one, because none is available here. Also
+outstanding: applied database migrations (no live
 Postgres in this environment — every model since M10 is unmigrated), live
 Temporal/MinIO/ffmpeg, real Veo/Runway/ComfyUI adapters (only the deterministic
 mock — do not connect one or spend money without an explicit, separate
@@ -106,6 +154,10 @@ Playwright suite run against. Anthropic is reachable via `@combat/providers`'s
   `domain` (not `database`, not `providers` directly). `packages/testing` is
   a leaf: other packages may depend on it for test helpers; it depends on
   nothing else in the workspace, to keep the dependency graph acyclic.
+  `apps/worker` is the Worker-side composition root: it may depend on
+  `database`, `providers` and `agents` to construct the concrete collaborators
+  `createWorkerActivities` injects, the same way `apps/api` does. It holds no
+  business logic of its own.
 - Every entity that isn't global reference data carries a `workspaceId`.
   Single-workspace MVP now; the schema and repository layer already require
   scoping — see `docs/architecture.md` §4.4.
@@ -128,14 +180,20 @@ Before reporting any change complete, run (scoped to what you touched, or
 the whole tree for cross-cutting changes):
 
 ```sh
-pnpm typecheck   # turbo run typecheck across the workspace
-pnpm lint        # turbo run lint
-pnpm test        # turbo run test (Vitest)
-pnpm build       # turbo run build
+pnpm typecheck     # turbo run typecheck across the workspace
+pnpm lint          # turbo run lint
+pnpm test          # turbo run test (Vitest)
+pnpm build         # turbo run build
+pnpm format:check  # prettier --check .
 ```
 
 Dashboard end-to-end coverage: `pnpm --filter dashboard test:e2e` (Playwright;
 builds and boots the app first — see `apps/dashboard/playwright.config.ts`).
+
+`.github/workflows/ci.yml` runs exactly these commands on every push and pull
+request — nothing else. Keep the two in step: a command added here belongs
+there, and no deployment, secret, paid service or external infrastructure
+belongs in that workflow.
 
 If a command can't be run because required local infrastructure isn't
 available (no Docker, no live Postgres/Temporal), say so explicitly rather

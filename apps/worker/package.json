@@ -11,9 +11,13 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@combat/agents": "workspace:*",
     "@combat/config": "workspace:*",
+    "@combat/database": "workspace:*",
     "@combat/observability": "workspace:*",
+    "@combat/providers": "workspace:*",
     "@combat/workflows": "workspace:*",
+    "@temporalio/activity": "^1.11.6",
     "@temporalio/worker": "^1.11.6"
   },
   "devDependencies": {

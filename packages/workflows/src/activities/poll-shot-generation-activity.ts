@@ -1,11 +1,11 @@
 import type { GenerationCandidateRecord, ShotGenerationDataSource } from '@combat/database';
 import {
-  chargeBudget,
   createAssetWithProvenance,
   createGenerationCandidate,
   getShotGenerationAttemptById,
   getShotGenerationJobById,
   releaseBudget,
+  settleBudgetReservation,
   updateGenerationCandidate,
   updateShotGenerationAttempt,
   updateShotGenerationJob,
@@ -85,23 +85,16 @@ async function releaseOrChargeAcrossLevels(
       continue;
     }
 
+    // Charge the real cost AND release the whole reservation — see
+    // settleBudgetReservation's doc comment (post-M14 audit finding C-2).
     // eslint-disable-next-line no-await-in-loop -- same rationale as above
-    await chargeBudget(deps.budgetDb, policy.id, ctx.workspaceId, {
-      amountCents: outcome.actualCents,
-      idempotencyKey: `${idempotencyKey}:charge`,
+    await settleBudgetReservation(deps.budgetDb, policy.id, ctx.workspaceId, {
+      reservedCents: outcome.estimatedCents,
+      actualCents: outcome.actualCents,
+      reservationIdempotencyKey: idempotencyKey,
       campaignId: ctx.campaignId,
       shotId: ctx.shotId,
     });
-    const remainder = outcome.estimatedCents - outcome.actualCents;
-    if (remainder > 0) {
-      // eslint-disable-next-line no-await-in-loop -- same rationale as above
-      await releaseBudget(deps.budgetDb, policy.id, ctx.workspaceId, {
-        amountCents: remainder,
-        idempotencyKey: `${idempotencyKey}:release`,
-        campaignId: ctx.campaignId,
-        shotId: ctx.shotId,
-      });
-    }
   }
 }
 

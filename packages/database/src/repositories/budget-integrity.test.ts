@@ -6,6 +6,7 @@ import {
   checkAndReserveBudget,
   getBudgetStatus,
   releaseBudget,
+  settleBudgetReservation,
 } from './budget-repository';
 
 /**
@@ -140,24 +141,45 @@ describe('budget integrity — idempotency', () => {
     expect(status!.spentCents).toBe(500);
   });
 
-  it('a retried charge on the same key is written once', async () => {
+  it('a retried charge on the same key resolves to the first row instead of throwing', async () => {
     const store = new InMemoryCampaignStore();
     const ctx = seedPolicy(store, 10_000);
     await reserve(store, ctx, 500, 'k');
 
-    await chargeBudget(store, ctx.policyId, ctx.workspaceId, {
+    const first = await chargeBudget(store, ctx.policyId, ctx.workspaceId, {
       amountCents: 480,
       idempotencyKey: 'k:charge',
       campaignId: ctx.campaignId,
     });
-    await expect(
-      chargeBudget(store, ctx.policyId, ctx.workspaceId, {
-        amountCents: 480,
-        idempotencyKey: 'k:charge',
-        campaignId: ctx.campaignId,
-      }),
-    ).rejects.toThrow(/unique constraint/);
+    // An Activity retry re-runs settlement from the top. The unique constraint
+    // is the authority on which write won, and the retry resolves to it rather
+    // than crashing the Activity mid-settlement (post-M14 audit finding C-2).
+    const retried = await chargeBudget(store, ctx.policyId, ctx.workspaceId, {
+      amountCents: 480,
+      idempotencyKey: 'k:charge',
+      campaignId: ctx.campaignId,
+    });
 
+    expect(retried.id).toBe(first.id);
+    expect(store.budgetLedgerEntries.filter((e) => e.entryType === 'CHARGE')).toHaveLength(1);
+  });
+
+  it('concurrent retries of the SAME charge key write exactly one row', async () => {
+    const store = new InMemoryCampaignStore();
+    const ctx = seedPolicy(store, 10_000);
+    await reserve(store, ctx, 500, 'k');
+
+    const results = await Promise.all(
+      Array.from({ length: 5 }, () =>
+        chargeBudget(store, ctx.policyId, ctx.workspaceId, {
+          amountCents: 480,
+          idempotencyKey: 'k:charge',
+          campaignId: ctx.campaignId,
+        }),
+      ),
+    );
+
+    expect(new Set(results.map((r) => r.id)).size).toBe(1);
     expect(store.budgetLedgerEntries.filter((e) => e.entryType === 'CHARGE')).toHaveLength(1);
   });
 });
@@ -181,28 +203,141 @@ describe('budget integrity — reconciliation after dispatch outcomes', () => {
     expect(next.ok).toBe(true);
   });
 
-  it('successful provider work is charged once and the remainder released', async () => {
+  /**
+   * Post-M14 audit finding C-2. This test previously asserted 1,400 for a job
+   * that really cost 700: it released only the `estimated − actual` remainder,
+   * so the RESERVATION row stayed on the ledger beside its CHARGE and both
+   * were counted. The invariant is now stated directly — once a job settles,
+   * `spentCents` equals what the provider actually charged.
+   */
+  it('one successful job leaves spentCents equal to the actual provider cost', async () => {
     const store = new InMemoryCampaignStore();
     const ctx = seedPolicy(store, 10_000);
     await reserve(store, ctx, 1_000, 'k');
 
     // Actual usage came in under the estimate.
-    await chargeBudget(store, ctx.policyId, ctx.workspaceId, {
-      amountCents: 700,
-      idempotencyKey: 'k:charge',
-      campaignId: ctx.campaignId,
-    });
-    await releaseBudget(store, ctx.policyId, ctx.workspaceId, {
-      amountCents: 300,
-      idempotencyKey: 'k:release-remainder',
+    await settleBudgetReservation(store, ctx.policyId, ctx.workspaceId, {
+      reservedCents: 1_000,
+      actualCents: 700,
+      reservationIdempotencyKey: 'k',
       campaignId: ctx.campaignId,
     });
 
     const status = await getBudgetStatus(store, ctx.workspaceId, 'WORKSPACE', ctx.workspaceId);
-    // Reservation 1000 + charge 700 − release 300 nets to the true 700 spend
-    // once the reservation is closed out by its release.
-    expect(status!.spentCents).toBe(1_400);
+    expect(status!.spentCents).toBe(700);
+    expect(status!.remainingCents).toBe(9_300);
     expect(store.budgetLedgerEntries.filter((e) => e.entryType === 'CHARGE')).toHaveLength(1);
+  });
+
+  it('an over-estimate does not sterilise the headroom it never used', async () => {
+    const store = new InMemoryCampaignStore();
+    const ctx = seedPolicy(store, 1_000);
+    await reserve(store, ctx, 900, 'k');
+
+    await settleBudgetReservation(store, ctx.policyId, ctx.workspaceId, {
+      reservedCents: 900,
+      actualCents: 100,
+      reservationIdempotencyKey: 'k',
+      campaignId: ctx.campaignId,
+    });
+
+    const status = await getBudgetStatus(store, ctx.workspaceId, 'WORKSPACE', ctx.workspaceId);
+    expect(status!.spentCents).toBe(100);
+    // The 800 reserved but never spent is genuinely reusable.
+    const next = await reserve(store, ctx, 850, 'next');
+    expect(next.ok).toBe(true);
+  });
+
+  it('an under-estimate settles to the higher actual cost, not to the estimate', async () => {
+    const store = new InMemoryCampaignStore();
+    const ctx = seedPolicy(store, 10_000);
+    await reserve(store, ctx, 500, 'k');
+
+    // The provider came in over the estimate, so there is no remainder to
+    // release — precisely the case the old remainder-only logic left
+    // permanently uncorrected.
+    await settleBudgetReservation(store, ctx.policyId, ctx.workspaceId, {
+      reservedCents: 500,
+      actualCents: 800,
+      reservationIdempotencyKey: 'k',
+      campaignId: ctx.campaignId,
+    });
+
+    const status = await getBudgetStatus(store, ctx.workspaceId, 'WORKSPACE', ctx.workspaceId);
+    expect(status!.spentCents).toBe(800);
+  });
+
+  it('a retried settlement neither charges nor releases twice', async () => {
+    const store = new InMemoryCampaignStore();
+    const ctx = seedPolicy(store, 10_000);
+    await reserve(store, ctx, 1_000, 'k');
+    // The same key replayed: a duplicate reservation attempt, then repeated
+    // settlement runs as an Activity retry after a mid-settlement crash does.
+    await reserve(store, ctx, 1_000, 'k');
+
+    for (let i = 0; i < 3; i += 1) {
+      // eslint-disable-next-line no-await-in-loop -- sequential replay is the point
+      await settleBudgetReservation(store, ctx.policyId, ctx.workspaceId, {
+        reservedCents: 1_000,
+        actualCents: 700,
+        reservationIdempotencyKey: 'k',
+        campaignId: ctx.campaignId,
+      });
+    }
+
+    const status = await getBudgetStatus(store, ctx.workspaceId, 'WORKSPACE', ctx.workspaceId);
+    expect(status!.spentCents).toBe(700);
+    expect(store.budgetLedgerEntries).toHaveLength(3);
+    expect(store.budgetLedgerEntries.filter((e) => e.entryType === 'RESERVATION')).toHaveLength(1);
+    expect(store.budgetLedgerEntries.filter((e) => e.entryType === 'CHARGE')).toHaveLength(1);
+    expect(store.budgetLedgerEntries.filter((e) => e.entryType === 'RELEASE')).toHaveLength(1);
+  });
+
+  it('a settled job frees exactly its unspent reservation for a concurrent job', async () => {
+    const store = new InMemoryCampaignStore();
+    const ctx = seedPolicy(store, 1_000);
+
+    // Two distinct jobs each reserve 500 — the cap is exactly consumed.
+    const [a, b] = await Promise.all([
+      reserve(store, ctx, 500, 'job-a'),
+      reserve(store, ctx, 500, 'job-b'),
+    ]);
+    expect(a!.ok && b!.ok).toBe(true);
+    const blocked = await reserve(store, ctx, 1, 'job-c');
+    expect(blocked.ok).toBe(false);
+
+    // Job A completes for 100. Only its unspent 400 comes back.
+    await settleBudgetReservation(store, ctx.policyId, ctx.workspaceId, {
+      reservedCents: 500,
+      actualCents: 100,
+      reservationIdempotencyKey: 'job-a',
+      campaignId: ctx.campaignId,
+    });
+
+    const status = await getBudgetStatus(store, ctx.workspaceId, 'WORKSPACE', ctx.workspaceId);
+    expect(status!.spentCents).toBe(600);
+    expect(status!.remainingCents).toBe(400);
+    const nowFits = await reserve(store, ctx, 400, 'job-c-retry');
+    expect(nowFits.ok).toBe(true);
+    const stillTooBig = await reserve(store, ctx, 1, 'job-d');
+    expect(stillTooBig.ok).toBe(false);
+  });
+
+  it('a provider failure after dispatch leaves no charge and no reservation', async () => {
+    const store = new InMemoryCampaignStore();
+    const ctx = seedPolicy(store, 1_000);
+    await reserve(store, ctx, 900, 'k');
+
+    // The failure path releases the reservation and writes no CHARGE at all.
+    await releaseBudget(store, ctx.policyId, ctx.workspaceId, {
+      amountCents: 900,
+      idempotencyKey: 'k:release',
+      campaignId: ctx.campaignId,
+    });
+
+    const status = await getBudgetStatus(store, ctx.workspaceId, 'WORKSPACE', ctx.workspaceId);
+    expect(status!.spentCents).toBe(0);
+    expect(store.budgetLedgerEntries.filter((e) => e.entryType === 'CHARGE')).toHaveLength(0);
   });
 
   it('a rejected reservation produces no ledger row of any type', async () => {
@@ -244,6 +379,76 @@ describe('budget integrity — tenant isolation', () => {
 
     expect(aBlocked.ok).toBe(false);
     expect(bFine.ok).toBe(true);
+  });
+
+  it('workspace and campaign budgets settle independently for the same job', async () => {
+    const store = new InMemoryCampaignStore();
+    const workspaceId = randomUUID();
+    const campaignA = randomUUID();
+    const campaignB = randomUUID();
+    const workspacePolicyId = randomUUID();
+    const campaignAPolicyId = randomUUID();
+    const campaignBPolicyId = randomUUID();
+    store.budgetPolicies.push(
+      {
+        id: workspacePolicyId,
+        workspaceId,
+        level: 'WORKSPACE',
+        scopeId: workspaceId,
+        limitCents: 10_000,
+      },
+      {
+        id: campaignAPolicyId,
+        workspaceId,
+        level: 'CAMPAIGN',
+        scopeId: campaignA,
+        limitCents: 5_000,
+      },
+      {
+        id: campaignBPolicyId,
+        workspaceId,
+        level: 'CAMPAIGN',
+        scopeId: campaignB,
+        limitCents: 5_000,
+      },
+    );
+
+    // One job in campaign A reserves and settles at both applicable levels,
+    // exactly as a dispatch/poll Activity pair does.
+    for (const [level, scopeId] of [
+      ['WORKSPACE', workspaceId],
+      ['CAMPAIGN', campaignA],
+    ] as const) {
+      // eslint-disable-next-line no-await-in-loop -- ledger writes are sequential by design
+      await checkAndReserveBudget(store, {
+        workspaceId,
+        level,
+        scopeId,
+        requiredCents: 1_000,
+        idempotencyKey: 'job',
+        campaignId: campaignA,
+      });
+    }
+    for (const policyId of [workspacePolicyId, campaignAPolicyId]) {
+      // eslint-disable-next-line no-await-in-loop -- same rationale
+      await settleBudgetReservation(store, policyId, workspaceId, {
+        reservedCents: 1_000,
+        actualCents: 640,
+        reservationIdempotencyKey: 'job',
+        campaignId: campaignA,
+      });
+    }
+
+    const workspaceStatus = await getBudgetStatus(store, workspaceId, 'WORKSPACE', workspaceId);
+    const aStatus = await getBudgetStatus(store, workspaceId, 'CAMPAIGN', campaignA);
+    const bStatus = await getBudgetStatus(store, workspaceId, 'CAMPAIGN', campaignB);
+
+    // The spend lands once on each applicable level and nowhere else — the
+    // workspace roll-up is not double-counted, and campaign B is untouched.
+    expect(workspaceStatus!.spentCents).toBe(640);
+    expect(aStatus!.spentCents).toBe(640);
+    expect(bStatus!.spentCents).toBe(0);
+    expect(bStatus!.remainingCents).toBe(5_000);
   });
 
   it('an uncapped scope (no policy) reserves without creating a ledger row', async () => {

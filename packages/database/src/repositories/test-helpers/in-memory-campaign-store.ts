@@ -123,10 +123,15 @@ import type {
  *  - `campaign.updateMany` only applies when the where-clause (including
  *    `currentStage`/`version`) matches every row — this is what makes the
  *    compare-and-swap concurrency guard testable without a live database.
- *  - unique constraints (`(campaignId, idempotencyKey)` on transition
- *    audits, `(budgetPolicyId, idempotencyKey)` on ledger entries) throw,
- *    matching Postgres's behavior, so idempotency/duplicate-reservation
- *    tests exercise the real failure mode.
+ *  - unique constraints throw, matching Postgres's behavior, so
+ *    idempotency and duplicate-version tests exercise the real failure mode.
+ *    Post-M14 audit finding H-1: this used to cover only three constraints
+ *    (transition audits, ledger entries, assets), which meant a duplicate
+ *    `(campaignId, version)` row or a double-inserted generation attempt
+ *    passed the entire suite and would have failed on the first real
+ *    database. Every `(campaignId, version)` family, every per-job
+ *    idempotency-key constraint and the one-job-per-specification
+ *    constraints are now mirrored — see `assertUnique`.
  *
  * This is intentionally one large fake rather than one per repository file —
  * campaign-transition-service.ts composes many repositories in a single
@@ -233,6 +238,25 @@ export class InMemoryCampaignStore
   promptVersions: PromptVersionRecord[] = [];
   agentInvocations: AgentInvocationRecord[] = [];
 
+  /**
+   * Throws the same way Postgres does when an insert would violate a unique
+   * index. Post-M14 audit finding H-1: this fake previously enforced only
+   * three of the schema's unique constraints, so an idempotency bug or a
+   * duplicate version could pass the whole suite and fail on the first real
+   * database. `table` and `columns` are the schema's own names, so a failure
+   * message points straight at the constraint it mirrors.
+   */
+  private assertUnique<TRow>(
+    table: string,
+    columns: string,
+    rows: readonly TRow[],
+    conflicts: (row: TRow) => boolean,
+  ): void {
+    if (rows.some(conflicts)) {
+      throw new Error(`unique constraint violation on ${table} (${columns})`);
+    }
+  }
+
   seedCampaign(overrides: Partial<CampaignRecord> = {}): CampaignRecord {
     const now = new Date();
     const campaign: CampaignRecord = {
@@ -257,6 +281,14 @@ export class InMemoryCampaignStore
   } = {
     create: async ({ data }) => {
       const now = new Date();
+      if (data.idempotencyKey !== undefined) {
+        this.assertUnique(
+          'campaigns',
+          'workspaceId, idempotencyKey',
+          this.campaigns,
+          (c) => c.workspaceId === data.workspaceId && c.idempotencyKey === data.idempotencyKey,
+        );
+      }
       const campaign: CampaignRecord = {
         id: randomUUID(),
         currentStage: 'DRAFT',
@@ -355,6 +387,12 @@ export class InMemoryCampaignStore
   campaignBrief: TransitionFactsDataSource['campaignBrief'] &
     CampaignBriefDataSource['campaignBrief'] = {
     create: async ({ data }) => {
+      this.assertUnique(
+        'campaign_briefs',
+        'campaignId, version',
+        this.campaignBriefRecords,
+        (row) => row.campaignId === data.campaignId && row.version === data.version,
+      );
       const brief: CampaignBriefRecord = { id: randomUUID(), createdAt: new Date(), ...data };
       this.campaignBriefRecords.push(brief);
       return brief;
@@ -371,6 +409,12 @@ export class InMemoryCampaignStore
   };
   strategy: StrategyDataSource['strategy'] = {
     create: async ({ data }) => {
+      this.assertUnique(
+        'strategies',
+        'campaignId, version',
+        this.strategies,
+        (row) => row.campaignId === data.campaignId && row.version === data.version,
+      );
       const strategy: StrategyRecord = { id: randomUUID(), createdAt: new Date(), ...data };
       this.strategies.push(strategy);
       return strategy;
@@ -383,6 +427,12 @@ export class InMemoryCampaignStore
   creativeConcept: TransitionFactsDataSource['creativeConcept'] &
     CreativeConceptDataSource['creativeConcept'] = {
     create: async ({ data }) => {
+      this.assertUnique(
+        'creative_concepts',
+        'campaignId, version',
+        this.creativeConceptRecords,
+        (row) => row.campaignId === data.campaignId && row.version === data.version,
+      );
       const concept: CreativeConceptRecord = { id: randomUUID(), createdAt: new Date(), ...data };
       this.creativeConceptRecords.push(concept);
       return concept;
@@ -397,6 +447,12 @@ export class InMemoryCampaignStore
   };
   script: TransitionFactsDataSource['script'] & ScriptDataSource['script'] = {
     create: async ({ data }) => {
+      this.assertUnique(
+        'scripts',
+        'campaignId, version',
+        this.scriptRecords,
+        (row) => row.campaignId === data.campaignId && row.version === data.version,
+      );
       const script: ScriptRecord = { id: randomUUID(), createdAt: new Date(), ...data };
       this.scriptRecords.push(script);
       return script;
@@ -457,6 +513,12 @@ export class InMemoryCampaignStore
       ];
     },
     create: async ({ data }) => {
+      this.assertUnique(
+        'shot_specifications',
+        'shotId, version',
+        this.shotSpecificationRecords,
+        (row) => row.shotId === data.shotId && row.version === data.version,
+      );
       const record: ShotSpecificationRecord = { id: randomUUID(), createdAt: new Date(), ...data };
       this.shotSpecificationRecords.push(record);
       return record;
@@ -498,6 +560,12 @@ export class InMemoryCampaignStore
     },
     create: async ({ data }) => {
       const now = new Date();
+      this.assertUnique(
+        'shot_generation_jobs',
+        'shotSpecificationId',
+        this.shotGenerationJobRecords,
+        (row) => row.shotSpecificationId === data.shotSpecificationId,
+      );
       const record: ShotGenerationJobRecord = {
         id: randomUUID(),
         createdAt: now,
@@ -542,6 +610,14 @@ export class InMemoryCampaignStore
         (a) => a.shotGenerationJobId === where.shotGenerationJobId,
       ),
     create: async ({ data }) => {
+      this.assertUnique(
+        'shot_generation_attempts',
+        'shotGenerationJobId, idempotencyKey',
+        this.shotGenerationAttemptRecords,
+        (row) =>
+          row.shotGenerationJobId === data.shotGenerationJobId &&
+          row.idempotencyKey === data.idempotencyKey,
+      );
       const record: ShotGenerationAttemptRecord = {
         id: randomUUID(),
         createdAt: new Date(),
@@ -580,6 +656,14 @@ export class InMemoryCampaignStore
     },
     create: async ({ data }) => {
       const now = new Date();
+      this.assertUnique(
+        'generation_candidates',
+        'shotGenerationAttemptId, candidateIndex',
+        this.generationCandidateRecords,
+        (row) =>
+          row.shotGenerationAttemptId === data.shotGenerationAttemptId &&
+          row.candidateIndex === data.candidateIndex,
+      );
       const record: GenerationCandidateRecord = {
         id: randomUUID(),
         createdAt: now,
@@ -696,6 +780,12 @@ export class InMemoryCampaignStore
   shotSelectionSet: ShotSelectionDataSource['shotSelectionSet'] = {
     create: async ({ data }) => {
       const now = new Date();
+      this.assertUnique(
+        'shot_selection_sets',
+        'campaignId, version',
+        this.shotSelectionSetRecords,
+        (row) => row.campaignId === data.campaignId && row.version === data.version,
+      );
       const record: ShotSelectionSetRecord = {
         id: randomUUID(),
         createdAt: now,
@@ -856,6 +946,12 @@ export class InMemoryCampaignStore
       );
     },
     create: async ({ data }: { data: Omit<EditDecisionListRecord, 'id' | 'createdAt'> }) => {
+      this.assertUnique(
+        'edit_decision_lists',
+        'campaignId, version',
+        this.editDecisionListRecords,
+        (row) => row.campaignId === data.campaignId && row.version === data.version,
+      );
       const record: EditDecisionListRecord = { id: randomUUID(), createdAt: new Date(), ...data };
       this.editDecisionListRecords.push(record);
       return record;
@@ -877,6 +973,12 @@ export class InMemoryCampaignStore
 
   roughEditSpecification: RoughEditSpecificationDataSource['roughEditSpecification'] = {
     create: async ({ data }) => {
+      this.assertUnique(
+        'rough_edit_specifications',
+        'campaignId, version',
+        this.roughEditSpecificationRecords,
+        (row) => row.campaignId === data.campaignId && row.version === data.version,
+      );
       const record: RoughEditSpecificationRecord = {
         id: randomUUID(),
         createdAt: new Date(),
@@ -911,6 +1013,12 @@ export class InMemoryCampaignStore
   compositionJob: CompositionDataSource['compositionJob'] = {
     create: async ({ data }) => {
       const now = new Date();
+      this.assertUnique(
+        'composition_jobs',
+        'roughEditSpecificationId',
+        this.compositionJobRecords,
+        (row) => row.roughEditSpecificationId === data.roughEditSpecificationId,
+      );
       const record: CompositionJobRecord = {
         id: randomUUID(),
         createdAt: now,
@@ -947,6 +1055,14 @@ export class InMemoryCampaignStore
 
   compositionAttempt: CompositionDataSource['compositionAttempt'] = {
     create: async ({ data }) => {
+      this.assertUnique(
+        'composition_attempts',
+        'compositionJobId, idempotencyKey',
+        this.compositionAttemptRecords,
+        (row) =>
+          row.compositionJobId === data.compositionJobId &&
+          row.idempotencyKey === data.idempotencyKey,
+      );
       const record: CompositionAttemptRecord = { id: randomUUID(), createdAt: new Date(), ...data };
       this.compositionAttemptRecords.push(record);
       return record;
@@ -1036,6 +1152,12 @@ export class InMemoryCampaignStore
 
   performanceObservation: PerformanceDataSource['performanceObservation'] = {
     create: async ({ data }) => {
+      this.assertUnique(
+        'performance_observations',
+        'workspaceId, idempotencyKey',
+        this.performanceObservationRecords,
+        (row) => row.workspaceId === data.workspaceId && row.idempotencyKey === data.idempotencyKey,
+      );
       const record: PerformanceObservationRecord = {
         id: randomUUID(),
         createdAt: new Date(),
@@ -1070,6 +1192,15 @@ export class InMemoryCampaignStore
 
   learningRecord: LearningDataSource['learningRecord'] = {
     create: async ({ data }) => {
+      this.assertUnique(
+        'learning_records',
+        'workspaceId, learningKey, version',
+        this.learningRecordRecords,
+        (row) =>
+          row.workspaceId === data.workspaceId &&
+          row.learningKey === data.learningKey &&
+          row.version === data.version,
+      );
       const record: LearningRecordRecord = { id: randomUUID(), createdAt: new Date(), ...data };
       this.learningRecordRecords.push(record);
       return record;
@@ -1095,6 +1226,15 @@ export class InMemoryCampaignStore
 
   deliveryProfile: DeliveryProfileDataSource['deliveryProfile'] = {
     create: async ({ data }) => {
+      this.assertUnique(
+        'delivery_profiles',
+        'workspaceId, key, version',
+        this.deliveryProfileRecords,
+        (row) =>
+          row.workspaceId === data.workspaceId &&
+          row.key === data.key &&
+          row.version === data.version,
+      );
       const record: DeliveryProfileRecord = { id: randomUUID(), createdAt: new Date(), ...data };
       this.deliveryProfileRecords.push(record);
       return record;
@@ -1125,6 +1265,16 @@ export class InMemoryCampaignStore
 
   variantSpecification: VariantDataSource['variantSpecification'] = {
     create: async ({ data }) => {
+      this.assertUnique(
+        'variant_specifications',
+        'campaignId, parentMasterAssetId, targetDurationSeconds, version',
+        this.variantSpecificationRecords,
+        (row) =>
+          row.campaignId === data.campaignId &&
+          row.parentMasterAssetId === data.parentMasterAssetId &&
+          row.targetDurationSeconds === data.targetDurationSeconds &&
+          row.version === data.version,
+      );
       const record: VariantSpecificationRecord = {
         id: randomUUID(),
         createdAt: new Date(),
@@ -1156,6 +1306,12 @@ export class InMemoryCampaignStore
   variantGenerationJob: VariantDataSource['variantGenerationJob'] = {
     create: async ({ data }) => {
       const now = new Date();
+      this.assertUnique(
+        'variant_generation_jobs',
+        'variantSpecificationId',
+        this.variantGenerationJobRecords,
+        (row) => row.variantSpecificationId === data.variantSpecificationId,
+      );
       const record: VariantGenerationJobRecord = {
         id: randomUUID(),
         createdAt: now,
@@ -1198,6 +1354,14 @@ export class InMemoryCampaignStore
 
   variantGenerationAttempt: VariantDataSource['variantGenerationAttempt'] = {
     create: async ({ data }) => {
+      this.assertUnique(
+        'variant_generation_attempts',
+        'variantGenerationJobId, idempotencyKey',
+        this.variantGenerationAttemptRecords,
+        (row) =>
+          row.variantGenerationJobId === data.variantGenerationJobId &&
+          row.idempotencyKey === data.idempotencyKey,
+      );
       const record: VariantGenerationAttemptRecord = {
         id: randomUUID(),
         createdAt: new Date(),
@@ -1271,6 +1435,12 @@ export class InMemoryCampaignStore
       );
     },
     create: async ({ data }: { data: Omit<TimelineRecord, 'id' | 'createdAt'> }) => {
+      this.assertUnique(
+        'timelines',
+        'campaignId, version',
+        this.timelineRecords,
+        (row) => row.campaignId === data.campaignId && row.version === data.version,
+      );
       const record: TimelineRecord = { id: randomUUID(), createdAt: new Date(), ...data };
       this.timelineRecords.push(record);
       return record;
@@ -1314,6 +1484,12 @@ export class InMemoryCampaignStore
 
   soundDesignPlan: SoundDesignDataSource['soundDesignPlan'] = {
     create: async ({ data }) => {
+      this.assertUnique(
+        'sound_design_plans',
+        'campaignId, version',
+        this.soundDesignPlanRecords,
+        (row) => row.campaignId === data.campaignId && row.version === data.version,
+      );
       const record: SoundDesignPlanRecord = { id: randomUUID(), createdAt: new Date(), ...data };
       this.soundDesignPlanRecords.push(record);
       return record;

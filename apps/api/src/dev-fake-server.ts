@@ -2,8 +2,13 @@ import {
   InMemoryCampaignStore,
   addMembership,
   createAssetWithProvenance,
+  createCreativeConcept,
+  createDraftShotSelectionSet,
   createQualityAssessmentForAsset,
+  createQualityAssessmentForCandidate,
   createLearningRecord,
+  createScriptWithShots,
+  createShotSpecification,
   createVariantSpecification,
   getOrCreateCreativeVariant,
   ingestPerformanceObservation,
@@ -11,6 +16,7 @@ import {
   getOrCreateVariantGenerationAttempt,
   getOrCreateVariantGenerationJob,
   updateCreativeVariant,
+  type GenerationCandidateRecord,
 } from '@combat/database';
 import { createLogger } from '@combat/observability';
 import { MockReviewProvider, MockStorageProvider } from '@combat/providers';
@@ -37,6 +43,15 @@ export const FIXTURES = {
   variantCampaignId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
   /** M13: a distributed campaign with closed performance data and learnings. */
   performanceCampaignId: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+  /**
+   * Post-M14 audit finding H-3: a campaign parked at the HUMAN_SHOT_SELECTION
+   * gate, with a QA-passed candidate per shot and a DRAFT selection set, so the
+   * browser suite can exercise the shot-selection gate the way it already
+   * exercises the concept gate.
+   */
+  shotSelectionCampaignId: 'cccccccc-cccc-cccc-cccc-cccccccccccc',
+  /** Post-M14 audit finding H-3: a campaign parked at the FINAL_APPROVAL gate, with an assessed FINAL_MASTER. */
+  finalApprovalCampaignId: 'dddddddd-dddd-dddd-dddd-dddddddddddd',
 };
 
 function buildFakeWorkflowClient(): WorkflowClient {
@@ -427,11 +442,208 @@ async function seedPerformance(store: InMemoryCampaignStore) {
   });
 }
 
+/**
+ * Post-M14 audit finding H-3 fixture: a campaign parked at
+ * HUMAN_SHOT_SELECTION with two shots, one QA-passed candidate each, and a
+ * DRAFT `ShotSelectionSet`.
+ *
+ * The gate is reachable in the browser but *not* satisfied: no candidate is
+ * selected and the set is not APPROVED, which is precisely the state the
+ * dashboard must refuse to advance past. The concept gate already had this
+ * coverage; the two remaining human gates did not.
+ */
+async function seedShotSelectionGate(store: InMemoryCampaignStore) {
+  const workspaceId = FIXTURES.workspaceId;
+  const campaignId = FIXTURES.shotSelectionCampaignId;
+  store.seedCampaign({
+    id: campaignId,
+    workspaceId,
+    name: 'Combat Reviews Q3 Launch — shot selection',
+    currentStage: 'HUMAN_SHOT_SELECTION',
+  });
+
+  const concept = await createCreativeConcept(store, workspaceId, {
+    campaignId,
+    version: 1,
+    logline: 'A gym owner watches reviews roll in without lifting a finger.',
+    visualDirection: 'Handheld gym footage, warm lighting.',
+    narrativeArc: 'Problem -> discovery -> relief.',
+    referenceNotes: [],
+  });
+  const { script, shots } = await createScriptWithShots(store, workspaceId, {
+    campaignId,
+    creativeConceptId: concept.id,
+    version: 1,
+    totalDurationFrames: 180,
+    shots: [
+      {
+        index: 0,
+        description: 'Hook: gym owner frustrated at a laptop.',
+        durationFrames: 90,
+        beat: 'HOOK',
+        dependsOnShotIndices: [],
+      },
+      {
+        index: 1,
+        description: 'Feature: reviews arriving automatically.',
+        durationFrames: 90,
+        beat: 'FEATURE',
+        dependsOnShotIndices: [0],
+      },
+    ],
+  });
+
+  const requiredShots = [];
+  for (const shot of shots) {
+    // eslint-disable-next-line no-await-in-loop -- deterministic ordered fixture setup
+    const spec = await createShotSpecification(store, workspaceId, {
+      campaignId,
+      creativeConceptId: concept.id,
+      creativeConceptVersion: 1,
+      scriptId: script.id,
+      scriptVersion: 1,
+      shotId: shot.id,
+      version: 1,
+      shotNumber: shot.index,
+      sequencePosition: shot.index,
+      intendedDurationSeconds: 3,
+      visualObjective: 'o',
+      action: 'a',
+      subject: 's',
+      environment: 'gym',
+      cameraMovement: 'static',
+      lensFraming: 'wide',
+      lighting: 'warm',
+      colorTreatment: 'neutral',
+      motionIntensity: 'LOW',
+      transitionIn: 'CUT',
+      transitionOut: 'CUT',
+      textSafeAreas: [],
+      referenceAssetIds: [],
+      continuityRequirements: [],
+      providerId: 'mock-video-generation',
+      promptVersionId: `fixture-prompt-version-${shot.index}`,
+      generationPrompt: shot.description,
+      generationParams: { durationSeconds: 3, aspectRatio: '9:16', providerOptions: {} },
+      outputRequirements: { durationSeconds: 3, aspectRatio: '9:16', minCandidateCount: 1 },
+      qualityRubric: [],
+      licensingConstraints: [],
+      createdByAgentInvocationId: `fixture-prompt-invocation-${shot.index}`,
+    });
+
+    // eslint-disable-next-line no-await-in-loop -- same rationale
+    const { asset } = await createAssetWithProvenance(store, workspaceId, {
+      campaignId,
+      kind: 'VIDEO_CANDIDATE',
+      s3Key: `mock/candidates/${campaignId}-${shot.index}.mp4`,
+      checksum: `candidate-${campaignId}-${shot.index}`,
+      mimeType: 'video/mp4',
+      originalFilename: `shot-${shot.index}-candidate-0.mp4`,
+      sizeBytes: 0,
+      ingestionStatus: 'READY',
+      generatedByActivity: 'pollShotGenerationActivity',
+    });
+    const candidate: GenerationCandidateRecord = {
+      id: `00000000-0000-0000-0000-00000000c${shot.index}00`,
+      workspaceId,
+      shotSpecificationId: spec.id,
+      shotGenerationAttemptId: `fixture-attempt-${shot.index}`,
+      candidateIndex: 0,
+      status: 'SUCCEEDED',
+      assetId: asset.id,
+      providerCandidateRef: `ref-${shot.index}`,
+      seed: 42 + shot.index,
+      durationSeconds: 3,
+      aspectRatio: '9:16',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    store.generationCandidateRecords.push(candidate);
+
+    for (const subjectStage of ['VISUAL_QA', 'CONTINUITY_QA'] as const) {
+      // eslint-disable-next-line no-await-in-loop -- same rationale
+      await createQualityAssessmentForCandidate(store, {
+        workspaceId,
+        campaignId,
+        candidate,
+        candidateCampaignId: campaignId,
+        latestCandidateId: candidate.id,
+        subjectStage,
+        pass: true,
+        overallScore: 1,
+        scores: { 'subject-fidelity': 1 },
+        assessedBy: 'AGENT',
+        failures: [],
+      });
+    }
+
+    requiredShots.push({
+      shotId: shot.id,
+      sequencePosition: shot.index,
+      shotSpecificationId: spec.id,
+      shotSpecificationVersion: 1,
+    });
+  }
+
+  await createDraftShotSelectionSet(store, workspaceId, {
+    campaignId,
+    scriptId: script.id,
+    scriptVersion: 1,
+    creativeConceptId: concept.id,
+    creativeConceptVersion: 1,
+    version: 1,
+    createdByUserId: FIXTURES.ownerUserId,
+    requiredShots,
+  });
+}
+
+/**
+ * Post-M14 audit finding H-3 fixture: a campaign parked at FINAL_APPROVAL with
+ * a registered FINAL_MASTER and its passing Final QA assessment, so the final
+ * approval screen is reachable and its gate is exercisable in the browser.
+ */
+async function seedFinalApprovalGate(store: InMemoryCampaignStore) {
+  const workspaceId = FIXTURES.workspaceId;
+  const campaignId = FIXTURES.finalApprovalCampaignId;
+  store.seedCampaign({
+    id: campaignId,
+    workspaceId,
+    name: 'Combat Reviews Q3 Launch — final approval',
+    currentStage: 'FINAL_APPROVAL',
+  });
+
+  const master = await createAssetWithProvenance(store, workspaceId, {
+    campaignId,
+    kind: 'FINAL_MASTER',
+    s3Key: `mock/final-master/${campaignId}.mp4`,
+    checksum: `final-master-${campaignId}`,
+    mimeType: 'video/mp4',
+    originalFilename: 'final-master-v1.mp4',
+    sizeBytes: 0,
+    ingestionStatus: 'READY',
+    generatedByActivity: 'runFinalQaControllerActivity',
+  });
+
+  await createQualityAssessmentForAsset(store, workspaceId, {
+    campaignId,
+    assetId: master.asset.id,
+    subjectStage: 'FINAL_QA',
+    pass: true,
+    overallScore: 0.94,
+    scores: { 'technical-delivery-spec': 1, 'brand-compliance': 0.88 },
+    assessedBy: 'AGENT',
+    createdByAgentInvocationId: 'fixture-final-qa-invocation',
+    failures: [],
+  });
+}
+
 async function main() {
   const store = new InMemoryCampaignStore();
   await seed(store);
   await seedVariants(store);
   await seedPerformance(store);
+  await seedShotSelectionGate(store);
+  await seedFinalApprovalGate(store);
   const app = buildServer({
     logger: createLogger({ serviceName: 'api-fake', level: 'silent' }),
     approvalDb: store,

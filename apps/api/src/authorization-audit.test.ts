@@ -14,6 +14,7 @@ import { MockReviewProvider, MockStorageProvider } from '@combat/providers';
 import type { WorkflowClient } from '@temporalio/client';
 import { buildServer } from './server';
 import { MUTATING_ROUTES } from './route-authorization';
+import { diffRouteSets, listRegisteredMutatingRoutes } from './route-inventory';
 
 /**
  * M14 — the authorization audit, executed rather than asserted in prose.
@@ -235,19 +236,33 @@ function snapshot(store: InMemoryCampaignStore) {
 }
 
 describe('M14 — every mutating route is enumerated in the audit registry', () => {
-  it('the registry matches exactly the POST routes Fastify registered', async () => {
+  /**
+   * Post-M14 audit finding C-3. This assertion used to check only that each
+   * audited path's last URL segment appeared *somewhere* in the router dump,
+   * against a hardcoded route count — which a route registered at the wrong
+   * path or under the wrong method would still have satisfied, and which said
+   * nothing about a real mutating endpoint missing from the registry
+   * altogether. It is now an exact set comparison in both directions, derived
+   * from the router itself. See `route-registry-conformance.test.ts` for the
+   * proof that the comparison catches each kind of drift.
+   */
+  it('exactly matches the mutating routes Fastify registered, in both directions', async () => {
     const { app } = buildHarness(new InMemoryCampaignStore());
     await app.ready();
 
-    const registered = app.printRoutes({ commonPrefix: false }).split('\n').join('\n');
+    const registered = listRegisteredMutatingRoutes(app);
+    const audited = MUTATING_ROUTES.map((route) => ({ method: route.method, path: route.path }));
+    const diff = diffRouteSets(registered, audited);
 
-    // Every audited path must exist on the router.
-    for (const route of MUTATING_ROUTES) {
-      const concrete = route.path.replace(/:[A-Za-z]+/g, '');
-      const segments = concrete.split('/').filter(Boolean);
-      const leaf = segments[segments.length - 1];
-      expect(registered, `${route.path} must be a registered route`).toContain(leaf!);
-    }
+    expect(
+      diff.unaudited,
+      `mutating routes registered but missing from MUTATING_ROUTES: ${diff.unaudited.join(', ')}`,
+    ).toEqual([]);
+    expect(
+      diff.unregistered,
+      `MUTATING_ROUTES entries with no matching registered route: ${diff.unregistered.join(', ')}`,
+    ).toEqual([]);
+    expect(registered).toHaveLength(audited.length);
   });
 
   it('names a permission that exists in the canonical domain matrix', () => {
@@ -256,10 +271,9 @@ describe('M14 — every mutating route is enumerated in the audit registry', () 
     }
   });
 
-  it('has no duplicate paths and covers every mutating route file', () => {
-    const paths = MUTATING_ROUTES.map((r) => r.path);
-    expect(new Set(paths).size).toBe(paths.length);
-    expect(paths.length).toBe(18);
+  it('has no duplicate entries', () => {
+    const keys = MUTATING_ROUTES.map((r) => `${r.method} ${r.path}`);
+    expect(new Set(keys).size).toBe(keys.length);
   });
 
   it('requires campaign-ownership verification on every campaign-scoped mutation', () => {

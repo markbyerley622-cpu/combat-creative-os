@@ -1,4 +1,6 @@
 export * from './ping-workflow';
+export * from './ping-workflow-activities';
+export * from './activity-name-contract';
 export * from './campaign-production-workflow';
 export * from './campaign-production-workflow-activities';
 export * from './campaign-production-workflow-signals';

@@ -1,6 +1,5 @@
 import type { AssetDataSource, BudgetDataSource, VariantDataSource } from '@combat/database';
 import {
-  chargeBudget,
   createAssetWithProvenance,
   findAssetByChecksum,
   getOrCreateCreativeVariant,
@@ -8,6 +7,7 @@ import {
   getVariantGenerationJobById,
   getVariantSpecification,
   releaseBudget,
+  settleBudgetReservation,
   updateCreativeVariant,
   updateVariantGenerationAttempt,
   updateVariantGenerationJob,
@@ -59,9 +59,11 @@ export interface PollVariantRenderActivityDeps {
  * provider's deterministic checksum, no real video bytes — the mock renderer
  * returns metadata only) with a real provenance edge back to the parent
  * `FINAL_MASTER` and every retained source asset, creates/updates the
- * `CreativeVariant` row the `variantsGenerated` fact reads, then charges the
- * provider's actual usage and releases the remainder. FAILED/TIMED_OUT/
- * CANCELLED release the full reservation and mark the variant FAILED.
+ * `CreativeVariant` row the `variantsGenerated` fact reads, then settles the
+ * budget — charging the provider's actual usage and releasing the reservation
+ * in full, so `spentCents` reflects the real cost and nothing else.
+ * FAILED/TIMED_OUT/CANCELLED release the reservation without a charge and mark
+ * the variant FAILED.
  * Re-polling an already-terminal attempt replays its outcome without calling
  * the provider or touching the ledger again.
  *
@@ -278,7 +280,6 @@ async function chargeAcrossLevels(
   reservationKey: string,
   amounts: { actualCents: number; estimatedCents: number },
 ): Promise<void> {
-  const remainder = Math.max(0, amounts.estimatedCents - amounts.actualCents);
   for (const level of CHARGEABLE_LEVELS) {
     const scopeId =
       level === 'WORKSPACE'
@@ -291,20 +292,15 @@ async function chargeAcrossLevels(
       where: { workspaceId: ctx.workspaceId, level, scopeId },
     });
     if (!policy) continue;
+    // Charge the real cost AND release the whole reservation — see
+    // settleBudgetReservation's doc comment (post-M14 audit finding C-2).
     // eslint-disable-next-line no-await-in-loop -- sequential ledger writes
-    await chargeBudget(deps.budgetDb, policy.id, ctx.workspaceId, {
-      amountCents: amounts.actualCents,
-      idempotencyKey: `${reservationKey}:charge`,
+    await settleBudgetReservation(deps.budgetDb, policy.id, ctx.workspaceId, {
+      reservedCents: amounts.estimatedCents,
+      actualCents: amounts.actualCents,
+      reservationIdempotencyKey: reservationKey,
       campaignId: ctx.campaignId,
     });
-    if (remainder > 0) {
-      // eslint-disable-next-line no-await-in-loop -- same rationale
-      await releaseBudget(deps.budgetDb, policy.id, ctx.workspaceId, {
-        amountCents: remainder,
-        idempotencyKey: `${reservationKey}:release-remainder`,
-        campaignId: ctx.campaignId,
-      });
-    }
   }
 }
 

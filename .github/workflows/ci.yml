@@ -1,0 +1,81 @@
+# The repository's own validation commands, run on every push and pull
+# request. Post-M14 audit finding H-2: those commands existed and were
+# documented in CLAUDE.md, but nothing ran them automatically, so a change
+# that broke typecheck, lint, tests, the build, formatting or the browser
+# suite could be merged without anyone noticing.
+#
+# Deliberately nothing else: no deployment, no secrets, no paid services, no
+# Docker, no external infrastructure. Every command below already runs green
+# against in-memory fakes (apps/api/src/dev-fake-server.ts), which is what
+# makes a credential-free CI job possible at all.
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: typecheck, lint, test, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      # Version comes from package.json's `packageManager` field, so CI and
+      # local development can never disagree about it.
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # Matches package.json's `engines.node` (>=20); pinned to the LTS
+          # line rather than `latest` so a Node release cannot break CI on a
+          # day nobody touched the repository.
+          node-version: 20
+          cache: pnpm
+
+      # `--frozen-lockfile` is the default in CI; stated explicitly so a
+      # lockfile that drifts from package.json fails here rather than being
+      # silently updated.
+      - run: pnpm install --frozen-lockfile
+
+      # Prisma's generated client is git-ignored, and typecheck/build depend
+      # on it. This reads the committed schema only — it never connects to a
+      # database (no DATABASE_URL is set in this workflow).
+      - run: pnpm db:generate
+
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm test
+      - run: pnpm build
+      - run: pnpm format:check
+
+  e2e:
+    name: dashboard end-to-end
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm db:generate
+
+      # The dashboard and the dev-fake-server both import compiled package
+      # output (`dist/`), not source, so the workspace must be built before
+      # Playwright boots either of them.
+      - run: pnpm build
+
+      # Playwright's own config builds the dashboard and boots the
+      # in-memory-backed apps/api dev-fake-server, so no Postgres, Temporal,
+      # MinIO or provider credential is involved.
+      - run: pnpm --filter dashboard exec playwright install --with-deps chromium
+      - run: pnpm --filter dashboard test:e2e

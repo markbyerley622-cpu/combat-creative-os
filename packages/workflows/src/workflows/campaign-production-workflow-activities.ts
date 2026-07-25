@@ -1,19 +1,20 @@
 import type * as activities from '../activities';
+import type { Equal, Expect } from './activity-name-contract';
 
 /**
- * The two Activity signatures `campaignProductionWorkflow` proxies, named
- * for what the Worker must register them as. `proxyActivities<T>()` only
- * uses `T` for compile-time destructuring/typing — it does not require
- * `../activities`' runtime namespace object to expose members under these
- * exact names, so this file is a type-only contract, not a claim that
- * `advanceCampaignStageActivity`/`verifyHumanApprovalActivity` already exist
- * as directly Worker-registrable functions today. `../activities` currently
- * only exports the `create*Activity(deps)` factories those two functions are
- * built from (kept dependency-injectable for unit tests); instantiating them
- * with real dependencies and registering the result with `Worker.create` in
- * apps/worker is separate, not-yet-done wiring work (see
- * docs/architecture.md §7.1) — not part of this workflow file, which must
- * stay I/O-free regardless.
+ * The Activity signatures `campaignProductionWorkflow` proxies, named for what
+ * the Worker must register them as. `proxyActivities<T>()` only uses `T` for
+ * compile-time destructuring/typing, so this interface is a type-only
+ * contract — `../activities` exports the `create*Activity(deps)` factories
+ * these are built from, kept dependency-injectable for unit tests, not
+ * directly-registrable functions.
+ *
+ * Post-M14 audit finding C-1: instantiating those factories and registering
+ * the result is no longer "not-yet-done wiring". `createWorkerActivities`
+ * (packages/workflows/src/worker) builds the real registration object from
+ * these same contracts, and `worker-activities.test.ts` asserts it covers
+ * `CAMPAIGN_PRODUCTION_ACTIVITY_NAMES` below exactly. This file stays I/O-free
+ * regardless.
  */
 export interface CampaignProductionActivities {
   advanceCampaignStageActivity(
@@ -103,3 +104,29 @@ export interface CampaignProductionActivities {
     input: activities.RunFinalQaControllerInput,
   ): Promise<activities.RunFinalQaControllerOutput>;
 }
+
+/**
+ * The same contract as a runtime-enumerable tuple, so the Worker-registration
+ * conformance test can compare against it without hand-maintaining a parallel
+ * list. The assertion below fails to compile if this tuple and the interface
+ * above ever disagree in either direction.
+ */
+export const CAMPAIGN_PRODUCTION_ACTIVITY_NAMES = [
+  'advanceCampaignStageActivity',
+  'verifyHumanApprovalActivity',
+  'runStrategyConceptScriptActivity',
+  'runShotPromptEngineerActivity',
+  'loadLatestShotSpecificationsActivity',
+  'runVisualQualityAssessmentsActivity',
+  'runContinuityAssessmentActivity',
+  'verifyShotSelectionActivity',
+  'loadShotSelectionRegenerationFeedbackActivity',
+  'runSoundDirectorActivity',
+  'runFinalQaControllerActivity',
+] as const satisfies readonly (keyof CampaignProductionActivities)[];
+
+export type CampaignProductionActivityName = (typeof CAMPAIGN_PRODUCTION_ACTIVITY_NAMES)[number];
+
+export type _AssertCampaignProductionNames = Expect<
+  Equal<keyof CampaignProductionActivities, CampaignProductionActivityName>
+>;

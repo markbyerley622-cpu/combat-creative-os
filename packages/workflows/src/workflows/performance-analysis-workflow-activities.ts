@@ -1,4 +1,5 @@
 import type * as activities from '../activities';
+import type { Equal, Expect } from './activity-name-contract';
 
 /**
  * The Activity signatures `performanceAnalysisWorkflow` proxies. Exactly one:
@@ -12,3 +13,11 @@ export interface PerformanceAnalysisActivities {
     input: activities.RunPerformanceAnalystInput,
   ): Promise<activities.RunPerformanceAnalystOutput>;
 }
+
+export const PERFORMANCE_ANALYSIS_ACTIVITY_NAMES = [
+  'runPerformanceAnalystActivity',
+] as const satisfies readonly (keyof PerformanceAnalysisActivities)[];
+
+export type _AssertPerformanceAnalysisNames = Expect<
+  Equal<keyof PerformanceAnalysisActivities, (typeof PERFORMANCE_ANALYSIS_ACTIVITY_NAMES)[number]>
+>;

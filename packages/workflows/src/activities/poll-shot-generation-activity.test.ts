@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { createShotSpecification, InMemoryCampaignStore } from '@combat/database';
+import { createShotSpecification, getBudgetStatus, InMemoryCampaignStore } from '@combat/database';
 import { MockVideoGenerationProvider } from '@combat/providers';
 import { createDispatchShotGenerationActivity } from './dispatch-shot-generation-activity';
 import { createPollShotGenerationActivity } from './poll-shot-generation-activity';
@@ -47,6 +47,7 @@ async function dispatch(
   campaign: { id: string; workspaceId: string },
   provider: MockVideoGenerationProvider,
   spec: Awaited<ReturnType<typeof seedSpec>>,
+  workflowRunId: string = randomUUID(),
 ) {
   const dispatchActivity = createDispatchShotGenerationActivity({
     videoGenerationProvider: provider,
@@ -58,7 +59,7 @@ async function dispatch(
   const result = await dispatchActivity({
     workspaceId: campaign.workspaceId,
     campaignId: campaign.id,
-    workflowRunId: randomUUID(),
+    workflowRunId,
     shotSpecificationId: spec.id,
     attemptNumber: 1,
   });
@@ -113,6 +114,133 @@ describe('pollShotGenerationActivity', () => {
       (e) => e.budgetPolicyId === store.budgetPolicies[0]!.id,
     );
     expect(shotEntries.map((e) => e.entryType)).toContain('CHARGE');
+  });
+
+  /**
+   * Post-M14 audit finding C-2, asserted end-to-end across the real
+   * dispatch → poll pair rather than only at the ledger level: after a
+   * successful job the budget must report exactly what the provider charged,
+   * with the pre-dispatch reservation fully closed out.
+   */
+  it('leaves spentCents equal to the attempt actual cost after a successful job', async () => {
+    const store = new InMemoryCampaignStore();
+    const campaign = store.seedCampaign();
+    const spec = await seedSpec(store, campaign.workspaceId, campaign.id);
+    store.budgetPolicies.push({
+      id: randomUUID(),
+      workspaceId: campaign.workspaceId,
+      level: 'WORKSPACE',
+      scopeId: campaign.workspaceId,
+      limitCents: 100_000,
+    });
+    const provider = new MockVideoGenerationProvider();
+    const dispatched = await dispatch(store, campaign, provider, spec);
+    const poll = buildPollActivity(store, provider);
+
+    await poll({
+      workspaceId: campaign.workspaceId,
+      campaignId: campaign.id,
+      shotId: spec.shotId,
+      providerId: spec.providerId,
+      attemptId: dispatched.attemptId,
+    });
+
+    const attempt = store.shotGenerationAttemptRecords[0]!;
+    expect(attempt.status).toBe('SUCCEEDED');
+    const status = await getBudgetStatus(
+      store,
+      campaign.workspaceId,
+      'WORKSPACE',
+      campaign.workspaceId,
+    );
+    expect(status!.spentCents).toBe(attempt.actualCostCents);
+    expect(status!.remainingCents).toBe(100_000 - attempt.actualCostCents!);
+  });
+
+  it('a re-run poll after settlement does not charge or release a second time', async () => {
+    const store = new InMemoryCampaignStore();
+    const campaign = store.seedCampaign();
+    const spec = await seedSpec(store, campaign.workspaceId, campaign.id);
+    store.budgetPolicies.push({
+      id: randomUUID(),
+      workspaceId: campaign.workspaceId,
+      level: 'WORKSPACE',
+      scopeId: campaign.workspaceId,
+      limitCents: 100_000,
+    });
+    const provider = new MockVideoGenerationProvider();
+    const dispatched = await dispatch(store, campaign, provider, spec);
+    const poll = buildPollActivity(store, provider);
+    const pollInput = {
+      workspaceId: campaign.workspaceId,
+      campaignId: campaign.id,
+      shotId: spec.shotId,
+      providerId: spec.providerId,
+      attemptId: dispatched.attemptId,
+    };
+
+    await poll(pollInput);
+    const afterFirst = await getBudgetStatus(
+      store,
+      campaign.workspaceId,
+      'WORKSPACE',
+      campaign.workspaceId,
+    );
+    await poll(pollInput);
+    await poll(pollInput);
+
+    const afterReplays = await getBudgetStatus(
+      store,
+      campaign.workspaceId,
+      'WORKSPACE',
+      campaign.workspaceId,
+    );
+    expect(afterReplays!.spentCents).toBe(afterFirst!.spentCents);
+    expect(store.budgetLedgerEntries.filter((e) => e.entryType === 'CHARGE')).toHaveLength(1);
+    expect(store.budgetLedgerEntries.filter((e) => e.entryType === 'RELEASE')).toHaveLength(1);
+  });
+
+  it('a failed provider job leaves no charge and no standing reservation', async () => {
+    const store = new InMemoryCampaignStore();
+    const campaign = store.seedCampaign();
+    const spec = await seedSpec(store, campaign.workspaceId, campaign.id);
+    store.budgetPolicies.push({
+      id: randomUUID(),
+      workspaceId: campaign.workspaceId,
+      level: 'WORKSPACE',
+      scopeId: campaign.workspaceId,
+      limitCents: 100_000,
+    });
+    const workflowRunId = randomUUID();
+    const provider = new MockVideoGenerationProvider({
+      forcedFailures: {
+        [`${workflowRunId}:GEN:${spec.id}:1`]: {
+          reason: 'PROVIDER_ERROR',
+          retryable: true,
+          message: 'boom',
+        },
+      },
+    });
+    const dispatched = await dispatch(store, campaign, provider, spec, workflowRunId);
+
+    const poll = buildPollActivity(store, provider);
+    const result = await poll({
+      workspaceId: campaign.workspaceId,
+      campaignId: campaign.id,
+      shotId: spec.shotId,
+      providerId: spec.providerId,
+      attemptId: dispatched.attemptId,
+    });
+
+    expect(result).toMatchObject({ terminal: true, status: 'FAILED' });
+    const status = await getBudgetStatus(
+      store,
+      campaign.workspaceId,
+      'WORKSPACE',
+      campaign.workspaceId,
+    );
+    expect(status!.spentCents).toBe(0);
+    expect(store.budgetLedgerEntries.filter((e) => e.entryType === 'CHARGE')).toHaveLength(0);
   });
 
   it('re-polling an already-SUCCEEDED attempt is idempotent and does not re-register candidates', async () => {

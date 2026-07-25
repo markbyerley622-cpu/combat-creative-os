@@ -1,7 +1,9 @@
+import { Context } from '@temporalio/activity';
 import { NativeConnection, Worker } from '@temporalio/worker';
 import { loadWorkerEnv } from '@combat/config';
 import { createLogger, initObservability } from '@combat/observability';
-import { activities } from '@combat/workflows';
+import { createWorkerActivities, type WorkerActivities } from '@combat/workflows';
+import { createActivityDependencies } from './activity-dependencies';
 import { startReadinessServer, type WorkerReadinessState } from './readiness-server';
 
 const RECONNECT_DELAY_MS = 5_000;
@@ -31,25 +33,42 @@ async function main(): Promise<void> {
     logger,
   );
 
+  // Built once, before Temporal is reachable, so a misconfigured dependency
+  // fails startup loudly instead of surfacing as an unregistered-Activity
+  // error on the first workflow task (post-M14 audit finding C-1).
+  // `Context.current()` is only valid inside an executing Activity, which is
+  // the only place these functions run — hence the lazy accessor.
+  const { deps, prisma } = await createActivityDependencies({
+    env,
+    logger,
+    getAttempt: () => Context.current().info.attempt,
+  });
+  const activities = createWorkerActivities(deps);
+  logger.info(
+    `Registered ${Object.keys(activities).length} activities: ${Object.keys(activities).sort().join(', ')}`,
+  );
+
   let shuttingDown = false;
   const shutdown = async (): Promise<void> => {
     if (shuttingDown) return;
     shuttingDown = true;
     logger.info('Shutting down apps/worker');
     readinessServer.close();
+    await prisma.$disconnect();
     await observability.shutdown();
     process.exit(0);
   };
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
 
-  await connectAndRunWithRetry(env, logger, state, () => shuttingDown);
+  await connectAndRunWithRetry(env, logger, state, activities, () => shuttingDown);
 }
 
 async function connectAndRunWithRetry(
   env: ReturnType<typeof loadWorkerEnv>,
   logger: ReturnType<typeof createLogger>,
   state: WorkerReadinessState,
+  activities: WorkerActivities,
   isShuttingDown: () => boolean,
 ): Promise<void> {
   while (!isShuttingDown()) {

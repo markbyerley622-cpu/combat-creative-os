@@ -1815,6 +1815,124 @@ subjectStage])` idempotency constraint. `createQualityAssessmentForCandidate`
   re-invoking any Activity with identical input is safe at every crash point,
   not Temporal's own delivery and heartbeat behaviour around it.
 
+- **Post-M14 corrective maintenance — foundation audit repair. Done
+  (2026-07-26).** Not a milestone: a read-only audit of the M14 tree returned
+  FAIL, and this is the repair. No new feature, agent, provider, stage or gate.
+  Six findings, each traced to code below.
+
+  **C-1 — no activity was actually registered with the Worker.** `apps/worker`
+  passed `@combat/workflows`' `activities` namespace to `Worker.create`. That
+  namespace exports `create*Activity(deps)` _factories_, not the functions the
+  workflows proxy, so **zero** proxied names were registered and every workflow
+  would have failed on its first Activity task against a real Temporal server.
+  Nothing caught it because no test ever built the registration object.
+  - Each executable workflow's Activity contract now also exports a runtime name
+    tuple (`CAMPAIGN_PRODUCTION_ACTIVITY_NAMES`, `SHOT_GENERATION_ACTIVITY_NAMES`,
+    `COMPOSITING_ACTIVITY_NAMES`, `VARIANT_ACTIVITY_NAMES`,
+    `PERFORMANCE_ANALYSIS_ACTIVITY_NAMES`, `PING_ACTIVITY_NAMES`), constrained
+    both ways: `satisfies readonly (keyof Contract)[]` rejects a name the
+    interface does not declare, and `Expect<Equal<…>>`
+    (`workflows/activity-name-contract.ts`) rejects an interface member the tuple
+    omits. There is no second, hand-maintained list anywhere.
+  - `packages/workflows/src/worker/createWorkerActivities(deps)` builds the real
+    registration object from those same contracts, typed as their intersection,
+    so a contract that grows fails to compile until the Activity is built.
+    Dependency injection is preserved: every Activity is still constructed from
+    its own factory with explicit collaborators.
+  - `apps/worker` is now the composition root — `activity-dependencies.ts` wires
+    Prisma, the deterministic provider mocks, `AGENT_REGISTRY` and Temporal's own
+    attempt counter; `prisma-activity-database.ts` bridges Prisma's `null` to the
+    repository record types' `undefined` structurally (shallow by design: no
+    repository issues a Prisma `include:`, and a recursive conversion would
+    corrupt JSON columns). This adds `@combat/agents`, `@combat/database`,
+    `@combat/providers` and `@temporalio/activity` to `apps/worker`'s
+    dependencies — a composition root depending on what it composes, consistent
+    with §1's direction rules.
+  - _Test:_ 11 conformance tests asserting exact coverage in both directions with
+    named missing/unexpected diagnostics, per-workflow resolution, and a proof
+    that a dropped registration is detected; 4 tests that the production wiring
+    itself yields complete coverage; 10 tests for the Prisma bridge. No Temporal
+    server, database or credential involved.
+
+  **C-2 — `spentCents` reported roughly double what was spent.** All three
+  settlement paths (`pollShotGenerationActivity`,
+  `pollCompositionRenderActivity`, `pollVariantRenderActivity`) charged the
+  provider's actual cost and released only `estimated − actual`, leaving the
+  original RESERVATION row on the ledger beside its CHARGE. Since
+  `computeSpentCents` counts both, a successful job inflated spend to about
+  twice its real cost — and an _under_-estimated job had no remainder to release
+  at all, so its whole reservation stood permanently. A workspace could be
+  locked out of budget it had never spent. A test encoded the wrong behaviour
+  (`expect(spentCents).toBe(1_400)` for a 700-cent job) and has been corrected.
+  - `settleBudgetReservation` is now the single settlement path: charge the
+    actual cost, release the reservation **in full**. `chargeBudget` and
+    `releaseBudget` are idempotent on `(policyId, idempotencyKey)`, resolving to
+    the winning row instead of throwing, so a retried Activity that already
+    settled observes the same ledger.
+  - _Test:_ 20 budget-integrity tests including `spentCents === actualCostCents`
+    after one job, over- and under-estimate settlement, triple-replayed
+    settlement writing exactly one row of each type, distinct concurrent jobs
+    still bounded by the cap, failure paths leaving no charge, and
+    workspace/campaign totals staying isolated; plus 3 end-to-end
+    dispatch→poll Activity assertions.
+
+  **C-3 — registry conformance was not real.** The M14 check asserted only that
+  each audited path's _last URL segment_ appeared somewhere in the router dump,
+  against a hardcoded `expect(paths.length).toBe(18)`. A route registered at the
+  wrong path or under the wrong method satisfied it, and it said nothing about a
+  real mutating endpoint missing from `MUTATING_ROUTES` entirely.
+  - `apps/api/src/route-inventory.ts` parses `app.printRoutes({ includeHooks:
+false })` into full `(method, path)` pairs by concatenating radix-tree labels,
+    and `diffRouteSets` compares against the registry as exact sets in both
+    directions.
+  - Permission probes now drive every registry entry twice: once by the role
+    holding the audited permission with valid resource ownership (asserting a 2xx,
+    with real prerequisites seeded — submitted brief, QA-passed candidates,
+    completed or rejected selections, a genuine presigned-upload round trip), and
+    once by the most-privileged canonical role that lacks it (asserting 403 and a
+    byte-identical store snapshot, zero signals, zero workflow starts).
+  - _Test:_ 45 tests — 5 proving the comparison detects each kind of drift,
+    3 proving the parser reassembles full paths, 18 positive probes, 18 negative
+    probes, plus a check that neither probe is vacuous for any permission.
+
+  **H-1 — the in-memory store mirrored only three schema constraints.** A
+  duplicate `(campaignId, version)` row or a double-inserted generation attempt
+  passed the entire suite and would have failed on the first real database. The
+  fake now enforces every `(campaignId, version)` family (briefs, strategies,
+  concepts, scripts, timelines, sound-design plans, rough-edit specs, EDLs,
+  selection sets), `(shotId, version)` on shot specifications, every per-job
+  idempotency-key constraint (shot-generation, composition and variant attempts;
+  performance observations; campaign intake), the one-job-per-specification
+  constraints, and `(shotGenerationAttemptId, candidateIndex)`. No Prisma
+  constraint was weakened. _Test:_ 14 constraint tests mapping 1:1 to the schema.
+
+  **H-2 — no continuous integration.** `.github/workflows/ci.yml` runs exactly
+  the documented validation commands (`typecheck`, `lint`, `test`, `build`,
+  `format:check`, and the dashboard Playwright suite) on the existing Node/pnpm
+  versions and the committed lockfile. No deployment, secrets, paid services,
+  Docker or external infrastructure — the whole suite already runs green against
+  in-memory fakes, which is what makes a credential-free job possible.
+
+  **H-3 — two of the three human gates had no browser coverage.** The CONCEPT
+  gate was covered; SHOT_SELECTION and FINAL were exercised only at the API
+  level. `dev-fake-server.ts` gained a campaign parked at `HUMAN_SHOT_SELECTION`
+  (two shots, a QA-passed candidate each, a DRAFT selection set with nothing
+  selected) and one parked at `FINAL_APPROVAL` (a registered `FINAL_MASTER` with
+  its passing Final QA assessment). _Test:_ 8 Playwright tests — each gate's
+  review UI is reachable, each gate-advancing control is disabled until its
+  required state exists, and the request behind each disabled control is refused
+  server-side when sent directly (incomplete selection → 409; a foreign
+  campaign's selection set → 404; a `REVIEWER` at the FINAL gate → 403).
+
+  **Unchanged by this repair.** Every production blocker §7.1 and the M14 entry
+  record still stands: no real caller authentication, no applied migrations (no
+  live Postgres in this environment), no live Temporal/MinIO/ffmpeg, no real
+  Veo/Runway/ComfyUI adapters, no real export/render implementation, no
+  ad-platform integration, and no licensing check at Final QA (§7.2 item 1). In
+  particular, C-1 makes the Worker _registration_ correct and provable without a
+  Temporal server; it does not prove the Worker runs against one, because none is
+  available here.
+
 ---
 
 ## 9. What this document deliberately does not do
