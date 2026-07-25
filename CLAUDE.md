@@ -4,37 +4,36 @@ This file is the operating contract for anyone (human or agent) working in
 this repository. It is deliberately short — for the full design rationale
 see `docs/architecture.md` and `docs/adr/`.
 
-Current milestone: **M6, shot prompting & video-generation orchestration,
-done** — `VideoGenerationProvider` (`packages/providers`) gained text-to-
-video/image-to-video modes, reference images/video metadata, capability
-profiles (`video-generation-profiles.ts`, illustrative Veo/Runway shapes),
-and a fully deterministic `MockVideoGenerationProvider` (idempotent by key,
-configurable latency/failure injection, never writes binary media). The
-Shot Prompt Engineer agent's output contract was extended (prompt v2) to a
-complete cinematographic brief, persisted by `runShotPromptEngineerActivity`
-as an immutable versioned `ShotSpecification` (`packages/domain`,
-superseding the earlier thin `GenerationPrompt`). `ShotGenerationWorkflow`
-(`packages/workflows/src/workflows`) is a deterministic child workflow —
-bounded parallel batches, per-shot bounded-retry polling via `sleep`, typed
-failure routing, cancellation, a progress query — driven by
-`dispatchShotGenerationActivity`/`pollShotGenerationActivity`/
-`cancelShotGenerationActivity`, which reserve/release/charge budget at all
-four `BudgetLevel`s per attempt and register successful candidates through
-the existing asset lifecycle (`AssetKind.VIDEO_CANDIDATE`).
-`CampaignProductionWorkflow` now runs the Shot Prompt Engineer at PROMPTING
-and starts `ShotGenerationWorkflow` as a child at SHOT_GENERATION, gated the
-same way STRATEGY_REVIEW's M4 hook is — no compositing begins unless every
-shot's generation resolved. `apps/api` gained one read-only
-`GET .../shot-generation` endpoint (specifications, job/attempt/candidate
-state, budget consumption); `apps/dashboard` gained a matching read-only
-page that renders mock candidates as explicit placeholders, never a fake
-video. See `docs/architecture.md` §8's M6 entry for the full accounting,
-including the documented interim narrowings (dispatch-time failures are
-terminal, not retried; a single campaign-wide `videoProviderId` rather than
-per-shot provider selection; SHOT/PROVIDER budget levels checked only at
-generation-dispatch granularity, as docs/domain-model.md §8 anticipated) and
-why the real runtime workflow legitimately reaches `BLOCKED` at VISUAL_QA
-(no QC agent exists until M7) rather than a defect. Still no real caller
+Current milestone: **M7, automated visual & continuity QA, done** — the
+existing `visual-quality-controller` and `continuity-controller` agents are
+now wired into `CampaignProductionWorkflow` at `VISUAL_QA` and
+`CONTINUITY_QA` through `runVisualQualityAssessmentsActivity`/
+`runContinuityAssessmentActivity` (`packages/workflows/src/activities`), each
+of which loads workspace-scoped candidate metadata through repositories,
+runs the agent through the same `executeSpecialistAgentActivity` boundary
+(agents never touch repositories/providers/other agents), and persists an
+immutable `QualityAssessment` + typed `QualityFailure` children per
+candidate. Visual QC assesses each shot's latest SUCCEEDED candidate;
+Continuity assesses the ordered candidate sequence and only after every shot
+has a VISUAL_QA-passed candidate. `QualityAssessmentSchema`/Prisma gained
+`campaignId`, `overallScore`, and `createdByAgentInvocationId` provenance
+plus a `@@unique([generationCandidateId, subjectStage])` idempotency key;
+`createQualityAssessmentForCandidate` is immutable + idempotent and rejects
+cross-workspace, mismatched-campaign, and stale (non-SUCCEEDED / superseded)
+candidates. `advanceCampaignStageActivity` gained an `AUTO_RETRY` mode that
+routes a failed assessment back to SHOT_GENERATION — restricted to the two
+automated-QA revision edges, never a human-gated one, bounded by
+`visualQARetryAllowed`/`continuityQARetryAllowed`, budget-enforced, and
+idempotent. The workflow routes failures through those bounded retries and
+stops **awaiting the SHOT_SELECTION human gate** at `HUMAN_SHOT_SELECTION`
+(the M7 stopping point; the gate UI is M8, compositing is M9); all three
+human gates are untouched. See `docs/architecture.md` §8's M7 entry for the
+full accounting and interim decisions (a SHOT_GENERATION retry regenerates
+every shot, so a passing shot is re-assessed against a fresh candidate but
+stays bounded; sequence-level continuity failures fail all shots; no new
+`apps/api`/`apps/dashboard` QA surface, deferred behind M8; no frame
+extraction, so the agents' frame inputs are documented placeholders). Still
+no real caller
 authentication, no real Veo/Runway/ComfyUI adapter (only the deterministic
 mock — do not connect one or spend money without an explicit, separate
 decision), and no live-Postgres/Temporal/MinIO/ffmpeg environment in this

@@ -41,8 +41,43 @@ export interface AdvanceCampaignStageGateDecisionInput {
   readonly requestedByUserId?: string;
 }
 
+/**
+ * M7: an *automated* revision routing back to SHOT_GENERATION after a
+ * failed Visual/Continuity QA assessment. Deliberately narrower than a
+ * GATE_DECISION — it can only ever traverse the two automated-QA revision
+ * edges in `AUTO_RETRY_ELIGIBLE_STAGES`, never a human-gated one, so no
+ * automated process can bypass a human approval gate. The transition itself
+ * is still fully gated by the bounded `visualQARetryAllowed`/
+ * `continuityQARetryAllowed` facts and (when a budget is supplied) a budget
+ * check inside `attemptCampaignTransition`, so retries stay bounded and
+ * budget-enforced.
+ */
+export interface AdvanceCampaignStageAutoRetryInput {
+  readonly mode: 'AUTO_RETRY';
+  readonly workspaceId: string;
+  readonly campaignId: string;
+  readonly fromStage: CampaignStage;
+  readonly idempotencyKey: string;
+  /** Reserved at WORKSPACE/CAMPAIGN before the retry re-enters SHOT_GENERATION, when provided. */
+  readonly generationBudgetCents?: number;
+  readonly requestedByUserId?: string;
+}
+
 export type AdvanceCampaignStageInput =
-  AdvanceCampaignStageAutoInput | AdvanceCampaignStageGateDecisionInput;
+  | AdvanceCampaignStageAutoInput
+  | AdvanceCampaignStageGateDecisionInput
+  | AdvanceCampaignStageAutoRetryInput;
+
+/**
+ * The only stages an AUTO_RETRY may leave: the two automated visual/continuity
+ * QA stages, each of whose sole REVISION edge routes to SHOT_GENERATION. Any
+ * other `fromStage` — in particular every human-gated stage — is refused, so
+ * an automated retry can never cross a human approval gate.
+ */
+const AUTO_RETRY_ELIGIBLE_STAGES: ReadonlySet<CampaignStage> = new Set([
+  'VISUAL_QA',
+  'CONTINUITY_QA',
+]);
 
 export type AdvanceCampaignStageOutput =
   | { readonly ok: true; readonly toStage: CampaignStage }
@@ -132,6 +167,7 @@ export function createAdvanceCampaignStageActivity(
     input: AdvanceCampaignStageInput,
   ): Promise<AdvanceCampaignStageOutput> {
     let toStage: CampaignStage;
+    let generationBudgetCents: number | undefined;
 
     if (input.mode === 'AUTO_FORWARD') {
       const edge = findForwardEdge(input.fromStage);
@@ -147,6 +183,28 @@ export function createAdvanceCampaignStageActivity(
         };
       }
       toStage = edge.to;
+    } else if (input.mode === 'AUTO_RETRY') {
+      // Refuse any stage whose revision edge isn't an automated-QA retry — a
+      // hard guard so an AUTO_RETRY can never traverse a human-gated edge.
+      if (!AUTO_RETRY_ELIGIBLE_STAGES.has(input.fromStage)) {
+        return {
+          ok: false,
+          reason: 'NO_MATCHING_TRANSITION',
+          detail: `AUTO_RETRY is not permitted from ${input.fromStage}`,
+        };
+      }
+      const edge = CAMPAIGN_TRANSITIONS.find(
+        (t) => t.from === input.fromStage && t.kind === 'REVISION' && !t.requiredApprovalGate,
+      );
+      if (!edge) {
+        return {
+          ok: false,
+          reason: 'NO_MATCHING_TRANSITION',
+          detail: `No automated revision edge exists from ${input.fromStage}`,
+        };
+      }
+      toStage = edge.to;
+      generationBudgetCents = input.generationBudgetCents;
     } else {
       if (input.decision === 'APPROVED') {
         const edge = findForwardEdge(input.fromStage);
@@ -179,6 +237,7 @@ export function createAdvanceCampaignStageActivity(
       toStage,
       idempotencyKey: input.idempotencyKey,
       requestedByUserId: input.requestedByUserId,
+      generationBudgetCents,
     });
 
     if (result.ok) {

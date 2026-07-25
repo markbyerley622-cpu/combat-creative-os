@@ -1186,10 +1186,65 @@ reasoning.claude.ts`) is unit-tested with an injected fake client instead,
   advance, a BLOCKED child result blocking before compositing); 5 `apps/api`
   route tests. No real provider credentials used anywhere — that remains a
   future, separately-approved step per §7.1.
-- **M7 — Visual QC & Continuity.** Visual Quality Controller, Continuity
-  Controller, the `VISUAL_QC ⇄ GENERATION` and `CONTINUITY_CHECK ⇄ GENERATION`
-  retry routing. _Test:_ fixture candidate sets (known-good/known-bad frames)
-  drive deterministic pass/fail assertions.
+- **M7 — Visual QC & Continuity. Done (2026-07-25), with the interim
+  decisions this item records.** The existing `visual-quality-controller`
+  and `continuity-controller` agents are wired into
+  `CampaignProductionWorkflow` at the `VISUAL_QA` and `CONTINUITY_QA` stages
+  through two new Activities —
+  `runVisualQualityAssessmentsActivity`/`runContinuityAssessmentActivity`
+  (`packages/workflows/src/activities`) — each of which loads the campaign's
+  latest script → shots → latest `ShotSpecification`s → SUCCEEDED candidates
+  (workspace-scoped, so a foreign or stale candidate is never even read),
+  runs the agent through the same `executeSpecialistAgentActivity` boundary
+  every other agent uses (so the agents never touch a repository, provider,
+  or another agent), validates the structured output, and persists an
+  immutable `QualityAssessment` (+ typed `QualityFailure` children) per
+  candidate. Visual QC runs one agent call per shot; Continuity runs one call
+  over the **ordered** candidate sequence and refuses to start until every
+  shot has a VISUAL_QA-passed candidate. `QualityAssessmentSchema` and the
+  Prisma model gained `campaignId` (campaign provenance + the
+  mismatched-candidate guard's comparison column), `overallScore` (the mean
+  of the per-criterion `scores`; `pass`, derived from the AND of every rubric
+  criterion, stays the authoritative recommendation), and
+  `createdByAgentInvocationId` (agent-invocation provenance, mirroring
+  `ShotSpecification`), plus a `@@unique([generationCandidateId,
+subjectStage])` idempotency constraint. `createQualityAssessmentForCandidate`
+  is immutable + idempotent (an exact retry returns the existing row) and
+  rejects cross-workspace, mismatched-campaign, and stale candidates (not
+  SUCCEEDED, or superseded by a newer candidate for the same shot) before any
+  insert. `advanceCampaignStageActivity` gained an `AUTO_RETRY` mode that can
+  traverse **only** the two automated-QA revision edges
+  (`VISUAL_QA`/`CONTINUITY_QA` → `SHOT_GENERATION`) — never a human-gated
+  edge — still fully gated by the bounded
+  `visualQARetryAllowed`/`continuityQARetryAllowed` facts (retries exhaust at
+  the shot's `ShotGenerationJob.maxAttempts`, escalating to BLOCKED rather
+  than looping) and budget-enforced (a `generationBudgetCents` reservation at
+  WORKSPACE/CAMPAIGN before re-entering SHOT_GENERATION). The workflow runs
+  both assessments before their AUTO_FORWARD attempt, routes a failed shot
+  back to SHOT_GENERATION via AUTO_RETRY, and stops **awaiting the
+  SHOT_SELECTION human gate** at `HUMAN_SHOT_SELECTION` — the exact M7
+  stopping point (the gate UI and the compositing pipeline are M8/M9). All
+  three human gates are untouched. **Interim decisions**: (1) a
+  SHOT_GENERATION retry revisit regenerates _every_ shot's specification (the
+  M6 child-workflow behavior), so an already-passing shot is re-assessed
+  against a fresh candidate on the next VISUAL_QA visit — correct and still
+  bounded by the same per-shot attempt cap, but partial (failed-shots-only)
+  regeneration is a future refinement; (2) per-shot continuity pass is driven
+  by blocking-conflict implication, with a sequence-level criterion failure
+  that names no conflict failing every shot (a genuine continuity failure is
+  cross-shot); (3) no new `apps/api`/`apps/dashboard` surface — a read-only QA
+  view is deferred behind M8's Shot Selection UI, the next human-facing
+  screen; (4) no frame extraction runs (the mock provider writes no media),
+  so the agents' `frameCount`/`candidateRef` inputs are documented
+  placeholders. _Test:_ repository guard tests (cross-workspace, stale,
+  mismatched, idempotent, score/provenance persistence); visual + continuity
+  activity tests (per-shot pass/fail, blocking vs non-blocking, ordered
+  sequence, VISUAL_QA-incomplete rejection, workspace isolation, idempotent
+  retry, agent-failure) driven by the deterministic `QueuedReasoningProvider`;
+  AUTO_RETRY activity tests (routing, bounded exhaustion, budget rejection,
+  human-gate refusal, idempotency); reducer tests; and QA workflow wiring
+  tests (both stages to the gate, visual-QA and continuity-QA repair loops,
+  bounded-exhaustion BLOCKED, human-gate non-bypass). No paid API calls.
 - **M8 — Shot Selection gate.** `providers/review` (Frame.io-compatible mock,
   complete and sufficient for local dev — no real Frame.io dependency),
   `apps/dashboard` Shot Selection UI calling `apps/api`. _Test:_ Playwright

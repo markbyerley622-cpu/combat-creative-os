@@ -97,11 +97,31 @@ describe('campaignProductionWorkflow — PROMPTING/SHOT_GENERATION wiring', () =
       ],
     }));
 
+    // M7: both QC stages now run an assessment Activity before AUTO_FORWARD;
+    // here every shot passes, so neither issues an AUTO_RETRY and the advance
+    // sequence above is unchanged.
+    const runVisualQualityAssessmentsActivity = vi
+      .fn<
+        (
+          input: activities.RunVisualQualityAssessmentsInput,
+        ) => Promise<activities.RunVisualQualityAssessmentsOutput>
+      >()
+      .mockResolvedValue({ ok: true, allPassed: true, anyBlocking: false, shotResults: [] });
+    const runContinuityAssessmentActivity = vi
+      .fn<
+        (
+          input: activities.RunContinuityAssessmentInput,
+        ) => Promise<activities.RunContinuityAssessmentOutput>
+      >()
+      .mockResolvedValue({ ok: true, allPassed: true, anyBlocking: false, shotResults: [] });
+
     setFakeActivityImpls({
       advanceCampaignStageActivity: advanceCampaignStageActivity as never,
       verifyHumanApprovalActivity: verifyHumanApprovalActivity as never,
       runShotPromptEngineerActivity: runShotPromptEngineerActivity as never,
       loadLatestShotSpecificationsActivity: loadLatestShotSpecificationsActivity as never,
+      runVisualQualityAssessmentsActivity: runVisualQualityAssessmentsActivity as never,
+      runContinuityAssessmentActivity: runContinuityAssessmentActivity as never,
     });
     setFakeChildWorkflowImpls({ shotGenerationWorkflow: shotGenerationWorkflowImpl as never });
 

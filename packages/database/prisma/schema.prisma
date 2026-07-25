@@ -748,6 +748,9 @@ model GenerationCandidate {
 model QualityAssessment {
   id                    String        @id @default(uuid())
   workspaceId           String
+  // Campaign the assessed subject belongs to (M7) — campaign provenance and
+  // the column the repository's mismatched-candidate guard compares against.
+  campaignId            String
   generationCandidateId String?
   assetId               String?
   // Disambiguates which stage's output this assessment concerns (VISUAL_QA /
@@ -756,7 +759,13 @@ model QualityAssessment {
   subjectStage          CampaignStage?
   pass                  Boolean
   scores                Json          @default("{}")
+  // Aggregate score (mean of the per-criterion `scores`, M7). `pass` stays the
+  // authoritative recommendation; this is the summary number.
+  overallScore          Float         @default(0)
   assessedBy            AssessedBy
+  // Agent invocation that produced this assessment (M7) — agent-invocation
+  // provenance, nullable for a HUMAN-assessed record.
+  createdByAgentInvocationId String?
   createdAt             DateTime      @default(now())
 
   generationCandidate GenerationCandidate? @relation(fields: [generationCandidateId], references: [id], onDelete: Cascade)
@@ -764,8 +773,14 @@ model QualityAssessment {
   failures            QualityFailure[]
 
   @@index([workspaceId])
+  @@index([campaignId])
   @@index([generationCandidateId])
   @@index([assetId])
+  // Idempotency identity for a candidate assessment: at most one assessment per
+  // (candidate, subjectStage). Postgres treats NULL generationCandidateId rows
+  // (asset-based assessments) as distinct, so this constrains candidate
+  // assessments only — matching the repository's findFirst idempotency check.
+  @@unique([generationCandidateId, subjectStage])
   @@map("quality_assessments")
 }
 

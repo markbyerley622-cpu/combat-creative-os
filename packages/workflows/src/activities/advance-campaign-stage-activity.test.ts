@@ -1,7 +1,39 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
+import type { CampaignRecord } from '@combat/database';
 import { createAdvanceCampaignStageActivity } from './advance-campaign-stage-activity';
 import { InMemoryTransitionStore } from './test-helpers/in-memory-transition-store';
+
+/**
+ * Seeds one shot (latest script -> shot -> spec -> job -> SUCCEEDED candidate)
+ * with no passing QA assessment, so `visualQARetryAllowed`/
+ * `continuityQARetryAllowed` is true while the job still has attempts left.
+ * Set `attemptCount === maxAttempts` to model an exhausted (bounded-out) shot.
+ */
+function seedShotForRetry(
+  store: InMemoryTransitionStore,
+  campaign: CampaignRecord,
+  opts: { attemptCount?: number; maxAttempts?: number } = {},
+): void {
+  const { attemptCount = 1, maxAttempts = 3 } = opts;
+  const scriptId = randomUUID();
+  const shotId = randomUUID();
+  const specId = randomUUID();
+  store.scripts.push({ id: scriptId, campaignId: campaign.id, version: 1 });
+  store.shots.push({ id: shotId, scriptId });
+  store.shotSpecifications.push({ id: specId, shotId });
+  store.shotGenerationJobs.push({
+    id: randomUUID(),
+    shotSpecificationId: specId,
+    attemptCount,
+    maxAttempts,
+  });
+  store.generationCandidates.push({
+    id: randomUUID(),
+    shotSpecificationId: specId,
+    status: 'SUCCEEDED',
+  });
+}
 
 describe('advanceCampaignStageActivity — AUTO_FORWARD', () => {
   it('advances a non-gated forward edge once its prerequisite fact is true', async () => {
@@ -211,5 +243,125 @@ describe('advanceCampaignStageActivity — GATE_DECISION', () => {
     expect(second).toEqual({ ok: true, toStage: 'SCRIPT_REVIEW' });
     expect(store.audits).toHaveLength(1);
     expect(store.campaigns[0]!.version).toBe(1);
+  });
+});
+
+describe('advanceCampaignStageActivity — AUTO_RETRY', () => {
+  it('routes a failed VISUAL_QA back to SHOT_GENERATION while retries remain', async () => {
+    const store = new InMemoryTransitionStore();
+    const campaign = store.seedCampaign({ currentStage: 'VISUAL_QA' });
+    seedShotForRetry(store, campaign, { attemptCount: 1, maxAttempts: 3 });
+    const activity = createAdvanceCampaignStageActivity({ campaignTransitionDb: store });
+
+    const result = await activity({
+      mode: 'AUTO_RETRY',
+      workspaceId: campaign.workspaceId,
+      campaignId: campaign.id,
+      fromStage: 'VISUAL_QA',
+      idempotencyKey: randomUUID(),
+    });
+
+    expect(result).toEqual({ ok: true, toStage: 'SHOT_GENERATION' });
+    expect(store.campaigns[0]!.currentStage).toBe('SHOT_GENERATION');
+  });
+
+  it('routes a failed CONTINUITY_QA back to SHOT_GENERATION while retries remain', async () => {
+    const store = new InMemoryTransitionStore();
+    const campaign = store.seedCampaign({ currentStage: 'CONTINUITY_QA' });
+    seedShotForRetry(store, campaign, { attemptCount: 2, maxAttempts: 3 });
+    const activity = createAdvanceCampaignStageActivity({ campaignTransitionDb: store });
+
+    const result = await activity({
+      mode: 'AUTO_RETRY',
+      workspaceId: campaign.workspaceId,
+      campaignId: campaign.id,
+      fromStage: 'CONTINUITY_QA',
+      idempotencyKey: randomUUID(),
+    });
+
+    expect(result).toEqual({ ok: true, toStage: 'SHOT_GENERATION' });
+  });
+
+  it('reports MISSING_PREREQUISITE (bounded) once a shot has exhausted its generation attempts', async () => {
+    const store = new InMemoryTransitionStore();
+    const campaign = store.seedCampaign({ currentStage: 'VISUAL_QA' });
+    seedShotForRetry(store, campaign, { attemptCount: 3, maxAttempts: 3 });
+    const activity = createAdvanceCampaignStageActivity({ campaignTransitionDb: store });
+
+    const result = await activity({
+      mode: 'AUTO_RETRY',
+      workspaceId: campaign.workspaceId,
+      campaignId: campaign.id,
+      fromStage: 'VISUAL_QA',
+      idempotencyKey: randomUUID(),
+    });
+
+    expect(result).toMatchObject({ ok: false, reason: 'MISSING_PREREQUISITE' });
+    expect(store.campaigns[0]!.currentStage).toBe('VISUAL_QA');
+  });
+
+  it('is budget-enforced: a retry into SHOT_GENERATION is rejected when the budget is exhausted', async () => {
+    const store = new InMemoryTransitionStore();
+    const campaign = store.seedCampaign({ currentStage: 'VISUAL_QA' });
+    seedShotForRetry(store, campaign, { attemptCount: 1, maxAttempts: 3 });
+    store.budgetPolicies.push({
+      id: randomUUID(),
+      workspaceId: campaign.workspaceId,
+      level: 'WORKSPACE',
+      scopeId: campaign.workspaceId,
+      limitCents: 0,
+    });
+    const activity = createAdvanceCampaignStageActivity({ campaignTransitionDb: store });
+
+    const result = await activity({
+      mode: 'AUTO_RETRY',
+      workspaceId: campaign.workspaceId,
+      campaignId: campaign.id,
+      fromStage: 'VISUAL_QA',
+      idempotencyKey: randomUUID(),
+      generationBudgetCents: 100_000,
+    });
+
+    expect(result).toMatchObject({ ok: false, reason: 'BUDGET_EXCEEDED' });
+    expect(store.campaigns[0]!.currentStage).toBe('VISUAL_QA');
+  });
+
+  it('refuses to AUTO_RETRY from a human-gated stage — never bypasses a human approval gate', async () => {
+    const store = new InMemoryTransitionStore();
+    const campaign = store.seedCampaign({ currentStage: 'HUMAN_SHOT_SELECTION' });
+    const activity = createAdvanceCampaignStageActivity({ campaignTransitionDb: store });
+
+    const result = await activity({
+      mode: 'AUTO_RETRY',
+      workspaceId: campaign.workspaceId,
+      campaignId: campaign.id,
+      fromStage: 'HUMAN_SHOT_SELECTION',
+      idempotencyKey: randomUUID(),
+    });
+
+    expect(result).toMatchObject({ ok: false, reason: 'NO_MATCHING_TRANSITION' });
+    expect(store.audits).toHaveLength(0);
+    expect(store.campaigns[0]!.currentStage).toBe('HUMAN_SHOT_SELECTION');
+  });
+
+  it('is idempotent: a retried AUTO_RETRY with the same key does not double-transition', async () => {
+    const store = new InMemoryTransitionStore();
+    const campaign = store.seedCampaign({ currentStage: 'VISUAL_QA' });
+    seedShotForRetry(store, campaign, { attemptCount: 1, maxAttempts: 3 });
+    const activity = createAdvanceCampaignStageActivity({ campaignTransitionDb: store });
+    const input = {
+      mode: 'AUTO_RETRY' as const,
+      workspaceId: campaign.workspaceId,
+      campaignId: campaign.id,
+      fromStage: 'VISUAL_QA' as const,
+      idempotencyKey: randomUUID(),
+    };
+
+    const first = await activity(input);
+    const second = await activity(input);
+
+    expect(first).toEqual({ ok: true, toStage: 'SHOT_GENERATION' });
+    expect(second).toEqual({ ok: true, toStage: 'SHOT_GENERATION' });
+    expect(store.audits).toHaveLength(1);
   });
 });

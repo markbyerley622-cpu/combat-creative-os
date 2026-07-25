@@ -46,6 +46,11 @@ import type {
   ShotGenerationJobRecord,
 } from '../shot-generation-repository';
 import type {
+  QualityAssessmentDataSource,
+  QualityAssessmentRecord,
+  QualityFailureRecord,
+} from '../quality-assessment-repository';
+import type {
   CampaignBriefFactRow,
   CreativeConceptFactRow,
   CreativeVariantFactRow,
@@ -101,7 +106,8 @@ export class InMemoryCampaignStore
     MembershipDataSource,
     LicenseDataSource,
     ShotSpecificationDataSource,
-    ShotGenerationDataSource
+    ShotGenerationDataSource,
+    QualityAssessmentDataSource
 {
   campaigns: CampaignRecord[] = [];
   audits: CampaignTransitionAuditRecord[] = [];
@@ -128,6 +134,9 @@ export class InMemoryCampaignStore
   generationCandidateRecords: GenerationCandidateRecord[] = [];
   qualityAssessments: QualityAssessmentFactRow[] = [];
   qualityFailures: QualityFailureFactRow[] = [];
+  /** Full rows written via `createQualityAssessmentForCandidate` (M7) — kept separate from the legacy minimal fixture arrays above for the same reason `shotSpecificationRecords` is kept separate from `shotSpecifications`. */
+  qualityAssessmentRecords: QualityAssessmentRecord[] = [];
+  qualityFailureRecords: QualityFailureRecord[] = [];
   renderJobs: RenderJobFactRow[] = [];
   editDecisionLists: EditDecisionListFactRow[] = [];
   deliverySpecifications: DeliverySpecificationFactRow[] = [];
@@ -507,23 +516,96 @@ export class InMemoryCampaignStore
       return candidate;
     },
   };
-  qualityAssessment: TransitionFactsDataSource['qualityAssessment'] = {
-    findMany: async ({ where }) => {
-      const [candidateFilter] = where.OR;
-      const candidateIds = new Set(candidateFilter.generationCandidateId.in);
-      return this.qualityAssessments.filter(
+  // Cast to `unknown` then the target intersection at the end, rather than
+  // annotating the object literal with the intersection type directly: the
+  // two source interfaces' `findMany` overloads have structurally
+  // incompatible return element shapes (`QualityAssessmentFactRow`'s
+  // `string | null` fields vs `QualityAssessmentRecord`'s `string |
+  // undefined` optional fields), which TS cannot reconcile as one
+  // assignable function type even though every branch below is runtime-
+  // correct for its own call shape.
+  qualityAssessment = {
+    findMany: async (args: {
+      where:
+        | { OR: [{ generationCandidateId: { in: string[] } }, { assetId: { not: null } }] }
+        | { generationCandidateId: { in: string[] }; workspaceId: string };
+    }) => {
+      const { where } = args;
+      if ('OR' in where) {
+        const [candidateFilter] = where.OR;
+        const candidateIds = new Set(candidateFilter.generationCandidateId.in);
+        return [
+          ...this.qualityAssessments.filter(
+            (qa) =>
+              (qa.generationCandidateId != null && candidateIds.has(qa.generationCandidateId)) ||
+              qa.assetId != null,
+          ),
+          // Records written via createQualityAssessmentForCandidate (M7) must
+          // also feed transition-facts.ts's fact computation — same
+          // legacy-plus-full-record merge rationale as shotSpecification/
+          // generationCandidate above.
+          ...this.qualityAssessmentRecords.filter(
+            (qa) =>
+              (qa.generationCandidateId != null && candidateIds.has(qa.generationCandidateId)) ||
+              qa.assetId != null,
+          ),
+        ];
+      }
+      const candidateIds = where.generationCandidateId.in;
+      return this.qualityAssessmentRecords.filter(
         (qa) =>
-          (qa.generationCandidateId != null && candidateIds.has(qa.generationCandidateId)) ||
-          qa.assetId != null,
+          qa.generationCandidateId != null &&
+          candidateIds.includes(qa.generationCandidateId) &&
+          qa.workspaceId === where.workspaceId,
       );
     },
-  };
-  qualityFailure: TransitionFactsDataSource['qualityFailure'] = {
-    findMany: async ({ where }) =>
-      this.qualityFailures.filter((f) =>
-        where.qualityAssessmentId.in.includes(f.qualityAssessmentId),
-      ),
-  };
+    findFirst: async ({
+      where,
+    }: {
+      where: { generationCandidateId: string; subjectStage: CampaignStage; workspaceId: string };
+    }) =>
+      this.qualityAssessmentRecords.find(
+        (qa) =>
+          qa.generationCandidateId === where.generationCandidateId &&
+          qa.subjectStage === where.subjectStage &&
+          qa.workspaceId === where.workspaceId,
+      ) ?? null,
+    create: async ({ data }: { data: Omit<QualityAssessmentRecord, 'id' | 'createdAt'> }) => {
+      const record: QualityAssessmentRecord = { id: randomUUID(), createdAt: new Date(), ...data };
+      this.qualityAssessmentRecords.push(record);
+      return record;
+    },
+  } as unknown as TransitionFactsDataSource['qualityAssessment'] &
+    QualityAssessmentDataSource['qualityAssessment'];
+
+  qualityFailure = {
+    findMany: async (args: {
+      where: { qualityAssessmentId: { in: string[] } } | { qualityAssessmentId: string };
+    }) => {
+      const { where } = args;
+      if (typeof where.qualityAssessmentId === 'string') {
+        const id = where.qualityAssessmentId;
+        return [
+          ...this.qualityFailures.filter((f) => f.qualityAssessmentId === id),
+          ...this.qualityFailureRecords.filter((f) => f.qualityAssessmentId === id),
+        ];
+      }
+      // Capture the narrowed `in` list in a const before the closures — TS
+      // drops the control-flow narrowing of `where.qualityAssessmentId` inside
+      // a nested closure (it could in principle be reassigned).
+      const inList = where.qualityAssessmentId.in;
+      return [
+        ...this.qualityFailures.filter((f) => inList.includes(f.qualityAssessmentId)),
+        ...this.qualityFailureRecords.filter((f) => inList.includes(f.qualityAssessmentId)),
+      ];
+    },
+    create: async ({ data }: { data: Omit<QualityFailureRecord, 'id' | 'createdAt'> }) => {
+      const record: QualityFailureRecord = { id: randomUUID(), createdAt: new Date(), ...data };
+      this.qualityFailureRecords.push(record);
+      return record;
+    },
+  } as unknown as TransitionFactsDataSource['qualityFailure'] &
+    QualityAssessmentDataSource['qualityFailure'];
   renderJob: TransitionFactsDataSource['renderJob'] = {
     findMany: async () => this.renderJobs,
   };

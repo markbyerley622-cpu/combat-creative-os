@@ -5,6 +5,8 @@ export * from './verify-human-approval-activity';
 export * from './run-strategy-concept-script-activity';
 export * from './run-shot-prompt-engineer-activity';
 export * from './load-latest-shot-specifications-activity';
+export * from './run-visual-quality-assessment-activity';
+export * from './run-continuity-assessment-activity';
 export * from './dispatch-shot-generation-activity';
 export * from './poll-shot-generation-activity';
 export * from './cancel-shot-generation-activity';

@@ -27,12 +27,37 @@ export const QualityAssessmentSchema = z
   .object({
     id: z.string().uuid(),
     workspaceId: z.string().uuid(),
+    /**
+     * Campaign the assessed subject belongs to (M7). Carried explicitly —
+     * rather than left to be re-derived through the candidate ->
+     * shotSpecification -> shot -> script -> campaign chain — so the
+     * repository can reject an assessment whose candidate belongs to a
+     * different campaign than the one requesting it (a "mismatched candidate")
+     * without a multi-join lookup, and so campaign provenance is a first-class
+     * column on the immutable record.
+     */
+    campaignId: z.string().uuid(),
     generationCandidateId: z.string().uuid().optional(),
     assetId: z.string().uuid().optional(),
     subjectStage: CampaignStageSchema.optional(),
     pass: z.boolean(),
+    /** Per-criterion rubric scores, keyed by the agent rubric's `criterionId`. */
     scores: z.record(z.string(), z.number()).default({}),
+    /**
+     * Single aggregate score for the assessment (M7) — the mean of the
+     * per-criterion `scores`. `pass` remains the authoritative recommendation
+     * (derived from the AND of every criterion's pass, not from this
+     * threshold); `overallScore` is the human-readable summary number.
+     */
+    overallScore: z.number(),
     assessedBy: AssessedBySchema,
+    /**
+     * The `AgentInvocation` this assessment was produced by (M7) — agent-
+     * invocation provenance, mirroring `ShotSpecification.createdByAgentInvocationId`.
+     * Optional because a `HUMAN`-assessed record (`assessedBy: 'HUMAN'`) has no
+     * agent invocation behind it.
+     */
+    createdByAgentInvocationId: z.string().uuid().optional(),
     createdAt: z.date(),
   })
   .refine((qa) => Boolean(qa.generationCandidateId) !== Boolean(qa.assetId), {

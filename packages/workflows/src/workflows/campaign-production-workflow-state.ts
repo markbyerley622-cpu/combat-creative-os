@@ -167,6 +167,85 @@ export function applyShotGenerationWorkflowResult(
   };
 }
 
+/**
+ * Applies the result of the VISUAL_QA assessment Activity
+ * (`runVisualQualityAssessmentsActivity`), run before every AUTO_FORWARD
+ * attempt out of VISUAL_QA. Success leaves state unchanged — the caller then
+ * either proceeds to AUTO_FORWARD (all shots passed) or issues an AUTO_RETRY
+ * (a shot failed) based on `allPassed`. Any Activity-level failure escalates
+ * straight to BLOCKED, matching every other pre-forward hook in this reducer.
+ */
+export function applyRunVisualQualityAssessmentsResult(
+  state: CampaignProductionWorkflowState,
+  result: activities.RunVisualQualityAssessmentsOutput,
+): CampaignProductionWorkflowState {
+  if (result.ok) {
+    return state;
+  }
+  return {
+    ...state,
+    status: 'BLOCKED',
+    blockedReason: `VISUAL_QA assessment failed (${result.reason}): ${describeQaFailure(result)}`,
+  };
+}
+
+/**
+ * Applies the result of the CONTINUITY_QA assessment Activity
+ * (`runContinuityAssessmentActivity`) — same shape as the VISUAL_QA reducer
+ * above.
+ */
+export function applyRunContinuityAssessmentResult(
+  state: CampaignProductionWorkflowState,
+  result: activities.RunContinuityAssessmentOutput,
+): CampaignProductionWorkflowState {
+  if (result.ok) {
+    return state;
+  }
+  return {
+    ...state,
+    status: 'BLOCKED',
+    blockedReason: `CONTINUITY_QA assessment failed (${result.reason}): ${describeQaFailure(result)}`,
+  };
+}
+
+function describeQaFailure(
+  result: Extract<
+    activities.RunVisualQualityAssessmentsOutput | activities.RunContinuityAssessmentOutput,
+    { ok: false }
+  >,
+): string {
+  if (result.reason === 'AGENT_FAILED') {
+    return 'shotId' in result
+      ? `${result.agentName} (shot ${result.shotId}): ${result.detail}`
+      : `${result.agentName}: ${result.detail}`;
+  }
+  return 'shotId' in result ? `${result.detail} (shot ${result.shotId})` : result.detail;
+}
+
+/**
+ * Applies the result of an AUTO_RETRY advance attempt (a failed visual/
+ * continuity assessment routing back to SHOT_GENERATION). A successful retry
+ * moves `currentStage` to SHOT_GENERATION and stays RUNNING so the loop
+ * regenerates. Any rejection — the bounded `visualQARetryAllowed`/
+ * `continuityQARetryAllowed` fact being false (retries exhausted), a budget
+ * rejection, or the edge being disallowed — escalates to BLOCKED rather than
+ * looping forever (CLAUDE.md: "Bound retries explicitly ... escalate to a
+ * human state").
+ */
+export function applyAutoRetryResult(
+  state: CampaignProductionWorkflowState,
+  result: activities.AdvanceCampaignStageOutput,
+): CampaignProductionWorkflowState {
+  if (result.ok) {
+    return { ...state, currentStage: result.toStage, status: 'RUNNING', pendingGate: null };
+  }
+  return {
+    ...state,
+    status: 'BLOCKED',
+    blockedReason: `Automated QA retry blocked (${describeFailure(result)})`,
+  };
+}
+
 export type GateSignalDecision =
   { readonly kind: 'IGNORE' } | { readonly kind: 'VERIFY'; readonly approvalId: string };
 
@@ -282,4 +361,12 @@ export function buildGateIdempotencyKey(
   approvalId: string,
 ): string {
   return `${workflowRunId}:GATE:${gate}:${approvalId}`;
+}
+
+export function buildAutoRetryIdempotencyKey(
+  workflowRunId: string,
+  stage: CampaignStage,
+  attempt: number,
+): string {
+  return `${workflowRunId}:RETRY:${stage}:${attempt}`;
 }

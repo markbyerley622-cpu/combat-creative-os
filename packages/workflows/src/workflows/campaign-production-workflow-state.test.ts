@@ -3,10 +3,14 @@ import { describe, expect, it } from 'vitest';
 import type * as activities from '../activities';
 import {
   applyAutoForwardResult,
+  applyAutoRetryResult,
   applyBoundExceeded,
   applyGateAdvanceResult,
+  applyRunContinuityAssessmentResult,
   applyRunStrategyConceptScriptResult,
+  applyRunVisualQualityAssessmentsResult,
   buildAutoForwardIdempotencyKey,
+  buildAutoRetryIdempotencyKey,
   buildGateIdempotencyKey,
   decideGateSignal,
   decideVerifyResult,
@@ -291,6 +295,98 @@ describe('idempotency key builders', () => {
     const approvalId = randomUUID();
     expect(buildGateIdempotencyKey('run-1', 'CONCEPT', approvalId)).toBe(
       `run-1:GATE:CONCEPT:${approvalId}`,
+    );
+  });
+});
+
+describe('applyRunVisualQualityAssessmentsResult', () => {
+  const base: CampaignProductionWorkflowState = {
+    ...initialCampaignProductionState('VISUAL_QA'),
+  };
+
+  it('leaves state unchanged on success (routing decided by allPassed in the workflow)', () => {
+    const next = applyRunVisualQualityAssessmentsResult(base, {
+      ok: true,
+      allPassed: true,
+      anyBlocking: false,
+      shotResults: [],
+    });
+    expect(next).toEqual(base);
+  });
+
+  it('escalates to BLOCKED on an Activity-level failure', () => {
+    const next = applyRunVisualQualityAssessmentsResult(base, {
+      ok: false,
+      reason: 'AGENT_FAILED',
+      agentName: 'visual-quality-controller',
+      shotId: 'shot-1',
+      detail: 'schema invalid',
+    });
+    expect(next.status).toBe('BLOCKED');
+    expect(next.blockedReason).toContain('VISUAL_QA');
+    expect(next.blockedReason).toContain('visual-quality-controller');
+  });
+});
+
+describe('applyRunContinuityAssessmentResult', () => {
+  const base = initialCampaignProductionState('CONTINUITY_QA');
+
+  it('leaves state unchanged on success', () => {
+    const next = applyRunContinuityAssessmentResult(base, {
+      ok: true,
+      allPassed: true,
+      anyBlocking: false,
+      shotResults: [],
+    });
+    expect(next).toEqual(base);
+  });
+
+  it('escalates to BLOCKED when continuity cannot run (visual QA incomplete)', () => {
+    const next = applyRunContinuityAssessmentResult(base, {
+      ok: false,
+      reason: 'VISUAL_QA_INCOMPLETE',
+      shotId: 'shot-1',
+      detail: 'no passing visual assessment',
+    });
+    expect(next.status).toBe('BLOCKED');
+    expect(next.blockedReason).toContain('CONTINUITY_QA');
+  });
+});
+
+describe('applyAutoRetryResult', () => {
+  const base = initialCampaignProductionState('VISUAL_QA');
+
+  it('moves back to SHOT_GENERATION and stays RUNNING on a successful retry', () => {
+    const next = applyAutoRetryResult(base, { ok: true, toStage: 'SHOT_GENERATION' });
+    expect(next.currentStage).toBe('SHOT_GENERATION');
+    expect(next.status).toBe('RUNNING');
+  });
+
+  it('escalates to BLOCKED when retries are exhausted (MISSING_PREREQUISITE)', () => {
+    const next = applyAutoRetryResult(base, {
+      ok: false,
+      reason: 'MISSING_PREREQUISITE',
+      detail: 'visualQARetryAllowed is false',
+    });
+    expect(next.status).toBe('BLOCKED');
+    expect(next.blockedReason).toContain('Automated QA retry blocked');
+  });
+
+  it('escalates to BLOCKED on a budget rejection', () => {
+    const next = applyAutoRetryResult(base, {
+      ok: false,
+      reason: 'BUDGET_EXCEEDED',
+      detail: 'workspace budget exhausted',
+    });
+    expect(next.status).toBe('BLOCKED');
+  });
+});
+
+describe('buildAutoRetryIdempotencyKey', () => {
+  it('is stable and distinct per stage/attempt (replay-safe)', () => {
+    expect(buildAutoRetryIdempotencyKey('run-1', 'VISUAL_QA', 2)).toBe('run-1:RETRY:VISUAL_QA:2');
+    expect(buildAutoRetryIdempotencyKey('run-1', 'CONTINUITY_QA', 5)).toBe(
+      'run-1:RETRY:CONTINUITY_QA:5',
     );
   });
 });

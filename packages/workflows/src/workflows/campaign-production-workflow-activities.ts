@@ -50,4 +50,21 @@ export interface CampaignProductionActivities {
   loadLatestShotSpecificationsActivity(
     input: activities.LoadLatestShotSpecificationsInput,
   ): Promise<activities.LoadLatestShotSpecificationsOutput>;
+  /**
+   * M7: runs the Visual Quality Controller once per shot's latest SUCCEEDED
+   * candidate at VISUAL_QA, persisting an immutable QualityAssessment +
+   * typed QualityFailures per candidate. See
+   * run-visual-quality-assessment-activity.ts's doc comment.
+   */
+  runVisualQualityAssessmentsActivity(
+    input: activities.RunVisualQualityAssessmentsInput,
+  ): Promise<activities.RunVisualQualityAssessmentsOutput>;
+  /**
+   * M7: runs the Continuity Controller once over the ordered candidate
+   * sequence at CONTINUITY_QA, persisting a per-candidate QualityAssessment.
+   * See run-continuity-assessment-activity.ts's doc comment.
+   */
+  runContinuityAssessmentActivity(
+    input: activities.RunContinuityAssessmentInput,
+  ): Promise<activities.RunContinuityAssessmentOutput>;
 }

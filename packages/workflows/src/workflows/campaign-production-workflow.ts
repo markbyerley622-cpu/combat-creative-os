@@ -17,13 +17,17 @@ import {
 import type { shotGenerationWorkflow } from './shot-generation-workflow';
 import {
   applyAutoForwardResult,
+  applyAutoRetryResult,
   applyBoundExceeded,
   applyGateAdvanceResult,
   applyLoadLatestShotSpecificationsResult,
+  applyRunContinuityAssessmentResult,
   applyRunShotPromptEngineerResult,
   applyRunStrategyConceptScriptResult,
+  applyRunVisualQualityAssessmentsResult,
   applyShotGenerationWorkflowResult,
   buildAutoForwardIdempotencyKey,
+  buildAutoRetryIdempotencyKey,
   buildGateIdempotencyKey,
   decideGateSignal,
   decideVerifyResult,
@@ -46,6 +50,8 @@ const {
   runStrategyConceptScriptActivity,
   runShotPromptEngineerActivity,
   loadLatestShotSpecificationsActivity,
+  runVisualQualityAssessmentsActivity,
+  runContinuityAssessmentActivity,
 } = proxyActivities<CampaignProductionActivities>({
   // Longer than the other two activities' effective budget: this one makes
   // three sequential reasoning-provider calls plus their persistence writes,
@@ -186,6 +192,78 @@ export async function campaignProductionWorkflow(
           if (state.status !== 'RUNNING') {
             continue;
           }
+        }
+      }
+
+      // M7: VISUAL_QA runs the Visual Quality Controller over each shot's
+      // latest candidate, persisting immutable assessments. If every shot
+      // passes, the normal AUTO_FORWARD below finds `allShotsPassedVisualQA`
+      // true and advances to CONTINUITY_QA. If a shot fails, an AUTO_RETRY
+      // routes back to SHOT_GENERATION — bounded by `visualQARetryAllowed`
+      // (the Activity returns MISSING_PREREQUISITE, escalating to BLOCKED,
+      // once a shot exhausts its generation attempts) and unable to cross any
+      // human gate (AUTO_RETRY only ever traverses VISUAL_QA/CONTINUITY_QA ->
+      // SHOT_GENERATION). The assessment Activity never advances a stage or
+      // fires an approval signal itself.
+      if (state.currentStage === 'VISUAL_QA') {
+        const visualResult = await runVisualQualityAssessmentsActivity({
+          workspaceId: input.workspaceId,
+          campaignId: input.campaignId,
+          workflowRunId: input.workflowRunId,
+          providerId: input.videoProviderId,
+          revisionAttempt: autoForwardAttempt,
+        });
+        state = applyRunVisualQualityAssessmentsResult(state, visualResult);
+        if (state.status !== 'RUNNING') {
+          continue;
+        }
+        if (visualResult.ok && !visualResult.allPassed) {
+          const retryResult = await advanceCampaignStageActivity({
+            mode: 'AUTO_RETRY',
+            workspaceId: input.workspaceId,
+            campaignId: input.campaignId,
+            fromStage: state.currentStage,
+            idempotencyKey: buildAutoRetryIdempotencyKey(
+              input.workflowRunId,
+              state.currentStage,
+              autoForwardAttempt,
+            ),
+          });
+          state = applyAutoRetryResult(state, retryResult);
+          continue;
+        }
+      }
+
+      // M7: CONTINUITY_QA runs the Continuity Controller over the ordered
+      // candidate sequence — reached only after VISUAL_QA cleared every shot,
+      // so eligible visual results always exist. Same pass/AUTO_RETRY routing
+      // as VISUAL_QA, gated by the bounded `continuityQARetryAllowed` fact.
+      if (state.currentStage === 'CONTINUITY_QA') {
+        const continuityResult = await runContinuityAssessmentActivity({
+          workspaceId: input.workspaceId,
+          campaignId: input.campaignId,
+          workflowRunId: input.workflowRunId,
+          providerId: input.videoProviderId,
+          revisionAttempt: autoForwardAttempt,
+        });
+        state = applyRunContinuityAssessmentResult(state, continuityResult);
+        if (state.status !== 'RUNNING') {
+          continue;
+        }
+        if (continuityResult.ok && !continuityResult.allPassed) {
+          const retryResult = await advanceCampaignStageActivity({
+            mode: 'AUTO_RETRY',
+            workspaceId: input.workspaceId,
+            campaignId: input.campaignId,
+            fromStage: state.currentStage,
+            idempotencyKey: buildAutoRetryIdempotencyKey(
+              input.workflowRunId,
+              state.currentStage,
+              autoForwardAttempt,
+            ),
+          });
+          state = applyAutoRetryResult(state, retryResult);
+          continue;
         }
       }
 
