@@ -314,28 +314,10 @@ describe('POST /workspaces/:workspaceId/campaigns/:campaignId/approvals/final', 
   });
 });
 
-describe('POST /workspaces/:workspaceId/campaigns/:campaignId/approvals/shot-selection', () => {
-  it('accepts a REVIEWER, who holds SELECT_SHOTS', async () => {
-    const db = new InMemoryApprovalDatabase();
-    const campaign = db.seedCampaign({ currentStage: 'HUMAN_SHOT_SELECTION' });
-    const userId = randomUUID();
-    db.seedMembership({ workspaceId: campaign.workspaceId, userId, role: 'REVIEWER' });
-    const { workflowClient, signal } = buildFakeWorkflowClient();
-    const app = buildApp(db, workflowClient);
-
-    const response = await app.inject({
-      method: 'POST',
-      url: `/workspaces/${campaign.workspaceId}/campaigns/${campaign.id}/approvals/shot-selection`,
-      payload: { userId, decision: 'APPROVED' },
-    });
-
-    expect(response.statusCode).toBe(202);
-    expect(signal).toHaveBeenCalledWith(
-      expect.objectContaining({ name: 'selectShotsSignal' }),
-      expect.anything(),
-    );
-  });
-});
+// The SHOT_SELECTION gate is no longer a generic approval route (M8): it is
+// driven exclusively by shot-review-routes.ts (see shot-review-routes.test.ts),
+// which validates + freezes the persisted ShotSelectionSet before recording the
+// approval. This keeps exactly one shot-selection approval path.
 
 describe('workflow signal failure handling', () => {
   it('still reports the persisted approvalId when the workflow signal itself fails', async () => {

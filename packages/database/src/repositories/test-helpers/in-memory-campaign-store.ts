@@ -51,6 +51,12 @@ import type {
   QualityFailureRecord,
 } from '../quality-assessment-repository';
 import type {
+  ShotSelectionDataSource,
+  ShotSelectionRecord,
+  ShotSelectionReplacementRecord,
+  ShotSelectionSetRecord,
+} from '../shot-selection-repository';
+import type {
   CampaignBriefFactRow,
   CreativeConceptFactRow,
   CreativeVariantFactRow,
@@ -107,7 +113,8 @@ export class InMemoryCampaignStore
     LicenseDataSource,
     ShotSpecificationDataSource,
     ShotGenerationDataSource,
-    QualityAssessmentDataSource
+    QualityAssessmentDataSource,
+    ShotSelectionDataSource
 {
   campaigns: CampaignRecord[] = [];
   audits: CampaignTransitionAuditRecord[] = [];
@@ -137,6 +144,10 @@ export class InMemoryCampaignStore
   /** Full rows written via `createQualityAssessmentForCandidate` (M7) — kept separate from the legacy minimal fixture arrays above for the same reason `shotSpecificationRecords` is kept separate from `shotSpecifications`. */
   qualityAssessmentRecords: QualityAssessmentRecord[] = [];
   qualityFailureRecords: QualityFailureRecord[] = [];
+  /** M8 shot-selection aggregate rows. */
+  shotSelectionSetRecords: ShotSelectionSetRecord[] = [];
+  shotSelectionRecords: ShotSelectionRecord[] = [];
+  shotSelectionReplacementRecords: ShotSelectionReplacementRecord[] = [];
   renderJobs: RenderJobFactRow[] = [];
   editDecisionLists: EditDecisionListFactRow[] = [];
   deliverySpecifications: DeliverySpecificationFactRow[] = [];
@@ -606,6 +617,113 @@ export class InMemoryCampaignStore
     },
   } as unknown as TransitionFactsDataSource['qualityFailure'] &
     QualityAssessmentDataSource['qualityFailure'];
+
+  shotSelectionSet: ShotSelectionDataSource['shotSelectionSet'] = {
+    create: async ({ data }) => {
+      const now = new Date();
+      const record: ShotSelectionSetRecord = {
+        id: randomUUID(),
+        createdAt: now,
+        updatedAt: now,
+        ...data,
+      };
+      this.shotSelectionSetRecords.push(record);
+      return record;
+    },
+    findFirst: async ({ where }) => {
+      if ('id' in where) {
+        return (
+          this.shotSelectionSetRecords.find(
+            (s) => s.id === where.id && s.workspaceId === where.workspaceId,
+          ) ?? null
+        );
+      }
+      return (
+        this.shotSelectionSetRecords.find(
+          (s) =>
+            s.campaignId === where.campaignId &&
+            s.version === where.version &&
+            s.workspaceId === where.workspaceId,
+        ) ?? null
+      );
+    },
+    findMany: async ({ where }) =>
+      this.shotSelectionSetRecords.filter(
+        (s) => s.campaignId === where.campaignId && s.workspaceId === where.workspaceId,
+      ),
+    updateMany: async ({ where, data }) => {
+      // Compare-and-swap: only the row matching id + workspace + revision +
+      // DRAFT status is mutated, reproducing the optimistic-concurrency guard a
+      // real `updateMany` gives us.
+      const match = this.shotSelectionSetRecords.find(
+        (s) =>
+          s.id === where.id &&
+          s.workspaceId === where.workspaceId &&
+          s.revision === where.revision &&
+          s.status === where.status,
+      );
+      if (!match) return { count: 0 };
+      if (data.status !== undefined) match.status = data.status;
+      if (data.reviewerUserId !== undefined) match.reviewerUserId = data.reviewerUserId;
+      if (data.rationale !== undefined) match.rationale = data.rationale;
+      if (data.approvedAt !== undefined) match.approvedAt = data.approvedAt;
+      match.revision += data.revision.increment;
+      match.updatedAt = new Date();
+      return { count: 1 };
+    },
+  };
+
+  shotSelection: ShotSelectionDataSource['shotSelection'] = {
+    create: async ({ data }) => {
+      const now = new Date();
+      const record: ShotSelectionRecord = {
+        id: randomUUID(),
+        createdAt: now,
+        updatedAt: now,
+        ...data,
+      };
+      this.shotSelectionRecords.push(record);
+      return record;
+    },
+    findMany: async ({ where }) =>
+      this.shotSelectionRecords.filter((s) => s.shotSelectionSetId === where.shotSelectionSetId),
+    updateMany: async ({ where, data }) => {
+      const matches = this.shotSelectionRecords.filter(
+        (s) => s.shotSelectionSetId === where.shotSelectionSetId && s.shotId === where.shotId,
+      );
+      for (const match of matches) {
+        if (data.status !== undefined) match.status = data.status;
+        // `selectedCandidateId` is nullable — `undefined` in the data means
+        // "clear it" (a rejected shot), so it's assigned unconditionally when
+        // the key is present rather than guarded by a `!== undefined` check.
+        if ('selectedCandidateId' in data) match.selectedCandidateId = data.selectedCandidateId;
+        if ('visualQaAssessmentId' in data) match.visualQaAssessmentId = data.visualQaAssessmentId;
+        if ('continuityQaAssessmentId' in data)
+          match.continuityQaAssessmentId = data.continuityQaAssessmentId;
+        if ('rationale' in data) match.rationale = data.rationale;
+        if ('regenerationFeedback' in data) match.regenerationFeedback = data.regenerationFeedback;
+        match.updatedAt = new Date();
+      }
+      return { count: matches.length };
+    },
+  };
+
+  shotSelectionReplacement: ShotSelectionDataSource['shotSelectionReplacement'] = {
+    create: async ({ data }) => {
+      const record: ShotSelectionReplacementRecord = {
+        id: randomUUID(),
+        createdAt: new Date(),
+        ...data,
+      };
+      this.shotSelectionReplacementRecords.push(record);
+      return record;
+    },
+    findMany: async ({ where }) =>
+      this.shotSelectionReplacementRecords.filter(
+        (r) => r.shotSelectionSetId === where.shotSelectionSetId,
+      ),
+  };
+
   renderJob: TransitionFactsDataSource['renderJob'] = {
     findMany: async () => this.renderJobs,
   };

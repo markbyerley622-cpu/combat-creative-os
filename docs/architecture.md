@@ -1245,11 +1245,70 @@ subjectStage])` idempotency constraint. `createQualityAssessmentForCandidate`
   human-gate refusal, idempotency); reducer tests; and QA workflow wiring
   tests (both stages to the gate, visual-QA and continuity-QA repair loops,
   bounded-exhaustion BLOCKED, human-gate non-bypass). No paid API calls.
-- **M8 — Shot Selection gate.** `providers/review` (Frame.io-compatible mock,
-  complete and sufficient for local dev — no real Frame.io dependency),
-  `apps/dashboard` Shot Selection UI calling `apps/api`. _Test:_ Playwright
-  covering select/reject flows and the reject→regenerate transition; RBAC test
-  confirming only `REVIEWER`/`OWNER_ADMIN` can select shots.
+- **M8 — Shot Selection gate. Done (2026-07-25), with the interim decisions
+  this item records.** The full human review experience at
+  HUMAN_SHOT_SELECTION. The `ReviewProvider` (`packages/providers`) was
+  widened from its original four-method shape into a Frame.io-compatible
+  session/version model — `createReviewSession`, `registerCandidateVersion`
+  (version history), timecoded + annotated `postComment`, `setVersionDecision`,
+  `listVersions`/`listComments`, `getShareLink` — all idempotency-keyed with
+  typed `ReviewProviderError`s and a fully deterministic `MockReviewProvider`
+  (counter-derived ids, no wall-clock). Candidate **eligibility** is a pure
+  domain evaluator (`packages/domain/src/workflow/candidate-eligibility.ts`)
+  over nine facts (SUCCEEDED, asset READY, latest candidate, VISUAL_QA passed,
+  CONTINUITY_QA passed, no unresolved blocking defect, licensing valid,
+  versions match, not superseded), fed by
+  `gatherCandidateEligibility` (`packages/database`). Selections persist as a
+  versioned, workspace-scoped `ShotSelectionSet` + per-shot `ShotSelection`
+  aggregate (`packages/domain` schemas, Prisma models, `shot-selection-repository`)
+  with DRAFT/APPROVED states, one candidate per required shot, deterministic
+  sequence ordering, `ShotSelectionReplacement` history, optimistic-concurrency
+  (`revision` compare-and-swap), immutable-once-APPROVED, and an
+  `approveShotSelectionSet` that refuses an incomplete, ineligible, or stale
+  set. `apps/api` gained RBAC-protected `shot-review` routes (the ordered
+  review workspace, signed candidate preview URLs that never expose the s3Key,
+  draft create, eligible-only select/replace, per-shot reject with regeneration
+  feedback, review comments, approve, request-regeneration, history) — the
+  **generic `/approvals/shot-selection` gate route was removed**, so the
+  SHOT_SELECTION gate has exactly one approval path (`shot-review/approve`),
+  which freezes the set, records the immutable `HumanApproval` **before**
+  signalling, dedupes exact retries, and only signals a valid complete set.
+  `CampaignProductionWorkflow` calls a new `verifyShotSelectionActivity` at the
+  SHOT_SELECTION gate — even after `verifyHumanApprovalActivity` confirms the
+  APPROVED record, the workflow re-reads the persisted set and refuses to
+  advance to COMPOSITING unless it is APPROVED, complete, and current, so an
+  API caller cannot fabricate gate satisfaction and a stale/incomplete
+  selection never crosses. `apps/dashboard` gained a functional Shot Selection
+  screen (candidate cards with deterministic placeholders, visual/continuity QA
+  - defects, eligibility reasons, select/replace/reject/approve/request-
+    regeneration, optimistic-concurrency conflict + failure handling, an explicit
+    "approval advances the workflow" warning). **Interim decisions**: (1)
+    regeneration preserves M6 behavior — a HUMAN_SHOT_SELECTION rejection routes
+    to SHOT_GENERATION and every shot regenerates; per-shot feedback is persisted
+    on `ShotSelection` rows and loaded by `loadShotSelectionRegenerationFeedbackActivity`
+    into the generation stage for provenance, but the deterministic mock does not
+    consume it and targeted (rejected-shots-only) regeneration is deferred; (2)
+    the `allShotsSelected` transition fact is unchanged (approval-based) — the
+    persisted-set guarantee lives in `verifyShotSelectionActivity`, not the fact
+    derivation, to avoid re-touching the M7 transition-facts layer; (3) review
+    comments live in the (in-memory mock) `ReviewProvider`, not a DB table — no
+    review-session persistence table exists yet; (4) COMPOSITING remains an
+    approved `NOT_IMPLEMENTED` placeholder (M9), so a real run legitimately
+    reaches BLOCKED there once the gate is crossed — the exact M8 stopping point.
+    No real Frame.io, no real generation provider, no compositing/sound/export,
+    no live Postgres/Temporal/MinIO (the schema.prisma models are unmigrated in
+    this environment — see docs/domain-model.md §8). _Test:_ deterministic
+    review-provider coverage (sessions, version history, timecoded/annotated
+    comments, idempotency, typed failures); domain eligibility-evaluator tests;
+    shot-selection repository tests (draft/select/replace/reject/approve,
+    optimistic concurrency, incomplete/ineligible-approval refusal, immutability,
+    workspace isolation); `gatherCandidateEligibility` tests; 11 `apps/api`
+    shot-review tests (ordered workspace, RBAC, eligible-only select,
+    persistence-before-signal, incomplete/stale refusal, regeneration routing,
+    cross-workspace 403, timecoded comment); `verifyShotSelectionActivity` and
+    `loadShotSelectionRegenerationFeedbackActivity` tests; workflow gate-non-bypass
+    wiring tests (invalid set does not advance; valid set advances to
+    COMPOSITING); and dashboard api-client tests. No paid API calls, no real media.
 - **M9 — Compositing & rough edit.** `providers/motion-graphics` (mock of the
   external-Windows-worker interface — no AE/aerender process run anywhere in
   this milestone), `providers/design` (Figma), `CompositingWorkflow`, Edit

@@ -95,6 +95,12 @@ describe('campaignProductionWorkflow — VISUAL_QA/CONTINUITY_QA wiring (M7)', (
       >();
 
     setFakeActivityImpls({
+      loadShotSelectionRegenerationFeedbackActivity: (async () => ({ feedback: [] })) as never,
+      verifyShotSelectionActivity: (async () => ({
+        valid: true,
+        setId: 'set-1',
+        version: 1,
+      })) as never,
       advanceCampaignStageActivity: advance as never,
       verifyHumanApprovalActivity: verifyHumanApprovalActivity as never,
       runVisualQualityAssessmentsActivity: runVisualQualityAssessmentsActivity as never,
@@ -167,6 +173,12 @@ describe('campaignProductionWorkflow — VISUAL_QA/CONTINUITY_QA wiring (M7)', (
     const shotGenChildImpl = shotGenChild();
 
     setFakeActivityImpls({
+      loadShotSelectionRegenerationFeedbackActivity: (async () => ({ feedback: [] })) as never,
+      verifyShotSelectionActivity: (async () => ({
+        valid: true,
+        setId: 'set-1',
+        version: 1,
+      })) as never,
       advanceCampaignStageActivity: advance as never,
       loadLatestShotSpecificationsActivity: loadSpecsFn() as never,
       runVisualQualityAssessmentsActivity: runVisualQualityAssessmentsActivity as never,
@@ -212,6 +224,12 @@ describe('campaignProductionWorkflow — VISUAL_QA/CONTINUITY_QA wiring (M7)', (
     const shotGenChildImpl = shotGenChild();
 
     setFakeActivityImpls({
+      loadShotSelectionRegenerationFeedbackActivity: (async () => ({ feedback: [] })) as never,
+      verifyShotSelectionActivity: (async () => ({
+        valid: true,
+        setId: 'set-1',
+        version: 1,
+      })) as never,
       advanceCampaignStageActivity: advance as never,
       loadLatestShotSpecificationsActivity: loadSpecsFn() as never,
       runVisualQualityAssessmentsActivity: runVisualQualityAssessmentsActivity as never,
@@ -243,6 +261,12 @@ describe('campaignProductionWorkflow — VISUAL_QA/CONTINUITY_QA wiring (M7)', (
     const runVisualQualityAssessmentsActivity = vi.fn<VisualFn>().mockResolvedValue(VISUAL_FAIL);
 
     setFakeActivityImpls({
+      loadShotSelectionRegenerationFeedbackActivity: (async () => ({ feedback: [] })) as never,
+      verifyShotSelectionActivity: (async () => ({
+        valid: true,
+        setId: 'set-1',
+        version: 1,
+      })) as never,
       advanceCampaignStageActivity: advance as never,
       runVisualQualityAssessmentsActivity: runVisualQualityAssessmentsActivity as never,
     });
@@ -275,6 +299,12 @@ describe('campaignProductionWorkflow — VISUAL_QA/CONTINUITY_QA wiring (M7)', (
     });
 
     setFakeActivityImpls({
+      loadShotSelectionRegenerationFeedbackActivity: (async () => ({ feedback: [] })) as never,
+      verifyShotSelectionActivity: (async () => ({
+        valid: true,
+        setId: 'set-1',
+        version: 1,
+      })) as never,
       advanceCampaignStageActivity: advance as never,
       runVisualQualityAssessmentsActivity: runVisualQualityAssessmentsActivity as never,
     });

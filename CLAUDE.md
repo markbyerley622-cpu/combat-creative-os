@@ -4,36 +4,41 @@ This file is the operating contract for anyone (human or agent) working in
 this repository. It is deliberately short — for the full design rationale
 see `docs/architecture.md` and `docs/adr/`.
 
-Current milestone: **M7, automated visual & continuity QA, done** — the
-existing `visual-quality-controller` and `continuity-controller` agents are
-now wired into `CampaignProductionWorkflow` at `VISUAL_QA` and
-`CONTINUITY_QA` through `runVisualQualityAssessmentsActivity`/
-`runContinuityAssessmentActivity` (`packages/workflows/src/activities`), each
-of which loads workspace-scoped candidate metadata through repositories,
-runs the agent through the same `executeSpecialistAgentActivity` boundary
-(agents never touch repositories/providers/other agents), and persists an
-immutable `QualityAssessment` + typed `QualityFailure` children per
-candidate. Visual QC assesses each shot's latest SUCCEEDED candidate;
-Continuity assesses the ordered candidate sequence and only after every shot
-has a VISUAL_QA-passed candidate. `QualityAssessmentSchema`/Prisma gained
-`campaignId`, `overallScore`, and `createdByAgentInvocationId` provenance
-plus a `@@unique([generationCandidateId, subjectStage])` idempotency key;
-`createQualityAssessmentForCandidate` is immutable + idempotent and rejects
-cross-workspace, mismatched-campaign, and stale (non-SUCCEEDED / superseded)
-candidates. `advanceCampaignStageActivity` gained an `AUTO_RETRY` mode that
-routes a failed assessment back to SHOT_GENERATION — restricted to the two
-automated-QA revision edges, never a human-gated one, bounded by
-`visualQARetryAllowed`/`continuityQARetryAllowed`, budget-enforced, and
-idempotent. The workflow routes failures through those bounded retries and
-stops **awaiting the SHOT_SELECTION human gate** at `HUMAN_SHOT_SELECTION`
-(the M7 stopping point; the gate UI is M8, compositing is M9); all three
-human gates are untouched. See `docs/architecture.md` §8's M7 entry for the
-full accounting and interim decisions (a SHOT_GENERATION retry regenerates
-every shot, so a passing shot is re-assessed against a fresh candidate but
-stays bounded; sequence-level continuity failures fail all shots; no new
-`apps/api`/`apps/dashboard` QA surface, deferred behind M8; no frame
-extraction, so the agents' frame inputs are documented placeholders). Still
-no real caller
+Current milestone: **M8, shot selection review gate, done** — the complete
+human review experience at HUMAN_SHOT_SELECTION. The `ReviewProvider`
+(`packages/providers`) is now a Frame.io-compatible session/version model
+(review sessions, versioned candidate registration, timecoded + annotated
+comments, reviewer decisions, share links) with idempotency keys, typed
+`ReviewProviderError`s, and a fully deterministic `MockReviewProvider`.
+Candidate **eligibility** is a pure domain evaluator
+(`candidate-eligibility.ts`) over nine facts (SUCCEEDED, asset READY, latest,
+VISUAL_QA + CONTINUITY_QA passed, no unresolved blocking defect, licensing
+valid, versions match, not superseded), fed by `gatherCandidateEligibility`
+(`packages/database`). Selections persist as a versioned, workspace-scoped
+`ShotSelectionSet` + `ShotSelection` aggregate (domain schemas, Prisma models,
+`shot-selection-repository`): DRAFT/APPROVED, one candidate per required shot,
+deterministic sequence ordering, replacement history, optimistic-concurrency
+(`revision` compare-and-swap), **immutable once APPROVED**, and an
+`approveShotSelectionSet` that refuses an incomplete, ineligible, or stale
+set. `apps/api` gained RBAC-protected `shot-review` routes (ordered review
+workspace, signed preview URLs that never expose the s3Key, draft,
+eligible-only select/replace, reject-with-feedback, comments, approve,
+request-regeneration, history); the generic `/approvals/shot-selection` route
+was **removed** so the gate has exactly one approval path, which freezes the
+set and records the immutable `HumanApproval` **before** signalling.
+`CampaignProductionWorkflow` calls `verifyShotSelectionActivity` at the gate
+— it re-reads the persisted set and refuses to advance to COMPOSITING unless
+it is APPROVED, complete, and current, so no API caller or agent can fabricate
+gate satisfaction. `apps/dashboard` gained a functional Shot Selection screen.
+All three human gates are untouched. See `docs/architecture.md` §8's M8 entry
+for the full accounting and interim decisions (regeneration preserves M6
+behavior — all shots regenerate, per-shot feedback is persisted + loaded for
+provenance but the mock doesn't consume it, targeted regeneration deferred;
+`allShotsSelected` fact unchanged, the persisted-set guarantee lives in
+`verifyShotSelectionActivity`; comments live in the in-memory mock provider,
+no review-session DB table; COMPOSITING remains a `NOT_IMPLEMENTED`
+placeholder and a real run reaches BLOCKED there — the exact M8 stopping
+point). Still no real caller
 authentication, no real Veo/Runway/ComfyUI adapter (only the deterministic
 mock — do not connect one or spend money without an explicit, separate
 decision), and no live-Postgres/Temporal/MinIO/ffmpeg environment in this

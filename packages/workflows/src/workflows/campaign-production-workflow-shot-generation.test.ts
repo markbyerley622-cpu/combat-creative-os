@@ -116,6 +116,12 @@ describe('campaignProductionWorkflow — PROMPTING/SHOT_GENERATION wiring', () =
       .mockResolvedValue({ ok: true, allPassed: true, anyBlocking: false, shotResults: [] });
 
     setFakeActivityImpls({
+      loadShotSelectionRegenerationFeedbackActivity: (async () => ({ feedback: [] })) as never,
+      verifyShotSelectionActivity: (async () => ({
+        valid: true,
+        setId: 'set-1',
+        version: 1,
+      })) as never,
       advanceCampaignStageActivity: advanceCampaignStageActivity as never,
       verifyHumanApprovalActivity: verifyHumanApprovalActivity as never,
       runShotPromptEngineerActivity: runShotPromptEngineerActivity as never,
@@ -210,6 +216,12 @@ describe('campaignProductionWorkflow — PROMPTING/SHOT_GENERATION wiring', () =
       });
 
     setFakeActivityImpls({
+      loadShotSelectionRegenerationFeedbackActivity: (async () => ({ feedback: [] })) as never,
+      verifyShotSelectionActivity: (async () => ({
+        valid: true,
+        setId: 'set-1',
+        version: 1,
+      })) as never,
       advanceCampaignStageActivity: advanceCampaignStageActivity as never,
       runShotPromptEngineerActivity: runShotPromptEngineerActivity as never,
     });
@@ -264,6 +276,12 @@ describe('campaignProductionWorkflow — PROMPTING/SHOT_GENERATION wiring', () =
     }));
 
     setFakeActivityImpls({
+      loadShotSelectionRegenerationFeedbackActivity: (async () => ({ feedback: [] })) as never,
+      verifyShotSelectionActivity: (async () => ({
+        valid: true,
+        setId: 'set-1',
+        version: 1,
+      })) as never,
       advanceCampaignStageActivity: advanceCampaignStageActivity as never,
       runShotPromptEngineerActivity: runShotPromptEngineerActivity as never,
       loadLatestShotSpecificationsActivity: loadLatestShotSpecificationsActivity as never,

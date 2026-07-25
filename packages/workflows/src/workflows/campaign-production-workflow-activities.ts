@@ -67,4 +67,21 @@ export interface CampaignProductionActivities {
   runContinuityAssessmentActivity(
     input: activities.RunContinuityAssessmentInput,
   ): Promise<activities.RunContinuityAssessmentOutput>;
+  /**
+   * M8: at the SHOT_SELECTION gate, verifies the *persisted* ShotSelectionSet
+   * is APPROVED, complete, and current before the workflow advances to
+   * COMPOSITING — the workflow-engine guarantee that only a valid human
+   * selection can satisfy the gate. See verify-shot-selection-activity.ts.
+   */
+  verifyShotSelectionActivity(
+    input: activities.VerifyShotSelectionInput,
+  ): Promise<activities.VerifyShotSelectionOutput>;
+  /**
+   * M8: on a HUMAN_SHOT_SELECTION -> SHOT_GENERATION regeneration re-entry,
+   * loads the reviewer's per-shot regeneration feedback to supply to the
+   * generation stage. See load-shot-selection-regeneration-feedback-activity.ts.
+   */
+  loadShotSelectionRegenerationFeedbackActivity(
+    input: activities.LoadShotSelectionRegenerationFeedbackInput,
+  ): Promise<activities.LoadShotSelectionRegenerationFeedbackOutput>;
 }

@@ -7,6 +7,8 @@ export * from './run-shot-prompt-engineer-activity';
 export * from './load-latest-shot-specifications-activity';
 export * from './run-visual-quality-assessment-activity';
 export * from './run-continuity-assessment-activity';
+export * from './verify-shot-selection-activity';
+export * from './load-shot-selection-regeneration-feedback-activity';
 export * from './dispatch-shot-generation-activity';
 export * from './poll-shot-generation-activity';
 export * from './cancel-shot-generation-activity';

@@ -52,6 +52,8 @@ const {
   loadLatestShotSpecificationsActivity,
   runVisualQualityAssessmentsActivity,
   runContinuityAssessmentActivity,
+  verifyShotSelectionActivity,
+  loadShotSelectionRegenerationFeedbackActivity,
 } = proxyActivities<CampaignProductionActivities>({
   // Longer than the other two activities' effective budget: this one makes
   // three sequential reasoning-provider calls plus their persistence writes,
@@ -164,6 +166,15 @@ export async function campaignProductionWorkflow(
           continue;
         }
         if (specResult.ok) {
+          // M8: if this SHOT_GENERATION visit is a HUMAN_SHOT_SELECTION
+          // regeneration re-entry, load the reviewer's per-shot feedback and
+          // carry it into the child for provenance (the mock provider does not
+          // consume it — targeted regeneration is deferred; see the M8 entry
+          // in docs/architecture.md §8).
+          const regen = await loadShotSelectionRegenerationFeedbackActivity({
+            workspaceId: input.workspaceId,
+            campaignId: input.campaignId,
+          });
           const childResult = await executeChild<typeof shotGenerationWorkflow>(
             'shotGenerationWorkflow',
             {
@@ -174,6 +185,7 @@ export async function campaignProductionWorkflow(
                   campaignId: input.campaignId,
                   workflowRunId: input.workflowRunId,
                   shotSpecificationIds: specResult.shotSpecificationIds,
+                  regenerationFeedback: regen.feedback.length > 0 ? [...regen.feedback] : undefined,
                   // Matches shot-generation-workflow-contracts.ts's
                   // DEFAULT_MAX_GENERATION_ATTEMPTS/DEFAULT_GENERATION_BATCH_SIZE/
                   // DEFAULT_POLL_INTERVAL_MS — supplied explicitly rather than
@@ -307,6 +319,25 @@ export async function campaignProductionWorkflow(
     }
 
     const { approval } = verifyOutcome;
+
+    // M8: the SHOT_SELECTION gate is satisfied by an APPROVED decision ONLY
+    // when the persisted ShotSelectionSet is itself valid (APPROVED, complete,
+    // current). This re-reads persisted state via an Activity — a signal
+    // cannot fabricate gate satisfaction, and an invalid/stale selection never
+    // crosses to COMPOSITING. A non-approved (regeneration) decision skips this
+    // check and routes to SHOT_GENERATION as before.
+    if (gate === 'SHOT_SELECTION' && approval.decision === 'APPROVED') {
+      const selectionCheck = await verifyShotSelectionActivity({
+        workspaceId: input.workspaceId,
+        campaignId: input.campaignId,
+      });
+      if (!selectionCheck.valid) {
+        // Do not advance; stay AWAITING_APPROVAL so a corrected re-approval can
+        // proceed. The signal is treated as not-yet-satisfying the gate.
+        continue;
+      }
+    }
+
     const advanceResult = await advanceCampaignStageActivity({
       mode: 'GATE_DECISION',
       workspaceId: input.workspaceId,

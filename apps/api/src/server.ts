@@ -4,7 +4,9 @@ import type { Logger } from '@combat/observability';
 import { createPrismaClient, type PrismaClient } from '@combat/database';
 import {
   createMinioStorageProvider,
+  MockReviewProvider,
   type MinioStorageConfig,
+  type ReviewProvider,
   type StorageProvider,
 } from '@combat/providers';
 import type { WorkflowClient } from '@temporalio/client';
@@ -19,6 +21,8 @@ import {
   type ShotGenerationDatabase,
 } from './shot-generation-database';
 import { registerShotGenerationRoutes } from './shot-generation-routes';
+import { createShotReviewDatabase, type ShotReviewDatabase } from './shot-review-database';
+import { registerShotReviewRoutes } from './shot-review-routes';
 import { createWorkflowClient, type TemporalEnv } from './temporal-client';
 
 /**
@@ -56,6 +60,10 @@ export interface BuildServerOptions {
   assetDb?: AssetDatabase;
   /** Overrides the M6 shot-generation read routes' `*DataSource` adapter — tests inject an in-memory fake here. */
   shotGenerationDb?: ShotGenerationDatabase;
+  /** Overrides the M8 shot-review routes' `*DataSource` adapter — tests inject an in-memory fake here. */
+  shotReviewDb?: ShotReviewDatabase;
+  /** The Frame.io-compatible review provider; defaults to the deterministic mock (no real Frame.io adapter exists — M8/§7.1). */
+  reviewProvider?: ReviewProvider;
   workflowClient?: WorkflowClient;
   temporalEnv?: TemporalEnv;
   /** Overrides the real MinIO adapter — tests inject `MockStorageProvider` here. */
@@ -81,6 +89,8 @@ export function buildServer({
   campaignDb = createCampaignDatabase(prisma),
   assetDb = createAssetDatabase(prisma),
   shotGenerationDb = createShotGenerationDatabase(prisma),
+  shotReviewDb = createShotReviewDatabase(prisma),
+  reviewProvider = new MockReviewProvider(),
   temporalEnv = { TEMPORAL_ADDRESS: 'localhost:7233', TEMPORAL_NAMESPACE: 'default' },
   workflowClient = createWorkflowClient(temporalEnv),
   minioConfig = DEFAULT_MINIO_CONFIG,
@@ -125,6 +135,12 @@ export function buildServer({
   registerCampaignRoutes(app, { db: campaignDb, workflowClient });
   registerAssetRoutes(app, { db: assetDb, storageProvider, limits: assetLimits });
   registerShotGenerationRoutes(app, { db: shotGenerationDb });
+  registerShotReviewRoutes(app, {
+    db: shotReviewDb,
+    storageProvider,
+    reviewProvider,
+    workflowClient,
+  });
 
   return app;
 }

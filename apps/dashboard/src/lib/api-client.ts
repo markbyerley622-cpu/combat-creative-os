@@ -207,6 +207,72 @@ export interface ConceptApprovalState {
   } | null;
 }
 
+// --- M8 shot review ---
+
+export interface ShotReviewQaDefect {
+  category: string;
+  severity: string;
+  description: string;
+  suggestedAction?: string;
+}
+
+export interface ShotReviewCandidate {
+  id: string;
+  candidateIndex: number;
+  status: string;
+  assetId?: string;
+  seed?: number;
+  durationSeconds?: number;
+  aspectRatio?: string;
+  providerId: string;
+  /** Always false — the mock provider writes no bytes; render a deterministic placeholder. */
+  hasMedia: false;
+  eligibility: { eligible: boolean; reasons: string[] };
+  visualQa: {
+    pass: boolean;
+    overallScore: number;
+    scores: Record<string, number>;
+    defects: ShotReviewQaDefect[];
+  } | null;
+  continuityQa: { pass: boolean; overallScore: number } | null;
+}
+
+export interface ShotReviewSelectionEntry {
+  status: string;
+  selectedCandidateId: string | null;
+  rationale: string | null;
+  regenerationFeedback: string | null;
+}
+
+export interface ShotReviewShot {
+  shotId: string;
+  index: number;
+  description: string;
+  durationFrames: number;
+  beat: string;
+  specification: { id: string; version: number; providerId: string } | null;
+  candidates: ShotReviewCandidate[];
+  selection: ShotReviewSelectionEntry | null;
+}
+
+export interface ShotSelectionSetView {
+  id: string;
+  campaignId: string;
+  version: number;
+  status: string;
+  revision: number;
+  reviewerUserId: string | null;
+  approvedAt: string | null;
+}
+
+export interface ShotReviewView {
+  campaign: { currentStage: string; isSelectionStage: boolean };
+  script: { id: string; version: number } | null;
+  shots: ShotReviewShot[];
+  selectionSet: ShotSelectionSetView | null;
+  budget: { workspace: BudgetStatusView | null; campaign: BudgetStatusView | null };
+}
+
 export interface ApiClientOptions {
   baseUrl?: string;
 }
@@ -311,6 +377,68 @@ export function createApiClient(
       request<{ approvalId: string; replayed: boolean }>(
         `/workspaces/${workspaceId}/campaigns/${campaignId}/approvals/concept`,
         { method: 'POST', body: JSON.stringify({ userId, decision, comments }) },
+        baseUrl,
+      ),
+
+    getShotReview: (campaignId: string) =>
+      request<ShotReviewView>(
+        `/workspaces/${workspaceId}/campaigns/${campaignId}/shot-review?userId=${userId}`,
+        undefined,
+        baseUrl,
+      ),
+
+    createShotSelectionDraft: (campaignId: string) =>
+      request<{ set: ShotSelectionSetView; selections: ShotReviewSelectionEntry[] }>(
+        `/workspaces/${workspaceId}/campaigns/${campaignId}/shot-review/draft`,
+        { method: 'POST', body: JSON.stringify({ userId }) },
+        baseUrl,
+      ),
+
+    selectShotCandidate: (
+      campaignId: string,
+      input: {
+        setId: string;
+        shotId: string;
+        candidateId: string;
+        expectedRevision: number;
+        rationale?: string;
+      },
+    ) =>
+      request<{ set: ShotSelectionSetView }>(
+        `/workspaces/${workspaceId}/campaigns/${campaignId}/shot-review/select`,
+        { method: 'POST', body: JSON.stringify({ userId, ...input }) },
+        baseUrl,
+      ),
+
+    rejectShotCandidate: (
+      campaignId: string,
+      input: {
+        setId: string;
+        shotId: string;
+        regenerationFeedback: string;
+        expectedRevision: number;
+      },
+    ) =>
+      request<{ set: ShotSelectionSetView }>(
+        `/workspaces/${workspaceId}/campaigns/${campaignId}/shot-review/reject-shot`,
+        { method: 'POST', body: JSON.stringify({ userId, ...input }) },
+        baseUrl,
+      ),
+
+    approveShotSelection: (
+      campaignId: string,
+      input: { setId: string; expectedRevision: number },
+    ) =>
+      request<{ approvalId: string; replayed: boolean; set: ShotSelectionSetView }>(
+        `/workspaces/${workspaceId}/campaigns/${campaignId}/shot-review/approve`,
+        { method: 'POST', body: JSON.stringify({ userId, ...input }) },
+        baseUrl,
+      ),
+
+    requestShotRegeneration: (campaignId: string, input: { setId: string; comments?: string }) =>
+      request<{ approvalId: string; replayed: boolean }>(
+        `/workspaces/${workspaceId}/campaigns/${campaignId}/shot-review/request-regeneration`,
+        { method: 'POST', body: JSON.stringify({ userId, ...input }) },
         baseUrl,
       ),
   };

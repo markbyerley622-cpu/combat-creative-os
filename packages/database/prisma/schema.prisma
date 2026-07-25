@@ -801,6 +801,96 @@ model QualityFailure {
   @@map("quality_failures")
 }
 
+enum ShotSelectionSetStatus {
+  DRAFT
+  APPROVED
+}
+
+enum ShotSelectionEntryStatus {
+  PENDING
+  SELECTED
+  REJECTED
+}
+
+/// M8 — one versioned revision of a reviewer's shot choices at
+/// HUMAN_SHOT_SELECTION. DRAFT sets are editable; an APPROVED set is frozen
+/// (the repository exposes no mutation of an APPROVED set). `revision` is an
+/// optimistic-concurrency counter bumped on every draft mutation. FKs to
+/// campaign/script/concept are plain columns (no relation back-reference),
+/// matching QualityAssessment — the parent/child relation is only within this
+/// selection aggregate.
+model ShotSelectionSet {
+  id                     String                  @id @default(uuid())
+  workspaceId            String
+  campaignId             String
+  scriptId               String
+  scriptVersion          Int
+  creativeConceptId      String
+  creativeConceptVersion Int
+  version                Int
+  status                 ShotSelectionSetStatus  @default(DRAFT)
+  createdByUserId        String
+  reviewerUserId         String?
+  rationale              String?
+  revision               Int                     @default(0)
+  idempotencyKey         String?
+  approvedAt             DateTime?
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
+
+  selections   ShotSelection[]
+  replacements ShotSelectionReplacement[]
+
+  @@unique([campaignId, version])
+  @@index([workspaceId])
+  @@index([campaignId])
+  @@map("shot_selection_sets")
+}
+
+model ShotSelection {
+  id                       String                   @id @default(uuid())
+  workspaceId              String
+  shotSelectionSetId       String
+  shotId                   String
+  sequencePosition         Int
+  shotSpecificationId      String
+  shotSpecificationVersion Int
+  status                   ShotSelectionEntryStatus @default(PENDING)
+  selectedCandidateId      String?
+  visualQaAssessmentId     String?
+  continuityQaAssessmentId String?
+  rationale                String?
+  regenerationFeedback     String?
+  createdAt                DateTime                 @default(now())
+  updatedAt                DateTime                 @updatedAt
+
+  shotSelectionSet ShotSelectionSet @relation(fields: [shotSelectionSetId], references: [id], onDelete: Cascade)
+
+  @@unique([shotSelectionSetId, shotId])
+  @@index([workspaceId])
+  @@index([shotSelectionSetId])
+  @@map("shot_selections")
+}
+
+/// Append-only history of candidate replacements within a draft set.
+model ShotSelectionReplacement {
+  id                  String   @id @default(uuid())
+  workspaceId         String
+  shotSelectionSetId  String
+  shotId              String
+  previousCandidateId String?
+  newCandidateId      String?
+  replacedByUserId    String
+  reason              String?
+  createdAt           DateTime @default(now())
+
+  shotSelectionSet ShotSelectionSet @relation(fields: [shotSelectionSetId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([shotSelectionSetId])
+  @@map("shot_selection_replacements")
+}
+
 /// Immutable once created — architecture.md §0 guiding constraint 3. The
 /// repository layer exposes only an insert for this table; a revised
 /// decision is a new row, never an update of an existing one.

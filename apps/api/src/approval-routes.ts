@@ -66,13 +66,12 @@ const GATE_ROUTES: GateRouteConfig[] = [
     signal: workflows.approveConceptSignal,
     bodySchema: ConceptOrShotSelectionBodySchema,
   },
-  {
-    path: '/workspaces/:workspaceId/campaigns/:campaignId/approvals/shot-selection',
-    gate: 'SHOT_SELECTION',
-    permission: 'SELECT_SHOTS',
-    signal: workflows.selectShotsSignal,
-    bodySchema: ConceptOrShotSelectionBodySchema,
-  },
+  // SHOT_SELECTION is NOT a generic gate route (M8): the shot-selection gate is
+  // driven exclusively by `shot-review-routes.ts`, whose approve/
+  // request-regeneration endpoints validate + freeze the persisted
+  // ShotSelectionSet before recording the HumanApproval and signalling. Keeping
+  // exactly one shot-selection approval path is what makes "exactly one
+  // SHOT_SELECTION gate" true at the API surface, not just the workflow.
   {
     path: '/workspaces/:workspaceId/campaigns/:campaignId/approvals/final',
     gate: 'FINAL',

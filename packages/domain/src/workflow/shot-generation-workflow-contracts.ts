@@ -22,6 +22,16 @@ export const ShotGenerationWorkflowInputSchema = z.object({
   maxAttempts: z.number().int().positive().default(DEFAULT_MAX_GENERATION_ATTEMPTS),
   batchSize: z.number().int().positive().default(DEFAULT_GENERATION_BATCH_SIZE),
   pollIntervalMs: z.number().int().positive().default(DEFAULT_POLL_INTERVAL_MS),
+  /**
+   * M8: per-shot reviewer regeneration feedback, present only on a
+   * HUMAN_SHOT_SELECTION -> SHOT_GENERATION revision re-entry. Carried for
+   * provenance; the deterministic mock provider does not consume it and every
+   * shot still regenerates (targeted regeneration is deferred — see
+   * docs/architecture.md §8's M8 entry).
+   */
+  regenerationFeedback: z
+    .array(z.object({ shotSpecificationId: z.string().uuid(), feedback: z.string() }))
+    .optional(),
 });
 export type ShotGenerationWorkflowInput = z.infer<typeof ShotGenerationWorkflowInputSchema>;
 

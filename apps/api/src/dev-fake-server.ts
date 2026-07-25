@@ -1,6 +1,6 @@
 import { InMemoryCampaignStore, addMembership } from '@combat/database';
 import { createLogger } from '@combat/observability';
-import { MockStorageProvider } from '@combat/providers';
+import { MockReviewProvider, MockStorageProvider } from '@combat/providers';
 import type { WorkflowClient } from '@temporalio/client';
 import { buildServer } from './server';
 
@@ -140,7 +140,9 @@ async function main() {
     campaignDb: store,
     assetDb: store,
     shotGenerationDb: store,
+    shotReviewDb: store,
     storageProvider: new MockStorageProvider(),
+    reviewProvider: new MockReviewProvider(),
     workflowClient: buildFakeWorkflowClient(),
   });
   const port = Number(process.env.PORT ?? 4100);

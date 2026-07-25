@@ -58,3 +58,67 @@ describe('createApiClient', () => {
     await expect(client.createCampaign('Q3 Launch')).rejects.toBeInstanceOf(ApiError);
   });
 });
+
+describe('createApiClient — M8 shot review', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('GETs the shot-review workspace scoped to workspace + user', async () => {
+    const fetchMock = mockFetchOnce(200, { shots: [] });
+    vi.stubGlobal('fetch', fetchMock);
+    const client = createApiClient('ws-1', 'user-1', { baseUrl: 'http://api.test' });
+    await client.getShotReview('camp-1');
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://api.test/workspaces/ws-1/campaigns/camp-1/shot-review?userId=user-1',
+      expect.anything(),
+    );
+  });
+
+  it('POSTs a candidate selection with the optimistic-concurrency revision', async () => {
+    const fetchMock = mockFetchOnce(200, { set: { id: 's1' } });
+    vi.stubGlobal('fetch', fetchMock);
+    const client = createApiClient('ws-1', 'user-1', { baseUrl: 'http://api.test' });
+    await client.selectShotCandidate('camp-1', {
+      setId: 's1',
+      shotId: 'shot-1',
+      candidateId: 'cand-1',
+      expectedRevision: 2,
+    });
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('http://api.test/workspaces/ws-1/campaigns/camp-1/shot-review/select');
+    expect(JSON.parse(init.body as string)).toEqual({
+      userId: 'user-1',
+      setId: 's1',
+      shotId: 'shot-1',
+      candidateId: 'cand-1',
+      expectedRevision: 2,
+    });
+  });
+
+  it('POSTs an approval to the shot-review approve endpoint (not a generic gate route)', async () => {
+    const fetchMock = mockFetchOnce(202, { approvalId: 'a1', replayed: false, set: { id: 's1' } });
+    vi.stubGlobal('fetch', fetchMock);
+    const client = createApiClient('ws-1', 'user-1', { baseUrl: 'http://api.test' });
+    await client.approveShotSelection('camp-1', { setId: 's1', expectedRevision: 3 });
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('http://api.test/workspaces/ws-1/campaigns/camp-1/shot-review/approve');
+  });
+
+  it('surfaces a 409 ineligible/stale conflict as an ApiError with reasons', async () => {
+    const fetchMock = mockFetchOnce(409, {
+      error: 'INELIGIBLE_CANDIDATE',
+      reasons: ['VISUAL_QA_NOT_PASSED'],
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const client = createApiClient('ws-1', 'user-1', { baseUrl: 'http://api.test' });
+    await expect(
+      client.selectShotCandidate('camp-1', {
+        setId: 's1',
+        shotId: 'x',
+        candidateId: 'y',
+        expectedRevision: 0,
+      }),
+    ).rejects.toMatchObject({ status: 409, body: { error: 'INELIGIBLE_CANDIDATE' } });
+  });
+});
