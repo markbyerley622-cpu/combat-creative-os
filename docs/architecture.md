@@ -1309,11 +1309,81 @@ subjectStage])` idempotency constraint. `createQualityAssessmentForCandidate`
     `loadShotSelectionRegenerationFeedbackActivity` tests; workflow gate-non-bypass
     wiring tests (invalid set does not advance; valid set advances to
     COMPOSITING); and dashboard api-client tests. No paid API calls, no real media.
-- **M9 — Compositing & rough edit.** `providers/motion-graphics` (mock of the
-  external-Windows-worker interface — no AE/aerender process run anywhere in
-  this milestone), `providers/design` (Figma), `CompositingWorkflow`, Edit
-  Director. _Test:_ mock render pipeline produces a rough-edit asset with
-  correct provenance chain.
+- **M9 — Compositing & rough edit. Done (2026-07-25), with the interim
+  decisions this item records.** Turns a human-approved `ShotSelectionSet` into
+  a versioned rough-edit specification and a deterministic mock rough-edit
+  asset. The `MotionGraphicsProvider` (`packages/providers`) was widened from
+  its thin `submitRenderJob` shape into the M6-style external-Windows-worker
+  contract — `getCapabilities`, idempotent `createProject`/`submitRender` (a
+  provider-neutral `MotionGraphicsTimeline`, capability-rejected before any
+  state is recorded), `getStatus`/`getFailure`/`fetchRenderOutput`/`getUsage`/
+  `cancel` — with typed `MotionGraphicsProviderError`s and a deterministic
+  `MockMotionGraphicsProvider` (configurable poll-count latency + forced
+  failures, no wall-clock, never writes a binary); `DesignProvider` gained a
+  capability check + typed errors. The Edit Director agent's output contract
+  was extended in place (prompt v1→v2, full rough-edit brief: per-clip in/out
+  timing, transitions, overlays [graphic/app-interface/typography/CTA/caption],
+  pacing/beat structure, continuity notes, downstream placeholders, rationale,
+  quality rubric). `runEditDirectorActivity` runs it through the ADR-0004
+  `executeSpecialistAgentActivity` boundary and persists — combined with the
+  revalidated approved selection + delivery context — the canonical, versioned
+  `RoughEditSpecification` (`packages/domain`; timeline tracks/clips/transitions
+  - overlays as validated nested structures, plus concept/script/selection
+    versions and prompt/agent provenance). `CompositingWorkflow`
+    (`packages/workflows/src/workflows`) is a deterministic child of
+    `CampaignProductionWorkflow` (one per COMPOSITING visit): it starts only from
+    a still-valid approved selection (re-verifying it via
+    `verifyShotSelectionActivity` and re-checking every source's eligibility +
+    licensing inside `runEditDirectorActivity`), runs the Edit Director, then a
+    bounded-retry render dispatch/poll loop
+    (`dispatchCompositionRenderActivity`/`pollCompositionRenderActivity`/
+    `cancelCompositionRenderActivity`) that reserves budget at
+    WORKSPACE/CAMPAIGN/PROVIDER before the provider `createProject`/`submitRender`,
+    persists a `CompositionJob` + append-only `CompositionAttempt` history, and on
+    success registers the rough-edit asset (`AssetKind.ROUGH_CUT`, deduped by
+    checksum) + a SUCCEEDED COMPOSITING `RenderJob` (→ `compositingComplete`) +
+    the derived `EditDecisionList` (→ `roughCutAssembled`), charges the provider's
+    actual usage and releases the remainder — all idempotent under Activity
+    retry/replay, with a `getCompositingProgress` query and a `cancelCompositing`
+    signal. `CampaignProductionWorkflow` starts the child at COMPOSITING and, on
+    COMPLETED, auto-forwards COMPOSITING → ROUGH_CUT → **SOUND_DESIGN, where it
+    legitimately reaches BLOCKED** (no Sound Director until M10) — the exact M9
+    stopping point; a BLOCKED/CANCELLED child, an invalid selection, or a
+    bounded-out render escalates to BLOCKED without advancing. `apps/api` gained
+    read-only compositing routes (rough-edit status, spec + source-selection +
+    budget + render attempts/typed failures + workflow stage, a signed-URL
+    preview that never exposes the s3Key) and an RBAC-gated cancel endpoint
+    (`TRIGGER_GENERATION`) that signals the campaign-derived compositing child id
+    (`compositingChildWorkflowId`) — the dashboard/API never advance the workflow.
+    `apps/dashboard` gained a matching read/cancel screen rendering the rough edit
+    as an explicit placeholder (the mock produces no bytes). **Interim
+    decisions**: (1) timeline tracks/clip-instances/transitions/overlays are
+    modeled as validated nested structures on the `RoughEditSpecification` (Zod +
+    Json columns), not separate tables — the same approach `ShotSpecification`
+    uses; (2) design/Figma overlays are metadata refs only (the mock
+    `DesignProvider` writes no bytes) and no real overlay compositing runs; (3)
+    one CompositingWorkflow per campaign (stable child id) rather than "one per
+    shot needing motion graphics" as §3.2 originally sketched — a single assembled
+    rough-edit render fits the mock pipeline and keeps cancellation targetable
+    without a WorkflowRun mapping table; (4) resolution is derived from aspect
+    ratio (documented MVP mapping, no per-campaign resolution field yet); (5) no
+    new env config — the mock providers need no credentials or non-secret
+    settings, so `.env.example` is unchanged. No real After Effects/aerender,
+    Figma, Frame.io, Remotion, or ffmpeg; no real video; no sound/export/
+    distribution; no live Postgres/Temporal/MinIO (the schema.prisma models are
+    unmigrated in this environment — see docs/domain-model.md §8). _Test:_
+    deterministic motion-graphics/design mock coverage; Edit Director schema/
+    prompt-snapshot coverage; compositing repository tests (rough-edit-spec
+    versioning, composition job/attempt idempotency, RenderJob/EDL fact
+    visibility); `runEditDirectorActivity` (spec persistence + provenance, stale/
+    ineligible-source rejection) and dispatch/poll/cancel coverage (budget
+    reserve/charge/release, asset+RenderJob+EDL registration, idempotent
+    dispatch/poll, capability + budget rejection, cancellation); a 5-test
+    CompositingWorkflow reducer/wiring suite (happy, bounded retry, dispatch/edit
+    failure) and a 3-test parent-wiring suite (COMPOSITING → ROUGH_CUT →
+    SOUND_DESIGN BLOCKED, child-BLOCKED escalation, selection-invalid
+    non-bypass); 6 `apps/api` route tests + dashboard api-client tests. No paid
+    API calls, no real media.
 - **M10 — Sound design.** Sound Director + audio asset handling.
   _Test:_ plan generation + asset attachment, fixture-based.
 - **M11 — Final QA & Final Approval gate.** Final QA Controller (ffmpeg technical

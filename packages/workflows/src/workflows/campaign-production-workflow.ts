@@ -15,10 +15,13 @@ import {
   selectShotsSignal,
 } from './campaign-production-workflow-signals';
 import type { shotGenerationWorkflow } from './shot-generation-workflow';
+import type { compositingWorkflow } from './compositing-workflow';
 import {
   applyAutoForwardResult,
   applyAutoRetryResult,
   applyBoundExceeded,
+  applyCompositingSelectionCheck,
+  applyCompositingWorkflowResult,
   applyGateAdvanceResult,
   applyLoadLatestShotSpecificationsResult,
   applyRunContinuityAssessmentResult,
@@ -276,6 +279,57 @@ export async function campaignProductionWorkflow(
           });
           state = applyAutoRetryResult(state, retryResult);
           continue;
+        }
+      }
+
+      // M9: COMPOSITING runs the CompositingWorkflow child — Edit Director ->
+      // versioned RoughEditSpecification -> mock rough-edit render -> registered
+      // ROUGH_CUT asset + COMPOSITING RenderJob + EditDecisionList. It starts
+      // ONLY from a still-valid approved selection: `verifyShotSelectionActivity`
+      // re-reads the persisted set here (defense-in-depth over the gate), so a
+      // stale/incomplete selection cannot begin compositing. On COMPLETED, the
+      // normal AUTO_FORWARD below finds `compositingComplete` true and advances
+      // to ROUGH_CUT; a BLOCKED/CANCELLED child escalates the parent to BLOCKED
+      // — no rough-cut/sound work begins ahead of a real rough edit. The child
+      // id is derived from the campaign key (matches
+      // `compositingChildWorkflowId` in @combat/domain, which apps/api's cancel
+      // endpoint targets) — constructed inline because workflow files may not
+      // import a value from @combat/domain (CLAUDE.md "Architecture boundaries").
+      if (state.currentStage === 'COMPOSITING') {
+        const selectionCheck = await verifyShotSelectionActivity({
+          workspaceId: input.workspaceId,
+          campaignId: input.campaignId,
+        });
+        state = applyCompositingSelectionCheck(
+          state,
+          selectionCheck.valid,
+          selectionCheck.valid ? '' : selectionCheck.reason,
+        );
+        if (state.status !== 'RUNNING') {
+          continue;
+        }
+        if (selectionCheck.valid) {
+          const childResult = await executeChild<typeof compositingWorkflow>(
+            'compositingWorkflow',
+            {
+              workflowId: `compositing:${input.campaignId}`,
+              args: [
+                {
+                  workspaceId: input.workspaceId,
+                  campaignId: input.campaignId,
+                  workflowRunId: input.workflowRunId,
+                  shotSelectionSetId: selectionCheck.setId,
+                  motionGraphicsProviderId: 'mock-motion-graphics',
+                  maxAttempts: 3,
+                  pollIntervalMs: 2000,
+                },
+              ],
+            },
+          );
+          state = applyCompositingWorkflowResult(state, childResult);
+          if (state.status !== 'RUNNING') {
+            continue;
+          }
         }
       }
 

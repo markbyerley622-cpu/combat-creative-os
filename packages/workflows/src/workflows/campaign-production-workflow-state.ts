@@ -246,6 +246,51 @@ export function applyAutoRetryResult(
   };
 }
 
+/**
+ * Applies the result of the `CompositingWorkflow` child run for one COMPOSITING
+ * visit (M9). COMPLETED leaves state unchanged (the normal AUTO_FORWARD then
+ * finds `compositingComplete` true and advances to ROUGH_CUT); BLOCKED/CANCELLED
+ * escalates straight to BLOCKED — no rough-cut/sound work begins, because the
+ * AUTO_FORWARD loop never runs again once `status` leaves 'RUNNING'.
+ */
+export function applyCompositingWorkflowResult(
+  state: CampaignProductionWorkflowState,
+  result: {
+    status: 'COMPLETED' | 'BLOCKED' | 'CANCELLED';
+    failureReason?: string;
+    failureMessage?: string;
+  },
+): CampaignProductionWorkflowState {
+  if (result.status === 'COMPLETED') {
+    return state;
+  }
+  return {
+    ...state,
+    status: 'BLOCKED',
+    blockedReason: `COMPOSITING child workflow ended ${result.status}: ${
+      result.failureMessage ?? result.failureReason ?? 'no detail'
+    }`,
+  };
+}
+
+/**
+ * Applies the SHOT_SELECTION-gate re-verification at COMPOSITING entry — the
+ * persisted selection set must still be valid before the CompositingWorkflow
+ * starts. An invalid set escalates to BLOCKED (a human must re-approve).
+ */
+export function applyCompositingSelectionCheck(
+  state: CampaignProductionWorkflowState,
+  valid: boolean,
+  detail: string,
+): CampaignProductionWorkflowState {
+  if (valid) return state;
+  return {
+    ...state,
+    status: 'BLOCKED',
+    blockedReason: `COMPOSITING could not start — approved selection is no longer valid: ${detail}`,
+  };
+}
+
 export type GateSignalDecision =
   { readonly kind: 'IGNORE' } | { readonly kind: 'VERIFY'; readonly approvalId: string };
 

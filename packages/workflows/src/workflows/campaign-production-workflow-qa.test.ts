@@ -106,6 +106,13 @@ describe('campaignProductionWorkflow — VISUAL_QA/CONTINUITY_QA wiring (M7)', (
       runVisualQualityAssessmentsActivity: runVisualQualityAssessmentsActivity as never,
       runContinuityAssessmentActivity: runContinuityAssessmentActivity as never,
     });
+    setFakeChildWorkflowImpls({
+      compositingWorkflow: (async () => ({
+        status: 'COMPLETED',
+        roughEditSpecificationId: 're-1',
+        roughEditAssetId: 'a-1',
+      })) as never,
+    });
 
     const resultPromise = campaignProductionWorkflow({
       workspaceId,
@@ -184,7 +191,14 @@ describe('campaignProductionWorkflow — VISUAL_QA/CONTINUITY_QA wiring (M7)', (
       runVisualQualityAssessmentsActivity: runVisualQualityAssessmentsActivity as never,
       runContinuityAssessmentActivity: runContinuityAssessmentActivity as never,
     });
-    setFakeChildWorkflowImpls({ shotGenerationWorkflow: shotGenChildImpl as never });
+    setFakeChildWorkflowImpls({
+      shotGenerationWorkflow: shotGenChildImpl as never,
+      compositingWorkflow: (async () => ({
+        status: 'COMPLETED',
+        roughEditSpecificationId: 're-1',
+        roughEditAssetId: 'a-1',
+      })) as never,
+    });
 
     campaignProductionWorkflow({
       workspaceId,
@@ -235,7 +249,14 @@ describe('campaignProductionWorkflow — VISUAL_QA/CONTINUITY_QA wiring (M7)', (
       runVisualQualityAssessmentsActivity: runVisualQualityAssessmentsActivity as never,
       runContinuityAssessmentActivity: runContinuityAssessmentActivity as never,
     });
-    setFakeChildWorkflowImpls({ shotGenerationWorkflow: shotGenChildImpl as never });
+    setFakeChildWorkflowImpls({
+      shotGenerationWorkflow: shotGenChildImpl as never,
+      compositingWorkflow: (async () => ({
+        status: 'COMPLETED',
+        roughEditSpecificationId: 're-1',
+        roughEditAssetId: 'a-1',
+      })) as never,
+    });
 
     campaignProductionWorkflow({
       workspaceId,

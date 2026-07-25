@@ -6,3 +6,4 @@ export * from './quality-failure-routing';
 export * from './candidate-eligibility';
 export * from './campaign-production-workflow-contracts';
 export * from './shot-generation-workflow-contracts';
+export * from './compositing-workflow-contracts';

@@ -6,6 +6,7 @@ import {
   resetFakeWorkflowRuntime,
   runQuery,
   setFakeActivityImpls,
+  setFakeChildWorkflowImpls,
 } from '../test-helpers/fake-temporal-workflow';
 
 vi.mock('@temporalio/workflow', async (importOriginal) => {
@@ -124,6 +125,15 @@ describe('campaignProductionWorkflow — SHOT_SELECTION gate (M8)', () => {
       verifyHumanApprovalActivity: verifyHumanApprovalActivity as never,
       verifyShotSelectionActivity: verifyShotSelectionActivity as never,
     });
+    // M9: entering COMPOSITING starts the CompositingWorkflow child, which
+    // completes here so the run reaches its TERMINAL end at COMPOSITING.
+    setFakeChildWorkflowImpls({
+      compositingWorkflow: (async () => ({
+        status: 'COMPLETED',
+        roughEditSpecificationId: 're-1',
+        roughEditAssetId: 'a-1',
+      })) as never,
+    });
 
     const resultPromise = campaignProductionWorkflow({
       workspaceId,
@@ -145,7 +155,8 @@ describe('campaignProductionWorkflow — SHOT_SELECTION gate (M8)', () => {
     });
 
     const result = await resultPromise;
-    expect(verifyShotSelectionActivity).toHaveBeenCalledTimes(1);
+    // Verified twice: once at the gate, once again at COMPOSITING entry (M9 defense-in-depth).
+    expect(verifyShotSelectionActivity).toHaveBeenCalledTimes(2);
     expect(result.finalStage).toBe('COMPOSITING');
   });
 });

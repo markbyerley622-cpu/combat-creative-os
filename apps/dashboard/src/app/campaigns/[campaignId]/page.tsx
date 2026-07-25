@@ -52,6 +52,7 @@ function ProductionProgress({ campaignId }: { campaignId: string }) {
   ];
   const showsShotGeneration = SHOT_GENERATION_STAGES.includes(status.currentStage);
   const showsShotSelection = status.currentStage === 'HUMAN_SHOT_SELECTION';
+  const showsCompositing = status.currentStage === 'COMPOSITING';
 
   return (
     <div>
@@ -79,6 +80,11 @@ function ProductionProgress({ campaignId }: { campaignId: string }) {
       {showsShotSelection && (
         <p>
           <Link href={`/campaigns/${campaignId}/shot-selection`}>Review &amp; select shots →</Link>
+        </p>
+      )}
+      {showsCompositing && (
+        <p>
+          <Link href={`/campaigns/${campaignId}/compositing`}>View rough edit →</Link>
         </p>
       )}
       {status.workflow?.status === 'BLOCKED' && (

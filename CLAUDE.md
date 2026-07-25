@@ -4,41 +4,40 @@ This file is the operating contract for anyone (human or agent) working in
 this repository. It is deliberately short — for the full design rationale
 see `docs/architecture.md` and `docs/adr/`.
 
-Current milestone: **M8, shot selection review gate, done** — the complete
-human review experience at HUMAN_SHOT_SELECTION. The `ReviewProvider`
-(`packages/providers`) is now a Frame.io-compatible session/version model
-(review sessions, versioned candidate registration, timecoded + annotated
-comments, reviewer decisions, share links) with idempotency keys, typed
-`ReviewProviderError`s, and a fully deterministic `MockReviewProvider`.
-Candidate **eligibility** is a pure domain evaluator
-(`candidate-eligibility.ts`) over nine facts (SUCCEEDED, asset READY, latest,
-VISUAL_QA + CONTINUITY_QA passed, no unresolved blocking defect, licensing
-valid, versions match, not superseded), fed by `gatherCandidateEligibility`
-(`packages/database`). Selections persist as a versioned, workspace-scoped
-`ShotSelectionSet` + `ShotSelection` aggregate (domain schemas, Prisma models,
-`shot-selection-repository`): DRAFT/APPROVED, one candidate per required shot,
-deterministic sequence ordering, replacement history, optimistic-concurrency
-(`revision` compare-and-swap), **immutable once APPROVED**, and an
-`approveShotSelectionSet` that refuses an incomplete, ineligible, or stale
-set. `apps/api` gained RBAC-protected `shot-review` routes (ordered review
-workspace, signed preview URLs that never expose the s3Key, draft,
-eligible-only select/replace, reject-with-feedback, comments, approve,
-request-regeneration, history); the generic `/approvals/shot-selection` route
-was **removed** so the gate has exactly one approval path, which freezes the
-set and records the immutable `HumanApproval` **before** signalling.
-`CampaignProductionWorkflow` calls `verifyShotSelectionActivity` at the gate
-— it re-reads the persisted set and refuses to advance to COMPOSITING unless
-it is APPROVED, complete, and current, so no API caller or agent can fabricate
-gate satisfaction. `apps/dashboard` gained a functional Shot Selection screen.
-All three human gates are untouched. See `docs/architecture.md` §8's M8 entry
-for the full accounting and interim decisions (regeneration preserves M6
-behavior — all shots regenerate, per-shot feedback is persisted + loaded for
-provenance but the mock doesn't consume it, targeted regeneration deferred;
-`allShotsSelected` fact unchanged, the persisted-set guarantee lives in
-`verifyShotSelectionActivity`; comments live in the in-memory mock provider,
-no review-session DB table; COMPOSITING remains a `NOT_IMPLEMENTED`
-placeholder and a real run reaches BLOCKED there — the exact M8 stopping
-point). Still no real caller
+Current milestone: **M9, compositing & rough edit, done** — turns a
+human-approved `ShotSelectionSet` into a versioned rough-edit specification and
+a deterministic mock rough-edit asset. The `MotionGraphicsProvider`
+(`packages/providers`) is now the M6-style external-Windows-worker contract
+(`getCapabilities`, idempotent `createProject`/`submitRender` with
+capability rejection, `getStatus`/`getFailure`/`fetchRenderOutput`/`getUsage`/
+`cancel`, typed errors) with a deterministic `MockMotionGraphicsProvider` (no
+wall-clock, no bytes); `DesignProvider` gained capabilities + typed errors. The
+Edit Director output was extended (prompt v2) to the full rough-edit brief;
+`runEditDirectorActivity` runs it through `executeSpecialistAgentActivity`,
+revalidates the approved selection (still APPROVED/complete/current + every
+source still eligible + licensed), and persists the canonical, versioned
+`RoughEditSpecification` (`packages/domain` schema + Prisma; timeline
+tracks/clips/transitions + overlays as validated nested structures). The
+deterministic `CompositingWorkflow` child (`packages/workflows`) runs the Edit
+Director then a bounded-retry render dispatch/poll loop — budget reserved at
+WORKSPACE/CAMPAIGN/PROVIDER, `CompositionJob` + append-only `CompositionAttempt`
+history, and on success the registered `AssetKind.ROUGH_CUT` asset + a SUCCEEDED
+COMPOSITING `RenderJob` (`compositingComplete`) + derived `EditDecisionList`
+(`roughCutAssembled`), actual usage charged and remainder released, all
+idempotent under retry/replay, with a progress query + cancel signal.
+`CampaignProductionWorkflow` starts the child at COMPOSITING (only from a
+`verifyShotSelectionActivity`-valid selection) and auto-forwards COMPOSITING →
+ROUGH_CUT → **SOUND_DESIGN, where it reaches BLOCKED** (no Sound Director until
+M10) — the exact M9 stopping point. `apps/api` gained read-only compositing
+routes (status/spec/attempts/budget, signed preview that never exposes the
+s3Key) and an RBAC-gated (`TRIGGER_GENERATION`) cancel that signals the
+campaign-derived compositing child id; `apps/dashboard` gained a matching
+read/cancel screen with a deterministic rough-edit placeholder. All human gates
+untouched. See `docs/architecture.md` §8's M9 entry for the full accounting
+and interim decisions (timeline modeled as validated nested structures not
+tables; design overlays are metadata refs only; one CompositingWorkflow per
+campaign, not per shot; resolution derived from aspect ratio; no new env
+config). Still no real caller Still no real caller
 authentication, no real Veo/Runway/ComfyUI adapter (only the deterministic
 mock — do not connect one or spend money without an explicit, separate
 decision), and no live-Postgres/Temporal/MinIO/ffmpeg environment in this

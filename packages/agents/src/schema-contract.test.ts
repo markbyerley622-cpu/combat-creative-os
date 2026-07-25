@@ -115,13 +115,40 @@ const VALID_SAMPLES: Partial<Record<SpecialistAgentName, { input: unknown; resul
   'edit-director': {
     input: {
       frameRate: 30,
-      selectedShots: [{ shotIndex: 0, durationFrames: 30 }],
+      aspectRatio: '9:16',
+      platform: 'INSTAGRAM_REELS',
       targetTotalDurationFrames: 30,
+      brandTokens: ['#0A0A0A'],
+      selectedShots: [
+        {
+          shotIndex: 0,
+          beat: 'HOOK',
+          description: 'Boxer throws a jab',
+          durationFrames: 30,
+          sourceAssetRef: 'asset-0',
+        },
+      ],
     },
     result: {
       frameRate: 30,
       durationFrames: 30,
-      entries: [{ shotIndex: 0, order: 0, startFrame: 0, durationFrames: 30 }],
+      entries: [
+        {
+          shotIndex: 0,
+          order: 0,
+          startFrame: 0,
+          durationFrames: 30,
+          sourceInFrame: 0,
+          sourceOutFrame: 30,
+          transitionIn: 'CUT',
+        },
+      ],
+      pacingNotes: 'fast',
+      overlays: [{ kind: 'CTA', shotIndex: 0, description: 'Sign up' }],
+      captionPlaceholder: 'captions TBD',
+      musicPlaceholder: 'music TBD',
+      sfxPlaceholder: 'sfx TBD',
+      editRationale: 'hook first',
     },
   },
   'sound-director': {

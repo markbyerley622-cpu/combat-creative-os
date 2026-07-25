@@ -23,6 +23,8 @@ import {
 import { registerShotGenerationRoutes } from './shot-generation-routes';
 import { createShotReviewDatabase, type ShotReviewDatabase } from './shot-review-database';
 import { registerShotReviewRoutes } from './shot-review-routes';
+import { createCompositingDatabase, type CompositingDatabase } from './compositing-database';
+import { registerCompositingRoutes } from './compositing-routes';
 import { createWorkflowClient, type TemporalEnv } from './temporal-client';
 
 /**
@@ -62,6 +64,8 @@ export interface BuildServerOptions {
   shotGenerationDb?: ShotGenerationDatabase;
   /** Overrides the M8 shot-review routes' `*DataSource` adapter — tests inject an in-memory fake here. */
   shotReviewDb?: ShotReviewDatabase;
+  /** Overrides the M9 compositing read/cancel routes' `*DataSource` adapter — tests inject an in-memory fake here. */
+  compositingDb?: CompositingDatabase;
   /** The Frame.io-compatible review provider; defaults to the deterministic mock (no real Frame.io adapter exists — M8/§7.1). */
   reviewProvider?: ReviewProvider;
   workflowClient?: WorkflowClient;
@@ -90,6 +94,7 @@ export function buildServer({
   assetDb = createAssetDatabase(prisma),
   shotGenerationDb = createShotGenerationDatabase(prisma),
   shotReviewDb = createShotReviewDatabase(prisma),
+  compositingDb = createCompositingDatabase(prisma),
   reviewProvider = new MockReviewProvider(),
   temporalEnv = { TEMPORAL_ADDRESS: 'localhost:7233', TEMPORAL_NAMESPACE: 'default' },
   workflowClient = createWorkflowClient(temporalEnv),
@@ -141,6 +146,7 @@ export function buildServer({
     reviewProvider,
     workflowClient,
   });
+  registerCompositingRoutes(app, { db: compositingDb, storageProvider, workflowClient });
 
   return app;
 }

@@ -18,6 +18,10 @@ export * from './repositories/shot-generation-repository';
 export * from './repositories/quality-assessment-repository';
 export * from './repositories/shot-selection-repository';
 export * from './repositories/candidate-eligibility-repository';
+export * from './repositories/rough-edit-specification-repository';
+export * from './repositories/composition-repository';
+export * from './repositories/render-job-repository';
+export * from './repositories/edit-decision-list-repository';
 export * from './repositories/agent-invocation-repository';
 // Exported deliberately (not just used internally) — this fake is the one
 // in-memory implementation of every *DataSource interface this package

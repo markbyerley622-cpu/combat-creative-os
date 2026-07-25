@@ -57,6 +57,21 @@ import type {
   ShotSelectionSetRecord,
 } from '../shot-selection-repository';
 import type {
+  RoughEditSpecificationDataSource,
+  RoughEditSpecificationRecord,
+} from '../rough-edit-specification-repository';
+import type {
+  CompositionAttemptRecord,
+  CompositionDataSource,
+  CompositionJobRecord,
+} from '../composition-repository';
+import type { RenderJobDataSource, RenderJobRecord } from '../render-job-repository';
+import type {
+  EditDecisionEntryRecord,
+  EditDecisionListDataSource,
+  EditDecisionListRecord,
+} from '../edit-decision-list-repository';
+import type {
   CampaignBriefFactRow,
   CreativeConceptFactRow,
   CreativeVariantFactRow,
@@ -114,7 +129,11 @@ export class InMemoryCampaignStore
     ShotSpecificationDataSource,
     ShotGenerationDataSource,
     QualityAssessmentDataSource,
-    ShotSelectionDataSource
+    ShotSelectionDataSource,
+    RoughEditSpecificationDataSource,
+    CompositionDataSource,
+    RenderJobDataSource,
+    EditDecisionListDataSource
 {
   campaigns: CampaignRecord[] = [];
   audits: CampaignTransitionAuditRecord[] = [];
@@ -148,6 +167,13 @@ export class InMemoryCampaignStore
   shotSelectionSetRecords: ShotSelectionSetRecord[] = [];
   shotSelectionRecords: ShotSelectionRecord[] = [];
   shotSelectionReplacementRecords: ShotSelectionReplacementRecord[] = [];
+  /** M9 compositing rows. */
+  roughEditSpecificationRecords: RoughEditSpecificationRecord[] = [];
+  compositionJobRecords: CompositionJobRecord[] = [];
+  compositionAttemptRecords: CompositionAttemptRecord[] = [];
+  renderJobRecords: RenderJobRecord[] = [];
+  editDecisionListRecords: EditDecisionListRecord[] = [];
+  editDecisionEntryRecords: EditDecisionEntryRecord[] = [];
   renderJobs: RenderJobFactRow[] = [];
   editDecisionLists: EditDecisionListFactRow[] = [];
   deliverySpecifications: DeliverySpecificationFactRow[] = [];
@@ -724,11 +750,182 @@ export class InMemoryCampaignStore
       ),
   };
 
-  renderJob: TransitionFactsDataSource['renderJob'] = {
-    findMany: async () => this.renderJobs,
+  // Merges the legacy fact-row fixtures with M9 full records (same rationale as
+  // qualityAssessment/generationCandidate above), and satisfies both the
+  // transition-facts read shape and the M9 RenderJobDataSource.
+  renderJob = {
+    findMany: async (args: { where: { campaignId: string; workspaceId?: string } }) => {
+      const { campaignId, workspaceId } = args.where;
+      return [
+        ...this.renderJobs,
+        ...this.renderJobRecords.filter(
+          (r) =>
+            r.campaignId === campaignId &&
+            (workspaceId === undefined || r.workspaceId === workspaceId),
+        ),
+      ];
+    },
+    findFirst: async (args: { where: { id: string; workspaceId: string } }) =>
+      this.renderJobRecords.find(
+        (r) => r.id === args.where.id && r.workspaceId === args.where.workspaceId,
+      ) ?? null,
+    create: async ({ data }: { data: Omit<RenderJobRecord, 'id' | 'createdAt'> }) => {
+      const record: RenderJobRecord = { id: randomUUID(), createdAt: new Date(), ...data };
+      this.renderJobRecords.push(record);
+      return record;
+    },
+  } as unknown as TransitionFactsDataSource['renderJob'] & RenderJobDataSource['renderJob'];
+
+  editDecisionList = {
+    findMany: async (args?: { where?: { campaignId?: string; workspaceId?: string } }) => {
+      const campaignId = args?.where?.campaignId;
+      const records = campaignId
+        ? this.editDecisionListRecords.filter((e) => e.campaignId === campaignId)
+        : this.editDecisionListRecords;
+      return [...this.editDecisionLists, ...records];
+    },
+    findFirst: async (args: {
+      where:
+        | { id: string; workspaceId: string }
+        | { campaignId: string; version: number; workspaceId: string };
+    }) => {
+      const { where } = args;
+      if ('id' in where) {
+        return (
+          this.editDecisionListRecords.find(
+            (e) => e.id === where.id && e.workspaceId === where.workspaceId,
+          ) ?? null
+        );
+      }
+      return (
+        this.editDecisionListRecords.find(
+          (e) =>
+            e.campaignId === where.campaignId &&
+            e.version === where.version &&
+            e.workspaceId === where.workspaceId,
+        ) ?? null
+      );
+    },
+    create: async ({ data }: { data: Omit<EditDecisionListRecord, 'id' | 'createdAt'> }) => {
+      const record: EditDecisionListRecord = { id: randomUUID(), createdAt: new Date(), ...data };
+      this.editDecisionListRecords.push(record);
+      return record;
+    },
+  } as unknown as TransitionFactsDataSource['editDecisionList'] &
+    EditDecisionListDataSource['editDecisionList'];
+
+  editDecisionEntry: EditDecisionListDataSource['editDecisionEntry'] = {
+    create: async ({ data }) => {
+      const record: EditDecisionEntryRecord = { id: randomUUID(), ...data };
+      this.editDecisionEntryRecords.push(record);
+      return record;
+    },
+    findMany: async ({ where }) =>
+      this.editDecisionEntryRecords.filter(
+        (e) => e.editDecisionListId === where.editDecisionListId,
+      ),
   };
-  editDecisionList: TransitionFactsDataSource['editDecisionList'] = {
-    findMany: async () => this.editDecisionLists,
+
+  roughEditSpecification: RoughEditSpecificationDataSource['roughEditSpecification'] = {
+    create: async ({ data }) => {
+      const record: RoughEditSpecificationRecord = {
+        id: randomUUID(),
+        createdAt: new Date(),
+        ...data,
+      };
+      this.roughEditSpecificationRecords.push(record);
+      return record;
+    },
+    findFirst: async ({ where }) => {
+      if ('id' in where) {
+        return (
+          this.roughEditSpecificationRecords.find(
+            (r) => r.id === where.id && r.workspaceId === where.workspaceId,
+          ) ?? null
+        );
+      }
+      return (
+        this.roughEditSpecificationRecords.find(
+          (r) =>
+            r.campaignId === where.campaignId &&
+            r.version === where.version &&
+            r.workspaceId === where.workspaceId,
+        ) ?? null
+      );
+    },
+    findMany: async ({ where }) =>
+      this.roughEditSpecificationRecords.filter(
+        (r) => r.campaignId === where.campaignId && r.workspaceId === where.workspaceId,
+      ),
+  };
+
+  compositionJob: CompositionDataSource['compositionJob'] = {
+    create: async ({ data }) => {
+      const now = new Date();
+      const record: CompositionJobRecord = {
+        id: randomUUID(),
+        createdAt: now,
+        updatedAt: now,
+        ...data,
+      };
+      this.compositionJobRecords.push(record);
+      return record;
+    },
+    findFirst: async ({ where }) => {
+      if ('id' in where) {
+        return (
+          this.compositionJobRecords.find(
+            (j) => j.id === where.id && j.workspaceId === where.workspaceId,
+          ) ?? null
+        );
+      }
+      return (
+        this.compositionJobRecords.find(
+          (j) =>
+            j.roughEditSpecificationId === where.roughEditSpecificationId &&
+            (where.workspaceId === undefined || j.workspaceId === where.workspaceId),
+        ) ?? null
+      );
+    },
+    update: async ({ where, data }) => {
+      const job = this.compositionJobRecords.find((j) => j.id === where.id);
+      if (!job) throw new Error(`composition job ${where.id} not found`);
+      Object.assign(job, data);
+      job.updatedAt = new Date();
+      return job;
+    },
+  };
+
+  compositionAttempt: CompositionDataSource['compositionAttempt'] = {
+    create: async ({ data }) => {
+      const record: CompositionAttemptRecord = { id: randomUUID(), createdAt: new Date(), ...data };
+      this.compositionAttemptRecords.push(record);
+      return record;
+    },
+    findFirst: async ({ where }) => {
+      if ('id' in where) {
+        return (
+          this.compositionAttemptRecords.find(
+            (a) => a.id === where.id && a.workspaceId === where.workspaceId,
+          ) ?? null
+        );
+      }
+      return (
+        this.compositionAttemptRecords.find(
+          (a) =>
+            a.compositionJobId === where.compositionJobId &&
+            a.idempotencyKey === where.idempotencyKey,
+        ) ?? null
+      );
+    },
+    findMany: async ({ where }) =>
+      this.compositionAttemptRecords.filter((a) => a.compositionJobId === where.compositionJobId),
+    update: async ({ where, data }) => {
+      const attempt = this.compositionAttemptRecords.find((a) => a.id === where.id);
+      if (!attempt) throw new Error(`composition attempt ${where.id} not found`);
+      Object.assign(attempt, data);
+      return attempt;
+    },
   };
   deliverySpecification: TransitionFactsDataSource['deliverySpecification'] = {
     findMany: async () => this.deliverySpecifications,

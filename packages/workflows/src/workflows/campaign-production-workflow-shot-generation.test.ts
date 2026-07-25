@@ -129,7 +129,14 @@ describe('campaignProductionWorkflow — PROMPTING/SHOT_GENERATION wiring', () =
       runVisualQualityAssessmentsActivity: runVisualQualityAssessmentsActivity as never,
       runContinuityAssessmentActivity: runContinuityAssessmentActivity as never,
     });
-    setFakeChildWorkflowImpls({ shotGenerationWorkflow: shotGenerationWorkflowImpl as never });
+    setFakeChildWorkflowImpls({
+      shotGenerationWorkflow: shotGenerationWorkflowImpl as never,
+      compositingWorkflow: (async () => ({
+        status: 'COMPLETED',
+        roughEditSpecificationId: 're-1',
+        roughEditAssetId: 'a-1',
+      })) as never,
+    });
 
     const resultPromise = campaignProductionWorkflow({
       workspaceId,

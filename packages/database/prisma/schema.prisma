@@ -154,6 +154,8 @@ enum AssetKind {
   THUMBNAIL
   PROXY
   MOTION_GRAPHICS_RENDER
+  /// M9: the assembled rough-edit render from a RoughEditSpecification.
+  ROUGH_CUT
   SOUND_STEM
   FINAL_MASTER
   VARIANT
@@ -1030,6 +1032,135 @@ model RenderJob {
   @@index([workspaceId])
   @@index([campaignId])
   @@map("render_jobs")
+}
+
+enum CompositionJobStatus {
+  PENDING
+  DISPATCHED
+  SUCCEEDED
+  FAILED
+  BUDGET_EXCEEDED
+  CANCELLED
+}
+
+enum CompositionAttemptStatus {
+  QUEUED
+  SUBMITTED
+  POLLING
+  SUCCEEDED
+  FAILED
+  TIMED_OUT
+  CANCELLED
+}
+
+enum CompositionFailureReason {
+  UNSUPPORTED_CAPABILITY
+  PROVIDER_TIMEOUT
+  PROVIDER_REJECTED
+  PROVIDER_ERROR
+  BUDGET_EXCEEDED
+}
+
+/// M9 — the canonical versioned rough-edit / timeline specification the Edit
+/// Director produces from a human-approved ShotSelectionSet. `tracks` and
+/// `overlays` are validated nested structures (Zod) stored as Json, matching
+/// ShotSpecification's params/requirements approach. FKs to campaign/concept/
+/// script/selection are plain columns (no relation back-reference), matching
+/// QualityAssessment/ShotSelectionSet.
+model RoughEditSpecification {
+  id                      String   @id @default(uuid())
+  workspaceId             String
+  campaignId              String
+  creativeConceptId       String
+  creativeConceptVersion  Int
+  scriptId                String
+  scriptVersion           Int
+  shotSelectionSetId      String
+  shotSelectionSetVersion Int
+  version                 Int
+  outputFormat            String
+  aspectRatio             String
+  resolutionWidth         Int
+  resolutionHeight        Int
+  frameRate               Int
+  targetDurationFrames    Int
+  tracks                  Json
+  overlays                Json                    @default("[]")
+  pacingNotes             String
+  beatStructure           Json                    @default("[]")
+  continuityNotes         String[]
+  textSafeAreas           TextSafeArea[]
+  brandTokens             String[]
+  captionPlaceholder      String
+  musicPlaceholder        String
+  sfxPlaceholder          String
+  platform                DeliveryPlatform
+  platformDeliveryNotes   String
+  editRationale           String
+  qualityRubric           String[]
+  promptVersionId         String
+  createdByAgentInvocationId String
+  createdAt               DateTime                @default(now())
+
+  compositionJobs CompositionJob[]
+
+  @@unique([campaignId, version])
+  @@index([workspaceId])
+  @@index([campaignId])
+  @@map("rough_edit_specifications")
+}
+
+/// M9 — groups the bounded-retry render attempts for one RoughEditSpecification.
+model CompositionJob {
+  id                       String               @id @default(uuid())
+  workspaceId              String
+  campaignId               String
+  roughEditSpecificationId String
+  status                   CompositionJobStatus @default(PENDING)
+  maxAttempts              Int
+  attemptCount             Int                  @default(0)
+  createdAt                DateTime             @default(now())
+  updatedAt                DateTime             @updatedAt
+
+  roughEditSpecification RoughEditSpecification @relation(fields: [roughEditSpecificationId], references: [id], onDelete: Cascade)
+  attempts               CompositionAttempt[]
+
+  @@unique([roughEditSpecificationId])
+  @@index([workspaceId])
+  @@index([campaignId])
+  @@map("composition_jobs")
+}
+
+/// M9 — one immutable render attempt within a CompositionJob. `idempotencyKey`
+/// is unique per job so a replayed Activity call never double-submits or
+/// double-reserves budget.
+model CompositionAttempt {
+  id                  String                   @id @default(uuid())
+  workspaceId         String
+  compositionJobId    String
+  attemptNumber       Int
+  idempotencyKey      String
+  providerId          String
+  providerProjectId   String?
+  providerJobId       String?
+  status              CompositionAttemptStatus @default(QUEUED)
+  budgetReservationId String?
+  estimatedCostCents  Int?
+  actualCostCents     Int?
+  outputAssetId       String?
+  failureReason       CompositionFailureReason?
+  failureRetryable    Boolean?
+  failureMessage      String?
+  startedAt           DateTime                 @default(now())
+  completedAt         DateTime?
+  createdAt           DateTime                 @default(now())
+
+  compositionJob CompositionJob @relation(fields: [compositionJobId], references: [id], onDelete: Cascade)
+
+  @@unique([compositionJobId, idempotencyKey])
+  @@index([workspaceId])
+  @@index([compositionJobId])
+  @@map("composition_attempts")
 }
 
 model SoundCue {

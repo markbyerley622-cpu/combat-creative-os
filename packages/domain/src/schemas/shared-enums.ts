@@ -45,6 +45,8 @@ export const ASSET_KINDS = [
   'THUMBNAIL',
   'PROXY',
   'MOTION_GRAPHICS_RENDER',
+  /** M9: the assembled rough-edit render produced by the CompositingWorkflow from a RoughEditSpecification. */
+  'ROUGH_CUT',
   'SOUND_STEM',
   'FINAL_MASTER',
   'VARIANT',
@@ -52,6 +54,45 @@ export const ASSET_KINDS = [
 ] as const;
 export const AssetKindSchema = z.enum(ASSET_KINDS);
 export type AssetKind = z.infer<typeof AssetKindSchema>;
+
+/**
+ * M9 — the composition job that renders a `RoughEditSpecification` into a
+ * rough-edit asset. Mirrors ShotGenerationJob's "mutable status row, immutable
+ * attempt history" split.
+ */
+export const COMPOSITION_JOB_STATUSES = [
+  'PENDING',
+  'DISPATCHED',
+  'SUCCEEDED',
+  'FAILED',
+  'BUDGET_EXCEEDED',
+  'CANCELLED',
+] as const;
+export const CompositionJobStatusSchema = z.enum(COMPOSITION_JOB_STATUSES);
+export type CompositionJobStatus = z.infer<typeof CompositionJobStatusSchema>;
+
+export const COMPOSITION_ATTEMPT_STATUSES = [
+  'QUEUED',
+  'SUBMITTED',
+  'POLLING',
+  'SUCCEEDED',
+  'FAILED',
+  'TIMED_OUT',
+  'CANCELLED',
+] as const;
+export const CompositionAttemptStatusSchema = z.enum(COMPOSITION_ATTEMPT_STATUSES);
+export type CompositionAttemptStatus = z.infer<typeof CompositionAttemptStatusSchema>;
+
+/** Mirrored from `@combat/providers`'s `MotionGraphicsFailureReason` — same "mirror rather than depend" rationale as the shot-generation failure enum (domain must not depend on providers). */
+export const COMPOSITION_FAILURE_REASONS = [
+  'UNSUPPORTED_CAPABILITY',
+  'PROVIDER_TIMEOUT',
+  'PROVIDER_REJECTED',
+  'PROVIDER_ERROR',
+  'BUDGET_EXCEEDED',
+] as const;
+export const CompositionFailureReasonSchema = z.enum(COMPOSITION_FAILURE_REASONS);
+export type CompositionFailureReason = z.infer<typeof CompositionFailureReasonSchema>;
 
 /**
  * M5: an uploaded asset's lifecycle after `putObject` succeeds — `PENDING`

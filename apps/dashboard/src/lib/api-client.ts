@@ -273,6 +273,61 @@ export interface ShotReviewView {
   budget: { workspace: BudgetStatusView | null; campaign: BudgetStatusView | null };
 }
 
+// --- M9 compositing / rough edit ---
+
+export interface RoughEditClipView {
+  order: number;
+  shotIndex: number;
+  sourceAssetId: string;
+  durationFrames: number;
+  transitionIn: string | null;
+}
+
+export interface RoughEditSpecView {
+  id: string;
+  version: number;
+  outputFormat: string;
+  aspectRatio: string;
+  resolutionWidth: number;
+  resolutionHeight: number;
+  frameRate: number;
+  targetDurationFrames: number;
+  shotSelectionSetId: string;
+  shotSelectionSetVersion: number;
+  clips: RoughEditClipView[];
+  overlays: { kind: string; shotIndex?: number; description: string }[];
+  pacingNotes: string;
+  continuityNotes: string[];
+  captionPlaceholder: string;
+  musicPlaceholder: string;
+  sfxPlaceholder: string;
+  editRationale: string;
+  qualityRubric: string[];
+  platform: string;
+}
+
+export interface CompositionAttemptView {
+  id: string;
+  attemptNumber: number;
+  status: string;
+  providerId: string;
+  estimatedCostCents: number | null;
+  actualCostCents: number | null;
+  failureReason: string | null;
+  failureMessage: string | null;
+  startedAt: string;
+  completedAt: string | null;
+}
+
+export interface CompositingView {
+  campaign: { currentStage: string; isCompositingStage: boolean };
+  roughEditSpecification: RoughEditSpecView | null;
+  compositionJob: { id: string; status: string; attemptCount: number; maxAttempts: number } | null;
+  attempts: CompositionAttemptView[];
+  roughEdit: { assetId: string | null; hasMedia: false };
+  budget: { workspace: BudgetStatusView | null; campaign: BudgetStatusView | null };
+}
+
 export interface ApiClientOptions {
   baseUrl?: string;
 }
@@ -439,6 +494,20 @@ export function createApiClient(
       request<{ approvalId: string; replayed: boolean }>(
         `/workspaces/${workspaceId}/campaigns/${campaignId}/shot-review/request-regeneration`,
         { method: 'POST', body: JSON.stringify({ userId, ...input }) },
+        baseUrl,
+      ),
+
+    getCompositing: (campaignId: string) =>
+      request<CompositingView>(
+        `/workspaces/${workspaceId}/campaigns/${campaignId}/compositing?userId=${userId}`,
+        undefined,
+        baseUrl,
+      ),
+
+    cancelCompositing: (campaignId: string) =>
+      request<{ cancelRequested: boolean }>(
+        `/workspaces/${workspaceId}/campaigns/${campaignId}/compositing/cancel`,
+        { method: 'POST', body: JSON.stringify({ userId }) },
         baseUrl,
       ),
   };

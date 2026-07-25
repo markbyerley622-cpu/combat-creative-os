@@ -13,6 +13,8 @@ export * from './shot-generation-job';
 export * from './shot-generation-attempt';
 export * from './quality-assessment';
 export * from './shot-selection';
+export * from './rough-edit-specification';
+export * from './composition-job';
 export * from './human-approval';
 export * from './asset';
 export * from './license-record';

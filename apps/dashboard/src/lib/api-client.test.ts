@@ -122,3 +122,37 @@ describe('createApiClient — M8 shot review', () => {
     ).rejects.toMatchObject({ status: 409, body: { error: 'INELIGIBLE_CANDIDATE' } });
   });
 });
+
+describe('createApiClient — M9 compositing', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('GETs the compositing status scoped to workspace + user', async () => {
+    const fetchMock = mockFetchOnce(200, { attempts: [] });
+    vi.stubGlobal('fetch', fetchMock);
+    const client = createApiClient('ws-1', 'user-1', { baseUrl: 'http://api.test' });
+    await client.getCompositing('camp-1');
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://api.test/workspaces/ws-1/campaigns/camp-1/compositing?userId=user-1',
+      expect.anything(),
+    );
+  });
+
+  it('POSTs a cancel request to the compositing cancel endpoint', async () => {
+    const fetchMock = mockFetchOnce(202, { cancelRequested: true });
+    vi.stubGlobal('fetch', fetchMock);
+    const client = createApiClient('ws-1', 'user-1', { baseUrl: 'http://api.test' });
+    await client.cancelCompositing('camp-1');
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('http://api.test/workspaces/ws-1/campaigns/camp-1/compositing/cancel');
+    expect(init.method).toBe('POST');
+  });
+
+  it('surfaces a 403 cancel rejection as an ApiError', async () => {
+    const fetchMock = mockFetchOnce(403, { error: 'FORBIDDEN' });
+    vi.stubGlobal('fetch', fetchMock);
+    const client = createApiClient('ws-1', 'user-1', { baseUrl: 'http://api.test' });
+    await expect(client.cancelCompositing('camp-1')).rejects.toMatchObject({ status: 403 });
+  });
+});

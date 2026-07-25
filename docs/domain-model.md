@@ -62,7 +62,10 @@ shape.
 | LicenseRecord            | `schemas/license-record.ts`           | 0..1 on Asset                                                                                                                                                                                                                                                            |
 | RenderJob                | `schemas/render-job.ts`               | COMPOSITING or EXPORT                                                                                                                                                                                                                                                    |
 | SoundCue                 | `schemas/sound-cue.ts`                | belongs to a Timeline                                                                                                                                                                                                                                                    |
-| EditDecisionList         | `schemas/edit-decision-list.ts`       | versioned; `entries` reference Asset                                                                                                                                                                                                                                     |
+| EditDecisionList         | `schemas/edit-decision-list.ts`       | versioned; `entries` reference Asset; its existence is the `roughCutAssembled` fact                                                                                                                                                                                      |
+| RoughEditSpecification   | `schemas/rough-edit-specification.ts` | M9 — the Edit Director's canonical, **immutable**, versioned rough-edit brief (timeline tracks/clips/transitions + overlays as validated nested structures); pins the approved ShotSelectionSet + concept/script versions + prompt/agent provenance                      |
+| CompositionJob           | `schemas/composition-job.ts`          | M9 — mutable status row grouping the bounded-retry render attempts for one RoughEditSpecification (same split as ShotGenerationJob)                                                                                                                                      |
+| CompositionAttempt       | `schemas/composition-job.ts`          | M9 — immutable append-only render attempt; provider project/job ids, budget reservation + actual usage, typed failure                                                                                                                                                    |
 | DeliverySpecification    | `schemas/delivery-specification.ts`   | per platform/aspect-ratio                                                                                                                                                                                                                                                |
 | CreativeVariant          | `schemas/creative-variant.ts`         | a rendered delivery-spec-conformant cut                                                                                                                                                                                                                                  |
 | PerformanceMetrics       | `schemas/performance-metrics.ts`      | per CreativeVariant, per platform                                                                                                                                                                                                                                        |
@@ -391,6 +394,17 @@ in the workflow by `verifyShotSelectionActivity` before the GATE_DECISION
 advance, and in `apps/api` by `approveShotSelectionSet` (which freezes the set
 before recording the approval), rather than by widening the M7 fact
 derivation.
+
+M9 populates the compositing facts. `pollCompositionRenderActivity`, on a
+SUCCEEDED render, writes a SUCCEEDED COMPOSITING `RenderJob` (which
+`compositingComplete` reads) and the derived `EditDecisionList` (which
+`roughCutAssembled` reads) — both deduped/idempotent — so a completed rough
+edit lets the campaign auto-forward COMPOSITING → ROUGH_CUT → SOUND_DESIGN,
+where M9 stops (BLOCKED, no Sound Director until M10). The
+`CompositingWorkflow` starts only from a `verifyShotSelectionActivity`-valid
+approved selection and re-checks every selected source's eligibility +
+licensing (via `gatherCandidateEligibility`) inside `runEditDirectorActivity`,
+so a stale/ineligible/unlicensed source can never produce a rough edit.
 
 These will be tightened once the workflows/activities milestones (M6–M12,
 architecture.md §8) that actually populate these tables in fine grain are
