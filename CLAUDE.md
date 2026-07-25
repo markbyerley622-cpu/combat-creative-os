@@ -4,65 +4,65 @@ This file is the operating contract for anyone (human or agent) working in
 this repository. It is deliberately short — for the full design rationale
 see `docs/architecture.md` and `docs/adr/`.
 
-Current milestone: **M13, performance analysis & creative learning, done** —
-a deterministic, **provider-independent** learning loop. Closed-window
-performance data is ingested from fixtures or manual entry as immutable
-`PerformanceObservation`s (architecture.md §4.1's `PerformanceRecord`,
-implemented — post identity + source provenance + raw counters + derived rates,
-idempotent per `(post, platform, window)`); the existing `performance-analyst`
-agent distils them into `LearningRecord`s (§4.1's `Learning`, promoted out of
-the agents package into a real versioned table with explicit evidence
-references and full agent/prompt provenance).
+Current milestone: **M14, production hardening & operational safety, done** —
+not a feature milestone. It closes the gap between "works" and "safe to run",
+and turns several previously-documented responsibilities into enforced code.
 
-**Three properties the agent cannot talk its way past:** completed data only (a
-window that has not elapsed is refused at the persistence boundary and filtered
-out before analysis); evidence must be real (every cited observation id is
-checked against what was actually supplied — a bad citation is a typed
-`UNSUPPORTED_EVIDENCE` failure, not a persisted learning); and **confidence is
-derived, never asserted** (`deriveLearningConfidence` computes the band from
-observation count _and_ impression volume, so one observation is always LOW
-however large, and the agent's schema has no confidence field at all).
+**Authorization audit.** All 18 mutating `apps/api` endpoints are enumerated in
+a typed registry (`apps/api/src/route-authorization.ts`) carrying the exact
+`Permission` from the canonical `@combat/domain` matrix, the target resource and
+the required ownership checks. The registry is executable: tests assert it
+matches the routes Fastify registered, that every permission exists in the
+matrix, that every campaign-scoped mutation verifies campaign ownership, and
+that `ANALYST` holds no mutating permission — so an endpoint added without a
+registry entry fails the suite rather than shipping unaudited.
 
-`PerformanceAnalysisWorkflow` is a **separate top-level workflow**, decoupled
-structurally rather than by convention: it proxies exactly one Activity whose
-only writes are `LearningRecord` rows, defines **no signals**, carries no
-stage/approval/asset/export field, and never calls
-`advanceCampaignStageActivity` — so it cannot advance a stage, satisfy or bypass
-a human gate, modify an approved asset, or trigger an export. It adds no
-transition facts, so no amount of performance data can make a campaign
-transition valid.
+**Three authorization defects found and fixed.** (1) Five shot-review mutations
+accepted a body-supplied `setId` verified only against the _workspace_, letting
+a privileged caller mutate one campaign's selection set through another
+campaign's route in the same tenant. (2) Performance ingestion pinned a
+client-supplied `creativeVariantId`/`variantAssetId` as provenance without
+checking it belonged to the path campaign. Both now run
+`assertBelongsToCampaign`. (3) `/shot-review/comment` required `SELECT_SHOTS`;
+narrowed to `PROVIDE_CANDIDATE_FEEDBACK`.
 
-Approved learnings reach the Campaign Strategist and Creative Director as
-**bounded, attributable** context: `selectLearningContext` admits only APPROVED,
-non-superseded, workspace-scoped records at or above MEDIUM confidence whose
-applicability overlaps the target campaign, ranks by confidence and evidence
-weight, and caps at 5 items — each rendered with its confidence band, evidence
-count and source record id so any influenced claim is traceable. It is offered
-**alongside** the approved brief, never in place of it (brief fields are passed
-verbatim and are not overridable), and a human with `APPROVE_CONCEPT` must
-approve a record before it is ever injected. Injection is opt-in via an optional
-`learningDb` dep, so every pre-M13 caller behaves exactly as before.
-`apps/api` gained ingestion (`MANAGE_CAMPAIGNS`), performance history and
-learning listing (`VIEW_REPORTING`) and learning review (`APPROVE_CONCEPT`);
-`apps/dashboard` gained performance and learning-review screens.
+**Two budget defects found and fixed.** `checkAndReserveBudget` was an
+unguarded read-then-write: concurrent _distinct-key_ reservations could both
+observe headroom and over-spend the cap, and concurrent _same-key_ retries
+crashed on the unique constraint instead of resolving idempotently. Now a
+constraint violation resolves to the winner's row, and after insert the ledger
+prefix up to the new reservation is re-summed so the row that actually crossed
+the cap is compensated while earlier writers stand (first-writer-wins). **The
+durable fix is a `SERIALIZABLE` transaction in Postgres**, which cannot be
+exercised without a live database — the compensating guard is what is tested.
 
-**Explicitly deferred: real platform integration.** There is no ad-platform API
-client, OAuth flow, scraper, webhook or credential anywhere — `PerformanceSource`
-is `FIXTURE | MANUAL_ENTRY` only, and the dashboard says so in plain text. A real
-connector would add one source value feeding the same ingestion Activity and
-would change nothing downstream. Also deferred: the `PROMPTING` learning scope is
-persistable but unconsumed, and no scheduler triggers the analysis workflow (it is
-started explicitly). See `docs/architecture.md` §8's M13 entry for the full
-accounting. Still no export/distribution, no real caller authentication, no real
-Veo/Runway/ComfyUI adapter (only the deterministic mock — do not connect one or
-spend money without an explicit, separate decision), **Final QA still performs no
-licensing check** (§7.2 open question 1), and no
-live-Postgres/Temporal/MinIO/ffmpeg environment in this session —
-`apps/api/src/dev-fake-server.ts` (in-memory-backed) is what both `apps/api`'s
-own tests and `apps/dashboard`'s Playwright suite run against instead. Anthropic
-is reachable via `@combat/providers`'s `ClaudeReasoningProvider`, but only when
-explicitly configured (`REASONING_PROVIDER=claude` + `ANTHROPIC_API_KEY`); the
-default `mock` provider is what every automated test uses.
+**Also hardened.** Crash-point replay for both dangerous windows (worker dies
+after persistence before dispatch; after dispatch before persistence) — no
+duplicate provider submission, charge or derived asset. Signal resilience —
+duplicate, late, wrong-gate, non-pending, forged and pre-gate signals each
+cross the gate at most once and poison nothing. `workerEnvSchema` now **fails
+closed** when `REASONING_PROVIDER=claude` has no `ANTHROPIC_API_KEY`, instead of
+silently degrading production to the deterministic mock. `createLogger` gained
+pino redaction (it previously had **none**) covering credentials, connection
+strings, auth headers and model payloads, while leaving correlation identifiers
+readable. The in-memory store now mirrors the `Asset` uniqueness constraint, so
+a missing checksum-dedup can no longer pass tests while failing on Postgres.
+
+**Remaining production blockers — unchanged by M14.** There is still **no real
+caller authentication**: the request-supplied `userId` remains the documented
+temporary development identity, and M14 hardens what an identity may _do_, never
+proves _who_ it is. Also outstanding: applied database migrations (no live
+Postgres in this environment — every model since M10 is unmigrated), live
+Temporal/MinIO/ffmpeg, real Veo/Runway/ComfyUI adapters (only the deterministic
+mock — do not connect one or spend money without an explicit, separate
+decision), real export/render implementation, real ad-platform integration, and
+**Final QA still performs no licensing check** (`docs/architecture.md` §7.2
+item 1). See §8's M14 entry for the full accounting, including exactly what is
+enforced in code versus deferred. `apps/api/src/dev-fake-server.ts`
+(in-memory-backed) is what both `apps/api`'s own tests and `apps/dashboard`'s
+Playwright suite run against. Anthropic is reachable via `@combat/providers`'s
+`ClaudeReasoningProvider`, but only when explicitly configured; the default
+`mock` provider is what every automated test uses.
 
 ## Context and token efficiency
 

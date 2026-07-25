@@ -31,6 +31,7 @@ import {
 import type { ReviewProvider, StorageProvider } from '@combat/providers';
 import { workflows } from '@combat/workflows';
 import { campaignProductionWorkflowId } from './campaign-workflow-id';
+import { assertBelongsToCampaign } from './route-authorization';
 import type { ShotReviewDatabase } from './shot-review-database';
 
 export interface ShotReviewRouteDeps {
@@ -390,6 +391,13 @@ export function registerShotReviewRoutes(
         return reply.status(404).send({ error: 'NOT_FOUND', message: 'campaign not found' });
       }
 
+      // M14: the set id is client-supplied. Workspace scoping alone would let
+      // a caller mutate another campaign's set through this campaign's route,
+      // so the set's own campaignId is checked against the path.
+      const targetSet = await getShotSelectionSet(deps.db, workspaceId, body.data.setId);
+      const owned = assertBelongsToCampaign(targetSet, campaignId, 'shot selection set');
+      if (!owned.ok) return reply.status(owned.status).send(owned.body);
+
       const [script, concept] = await Promise.all([
         getLatestScript(deps.db, workspaceId, campaignId),
         getLatestCreativeConcept(deps.db, workspaceId, campaignId),
@@ -451,6 +459,13 @@ export function registerShotReviewRoutes(
         return reply.status(404).send({ error: 'NOT_FOUND', message: 'campaign not found' });
       }
 
+      // M14: the set id is client-supplied. Workspace scoping alone would let
+      // a caller mutate another campaign's set through this campaign's route,
+      // so the set's own campaignId is checked against the path.
+      const targetSet = await getShotSelectionSet(deps.db, workspaceId, body.data.setId);
+      const owned = assertBelongsToCampaign(targetSet, campaignId, 'shot selection set');
+      if (!owned.ok) return reply.status(owned.status).send(owned.body);
+
       const result = await rejectShotSelection(deps.db, workspaceId, {
         setId: body.data.setId,
         shotId: body.data.shotId,
@@ -480,7 +495,12 @@ export function registerShotReviewRoutes(
       if (!body.success) {
         return reply.status(400).send({ error: 'INVALID_BODY', issues: body.error.issues });
       }
-      const auth = await authorize(deps.db, workspaceId, body.data.userId, 'SELECT_SHOTS');
+      const auth = await authorize(
+        deps.db,
+        workspaceId,
+        body.data.userId,
+        'PROVIDE_CANDIDATE_FEEDBACK',
+      );
       if (!auth.ok) return reply.status(auth.status).send(auth.body);
       const campaign = await getCampaign(deps.db, workspaceId, campaignId);
       if (!campaign) {
@@ -541,6 +561,13 @@ export function registerShotReviewRoutes(
       if (!campaign) {
         return reply.status(404).send({ error: 'NOT_FOUND', message: 'campaign not found' });
       }
+
+      // M14: the set id is client-supplied. Workspace scoping alone would let
+      // a caller mutate another campaign's set through this campaign's route,
+      // so the set's own campaignId is checked against the path.
+      const targetSet = await getShotSelectionSet(deps.db, workspaceId, body.data.setId);
+      const owned = assertBelongsToCampaign(targetSet, campaignId, 'shot selection set');
+      if (!owned.ok) return reply.status(owned.status).send(owned.body);
       const set = await getShotSelectionSet(deps.db, workspaceId, body.data.setId);
       if (!set) {
         return reply.status(404).send({ error: 'NOT_FOUND', message: 'selection set not found' });
@@ -635,6 +662,13 @@ export function registerShotReviewRoutes(
       if (!campaign) {
         return reply.status(404).send({ error: 'NOT_FOUND', message: 'campaign not found' });
       }
+
+      // M14: the set id is client-supplied. Workspace scoping alone would let
+      // a caller mutate another campaign's set through this campaign's route,
+      // so the set's own campaignId is checked against the path.
+      const targetSet = await getShotSelectionSet(deps.db, workspaceId, body.data.setId);
+      const owned = assertBelongsToCampaign(targetSet, campaignId, 'shot selection set');
+      if (!owned.ok) return reply.status(owned.status).send(owned.body);
       const set = await getShotSelectionSet(deps.db, workspaceId, body.data.setId);
       if (!set) {
         return reply.status(404).send({ error: 'NOT_FOUND', message: 'selection set not found' });

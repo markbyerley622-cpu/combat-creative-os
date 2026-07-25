@@ -1377,6 +1377,18 @@ export class InMemoryCampaignStore
 
   asset: AssetDataSource['asset'] = {
     create: async ({ data }) => {
+      // M14: mirrors the schema's `@@unique([workspaceId, checksum, kind])`.
+      // Without it a test could pass here while the same code threw against
+      // Postgres, hiding a missing `findAssetByChecksum` dedup in an Activity.
+      const exists = this.assets.some(
+        (a) =>
+          a.workspaceId === data.workspaceId &&
+          a.checksum === data.checksum &&
+          a.kind === data.kind,
+      );
+      if (exists) {
+        throw new Error('unique constraint violation on assets (workspaceId, checksum, kind)');
+      }
       const asset: AssetRecord = { id: randomUUID(), createdAt: new Date(), ...data };
       this.assets.push(asset);
       return asset;

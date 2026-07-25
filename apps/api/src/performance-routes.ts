@@ -7,8 +7,10 @@ import {
   type RoleName,
 } from '@combat/domain';
 import {
+  getAsset,
   getCampaign,
   ingestPerformanceObservation,
+  listCreativeVariants,
   InvalidPerformanceMetricsError,
   listLearningRecords,
   listMembershipsForWorkspace,
@@ -17,6 +19,7 @@ import {
   reviewLearningRecord,
 } from '@combat/database';
 import type { PerformanceDatabase } from './performance-database';
+import { assertBelongsToCampaign } from './route-authorization';
 
 export interface PerformanceRouteDeps {
   readonly db: PerformanceDatabase;
@@ -126,6 +129,28 @@ export function registerPerformanceRoutes(
       const campaign = await getCampaign(deps.db, workspaceId, campaignId);
       if (!campaign) {
         return reply.status(404).send({ error: 'NOT_FOUND', message: 'campaign not found' });
+      }
+
+      // M14: a supplied variant/asset id becomes this observation's provenance,
+      // so it is verified to belong to the path campaign before it is pinned —
+      // workspace scoping alone would let one campaign's data cite another's
+      // creative. Variant ids are resolved once for the whole batch.
+      const campaignVariantIds = new Set(
+        (await listCreativeVariants(deps.db, workspaceId, campaignId)).map((v) => v.id),
+      );
+      for (const entry of parsed.data.observations) {
+        if (entry.creativeVariantId && !campaignVariantIds.has(entry.creativeVariantId)) {
+          return reply.status(404).send({
+            error: 'NOT_FOUND',
+            message: 'creative variant not found for this campaign',
+          });
+        }
+        if (entry.variantAssetId) {
+          // eslint-disable-next-line no-await-in-loop -- bounded by the batch; only runs when an asset id was supplied
+          const asset = await getAsset(deps.db, workspaceId, entry.variantAssetId);
+          const owned = assertBelongsToCampaign(asset, campaignId, 'variant asset');
+          if (!owned.ok) return reply.status(owned.status).send(owned.body);
+        }
       }
 
       const summaries: {

@@ -1714,13 +1714,106 @@ subjectStage])` idempotency constraint. `createQualityAssessmentForCandidate`
   api-client tests and 9 Playwright e2e tests. No paid API calls, no real
   platform traffic.
 
-- **M14 — Production hardening.** RBAC enforcement audit across every mutation
-  path in `apps/api` (every endpoint checked against the full permission matrix
-  in §2.2, not just the gates), full audit-trail completeness review, chaos/retry
-  testing (kill worker mid-stage, confirm resumability), budget-limit enforcement
-  under concurrency at all four levels, workspace-isolation fuzzing (attempt
-  every mutation across a workspace boundary), secrets/config separation review
-  (local vs. prod), full Playwright suite across all three gates end-to-end.
+- **M14 — Production hardening & operational safety. Done (2026-07-26), with the
+  blockers this item records.** Not a feature milestone: no new agent, provider,
+  entity or stage. It closes the gaps between "works" and "safe to run", and
+  turns several previously-documented responsibilities into enforced code.
+
+  **Authorization audit (`apps/api/src/route-authorization.ts`).** All 18
+  mutating endpoints are enumerated in a typed `MUTATING_ROUTES` registry
+  carrying the exact `Permission` from §2.2's canonical matrix, the target
+  resource, and the ownership checks required. The registry is _executable_:
+  `authorization-audit.test.ts` asserts it matches the routes Fastify actually
+  registered, that every named permission exists in the domain matrix, that
+  every campaign-scoped mutation verifies campaign ownership, and that no
+  mutating permission is granted to `ANALYST`. An endpoint added without a
+  registry entry fails the suite rather than shipping unaudited. Permission
+  values are never redeclared here — the union comes from `@combat/domain`.
+
+  **Two authorization defects found and fixed.** (1) The five shot-review
+  mutations accepted a body-supplied `setId` verified only against the
+  _workspace_, so a privileged caller could mutate one campaign's selection set
+  through another campaign's route within the same tenant. (2) Performance
+  ingestion accepted a `creativeVariantId`/`variantAssetId` and pinned it as
+  provenance without checking it belonged to the path campaign. Both now run
+  `assertBelongsToCampaign`, and both attacks are covered by tests. A third
+  finding was a mis-scoped permission: `/shot-review/comment` required
+  `SELECT_SHOTS` when commenting is feedback, not selection — narrowed to
+  `PROVIDE_CANDIDATE_FEEDBACK`.
+
+  **Tenant-isolation sweep.** 83 tests drive _every_ mutating endpoint from
+  four hostile positions — no membership, insufficient role, valid caller
+  against another workspace's campaign, and malformed body — and assert a
+  byte-identical store snapshot afterwards (campaign stage/version, approvals,
+  audits, assets, briefs, selection sets, budget ledger, observations,
+  learnings, variants, agent invocations) plus zero workflow signals and zero
+  workflow starts. Cross-tenant reads answer **404, never 403**, so resource ids
+  are not probeable across workspaces.
+
+  **Budget integrity (two real defects fixed).** `checkAndReserveBudget` was a
+  read-then-write with no guard. Concurrent reservations for _distinct_ keys
+  could both observe headroom and both commit, over-spending the cap; concurrent
+  retries of the _same_ key all passed the pre-read and the losers crashed on
+  the unique constraint instead of resolving idempotently. Both are now closed:
+  a constraint violation resolves to the winner's row, and after insert the
+  ledger prefix up to and including the new reservation is re-summed so the row
+  that actually crossed the cap is compensated (released) while earlier writers
+  stand — first-writer-wins. Proven with `Promise.all` races: two 600-cent
+  reservations against a 1,000-cent cap yield exactly one winner; ten 250-cent
+  racers never exceed the limit; five concurrent same-key retries reserve once.
+  **The durable fix under Postgres is a `SERIALIZABLE` transaction (or
+  `SELECT … FOR UPDATE` on the policy row) around the read-and-insert** — that
+  cannot be exercised without a live database, so the compensating guard is what
+  is actually tested here.
+
+  **Crash-point recovery.** Activity-level replay tests cover both dangerous
+  windows: a worker dying _after persistence, before dispatch_ (a retry reuses
+  the attempt, submits to the provider exactly once, reserves once) and _after
+  dispatch, before persistence_ (a re-polled terminal attempt replays its
+  outcome with no second asset, no second charge, no second release). A
+  test-fidelity gap was closed along the way: the in-memory store did not
+  enforce the schema's `@@unique([workspaceId, checksum, kind])` on `Asset`, so
+  a missing checksum-dedup in an Activity could have passed tests while failing
+  against Postgres.
+
+  **Signal resilience.** Duplicate delivery, late re-delivery after the gate
+  closed, a `FINAL` payload on the `CONCEPT` channel, a signal for a
+  non-pending gate, an unverifiable (forged) approval, a gate-mismatched
+  approval, a burst of distinct approvals, and a signal arriving _before_ the
+  gate opened — each is driven at the real workflow, and in every case the gate
+  is crossed at most once and a bad signal poisons nothing that follows.
+
+  **Config and secrets.** `workerEnvSchema` now **fails closed**: selecting
+  `REASONING_PROVIDER=claude` without `ANTHROPIC_API_KEY` is a startup error
+  naming the variable, rather than the previously-documented-but-unenforced
+  caller responsibility that could silently degrade production to the
+  deterministic mock. `createLogger` gained pino redaction — it previously had
+  none — censoring provider credentials, connection strings, auth headers, and
+  model payloads (prompts and attachments, which carry brand-confidential
+  material and signed URLs) at root and two levels deep, while deliberately
+  leaving correlation identifiers (`workspaceId`, `campaignId`,
+  `workflowRunId`, `correlationId`, `idempotencyKey`, `invocationId`) readable.
+  `.env.example` is asserted to contain no real-looking credential and to
+  default to the mock provider.
+
+  **Enforced in code vs. still deferred.** Enforced: membership, permission,
+  campaign ownership, child-resource association, cross-tenant 404s, budget
+  idempotency and over-commit compensation, activity replay safety, signal
+  handling, config fail-closed, log redaction. Deferred and unchanged:
+  real caller authentication (the request-supplied `userId` remains the
+  documented temporary development identity — M14 hardens what an identity may
+  _do_, never proves _who_ it is), applied database migrations, live
+  Postgres/Temporal/MinIO/ffmpeg, real media and export providers, and the
+  licensing check at Final QA (§7.2 item 1).
+
+  _Test:_ 83 `apps/api` authorization/isolation tests; 13 budget-integrity
+  concurrency tests; 7 crash-recovery replay tests; 8 signal-resilience tests;
+  21 log-redaction tests; 11 config-safety tests. **Limitation:** a true
+  kill-the-worker integration test needs a live Temporal server, which this
+  environment does not have (see
+  `packages/testing/src/temporal-test-environment.ts`); what is proven is that
+  re-invoking any Activity with identical input is safe at every crash point,
+  not Temporal's own delivery and heartbeat behaviour around it.
 
 ---
 

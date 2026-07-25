@@ -118,6 +118,26 @@ export type BudgetCheckResult =
  * configure them. Idempotent: replaying the same `idempotencyKey` against the
  * same policy returns the existing reservation rather than double-reserving
  * (CLAUDE.md workflow-idempotency rule).
+ *
+ * **M14 — concurrency.** The headroom check is a read followed by a write, so
+ * two callers can both observe enough budget before either has written. Two
+ * guards close that window without requiring a database transaction:
+ *
+ * 1. *Duplicate keys.* Concurrent retries of the SAME key all pass the
+ *    pre-read, so the losers hit the `(budgetPolicyId, idempotencyKey)` unique
+ *    constraint. That violation is caught and resolved by re-reading the row
+ *    the winner wrote, so a retry storm is idempotent rather than an error.
+ * 2. *Over-commitment.* After inserting, the ledger is re-read and the total
+ *    re-checked. A reservation that turns out to have crossed the limit is
+ *    compensated — released immediately and reported as `BUDGET_EXCEEDED` — so
+ *    the committed total can never exceed the configured cap even when several
+ *    distinct dispatches race.
+ *
+ * The durable fix under Postgres is a `SERIALIZABLE` transaction (or a
+ * `SELECT ... FOR UPDATE` on the policy row) around the read-and-insert; that
+ * cannot be exercised in this environment, which has no live database, so the
+ * compensating guard above is what is actually tested. See
+ * docs/architecture.md §8's M14 entry.
  */
 export async function checkAndReserveBudget(
   db: BudgetDataSource,
@@ -154,18 +174,65 @@ export async function checkAndReserveBudget(
     };
   }
 
-  const reservation = await db.budgetLedgerEntry.create({
-    data: {
-      workspaceId: request.workspaceId,
-      budgetPolicyId: policy.id,
-      entryType: 'RESERVATION',
-      amountCents: request.requiredCents,
-      idempotencyKey: request.idempotencyKey,
-      campaignId: request.campaignId,
-      shotId: request.shotId,
-      generationJobRef: request.generationJobRef,
-    },
-  });
+  let reservation: BudgetLedgerEntryRecord;
+  try {
+    reservation = await db.budgetLedgerEntry.create({
+      data: {
+        workspaceId: request.workspaceId,
+        budgetPolicyId: policy.id,
+        entryType: 'RESERVATION',
+        amountCents: request.requiredCents,
+        idempotencyKey: request.idempotencyKey,
+        campaignId: request.campaignId,
+        shotId: request.shotId,
+        generationJobRef: request.generationJobRef,
+      },
+    });
+  } catch (error) {
+    // Guard 1: a concurrent retry of the same key won the race. The unique
+    // constraint is the authority — resolve to the row it wrote.
+    const winner = await db.budgetLedgerEntry.findFirst({
+      where: { budgetPolicyId: policy.id, idempotencyKey: request.idempotencyKey },
+    });
+    if (winner) return { ok: true, policy, reservation: winner };
+    throw error;
+  }
+
+  // Guard 2: re-read and re-check, first-writer-wins. Another dispatch may
+  // have committed between this call's read and its write, so the ledger
+  // prefix up to and including this reservation is re-summed: if THIS row is
+  // the one that crossed the cap it is compensated, while everything written
+  // before it stands. Without the prefix rule every racer would see the
+  // over-commit and all of them would back out, wasting headroom that one of
+  // them was entitled to.
+  const committed = await db.budgetLedgerEntry.findMany({ where: { budgetPolicyId: policy.id } });
+  const ownIndex = committed.findIndex((e) => e.id === reservation.id);
+  const prefix = ownIndex >= 0 ? committed.slice(0, ownIndex + 1) : committed;
+  if (computeSpentCents(prefix) > policy.limitCents) {
+    await db.budgetLedgerEntry.create({
+      data: {
+        workspaceId: request.workspaceId,
+        budgetPolicyId: policy.id,
+        entryType: 'RELEASE',
+        amountCents: request.requiredCents,
+        idempotencyKey: `${request.idempotencyKey}:overcommit-release`,
+        campaignId: request.campaignId,
+        shotId: request.shotId,
+        generationJobRef: request.generationJobRef,
+      },
+    });
+    return {
+      ok: false,
+      error: new CampaignTransitionError({
+        type: 'BUDGET_EXCEEDED',
+        level: request.level,
+        scopeId: request.scopeId,
+        requiredCents: request.requiredCents,
+        remainingCents: Math.max(0, policy.limitCents - spent),
+      }),
+    };
+  }
+
   return { ok: true, policy, reservation };
 }
 

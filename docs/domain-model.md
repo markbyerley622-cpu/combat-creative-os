@@ -336,6 +336,23 @@ shot-generation loop in this milestone; extending bounded retries to these
 three loops is expected before production hardening (architecture.md §8,
 M14).
 
+**M14 hardening notes.** Two invariants this document describes were previously
+enforced only by convention and are now enforced by code and covered by tests:
+
+- _Resource association, not just tenancy._ A repository call that folds
+  `workspaceId` into its lookup proves the row belongs to the tenant, but not
+  that it belongs to the **campaign** being acted on. Two campaigns in one
+  workspace are distinct resources, so `apps/api` now verifies a client-supplied
+  `setId` / `creativeVariantId` / `variantAssetId` against the path campaign
+  before use (`assertBelongsToCampaign`). Cross-tenant lookups answer 404 rather
+  than 403, so ids stay unprobeable.
+- _Budget reservation is compensating, not transactional._ `BudgetLedgerEntry`
+  is append-only and every amount is derived from it, so a reservation is a
+  read-then-write. Under concurrency the ledger prefix up to a new reservation
+  is re-summed and the row that crossed the cap is released, leaving earlier
+  writers standing. The durable fix is a `SERIALIZABLE` transaction in Postgres;
+  the compensating guard is what this environment can actually test.
+
 ---
 
 ## 5. Deriving facts from persisted state

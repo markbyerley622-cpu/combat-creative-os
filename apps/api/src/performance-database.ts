@@ -1,5 +1,7 @@
 import type { LearningDataSource, PerformanceDataSource, PrismaClient } from '@combat/database';
 import { createCampaignDatabase, type CampaignDatabase } from './campaign-database';
+import { createAssetDatabase, type AssetDatabase } from './asset-database';
+import { createVariantDatabase, type VariantDatabase } from './variant-database';
 
 /**
  * The M13 performance/learning routes' data-source contract: campaign +
@@ -7,7 +9,16 @@ import { createCampaignDatabase, type CampaignDatabase } from './campaign-databa
  * PrismaClient to the narrow *DataSource interfaces" pattern as its siblings;
  * tests inject an in-memory fake.
  */
-export type PerformanceDatabase = CampaignDatabase & PerformanceDataSource & LearningDataSource;
+/**
+ * M14 widens this with the asset + variant sources the ingestion route needs to
+ * verify that a client-supplied `creativeVariantId`/`variantAssetId` actually
+ * belongs to the path campaign before it is pinned as provenance.
+ */
+export type PerformanceDatabase = CampaignDatabase &
+  AssetDatabase &
+  VariantDatabase &
+  PerformanceDataSource &
+  LearningDataSource;
 
 function undef<T>(v: T | null): T | undefined {
   return v ?? undefined;
@@ -16,6 +27,8 @@ function undef<T>(v: T | null): T | undefined {
 export function createPerformanceDatabase(prisma: PrismaClient): PerformanceDatabase {
   return {
     ...createCampaignDatabase(prisma),
+    ...createAssetDatabase(prisma),
+    ...createVariantDatabase(prisma),
     performanceObservation: {
       create: async (args) =>
         mapObservation(await prisma.performanceObservation.create({ data: args.data as never })),
