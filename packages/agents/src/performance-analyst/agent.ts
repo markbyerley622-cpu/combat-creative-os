@@ -5,17 +5,18 @@ import {
   defineAgent,
 } from '@combat/agent-runtime';
 import { PerformanceAnalystInputSchema, PerformanceAnalystResultSchema } from './schema';
-import { V1 } from './prompts/v1';
+import { V2 } from './prompts/v2';
 
 export const performanceAnalystAgent = defineAgent({
   name: 'performance-analyst',
   displayName: 'Performance Analyst',
-  description: 'Distills per-platform performance metrics into reusable Learnings.',
+  description:
+    'Distills closed-window performance observations into evidence-cited, reusable creative learnings.',
   implemented: true,
   disabledByDefault: false,
   inputSchema: PerformanceAnalystInputSchema,
   resultSchema: PerformanceAnalystResultSchema,
-  promptVersion: V1,
+  promptVersion: V2,
   modelPolicy: DEFAULT_MODEL_POLICY,
   tokenBudget: DEFAULT_TOKEN_BUDGET,
   toolPolicy: NO_TOOL_POLICY,

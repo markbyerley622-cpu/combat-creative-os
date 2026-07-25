@@ -20,6 +20,8 @@ export * from './dispatch-variant-render-activity';
 export * from './poll-variant-render-activity';
 export * from './cancel-variant-render-activity';
 export * from './run-variant-final-qa-activity';
+export * from './ingest-performance-observations-activity';
+export * from './run-performance-analyst-activity';
 export * from './dispatch-shot-generation-activity';
 export * from './poll-shot-generation-activity';
 export * from './cancel-shot-generation-activity';

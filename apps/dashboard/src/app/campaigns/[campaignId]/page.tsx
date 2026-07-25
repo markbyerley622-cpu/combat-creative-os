@@ -110,6 +110,14 @@ function ProductionProgress({ campaignId }: { campaignId: string }) {
           <Link href={`/campaigns/${campaignId}/variants`}>View delivery variants →</Link>
         </p>
       )}
+      {/* M13: performance history is always reachable — data can be recorded
+          for a campaign at any point after it has run. */}
+      <p>
+        <Link href={`/campaigns/${campaignId}/performance`}>View campaign performance →</Link>
+      </p>
+      <p>
+        <Link href="/learnings">View creative learnings →</Link>
+      </p>
       {status.workflow?.status === 'BLOCKED' && (
         <ErrorState message="This campaign's workflow is blocked and needs attention." />
       )}

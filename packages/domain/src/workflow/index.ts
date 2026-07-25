@@ -9,3 +9,6 @@ export * from './shot-generation-workflow-contracts';
 export * from './compositing-workflow-contracts';
 export * from './variant-workflow-contracts';
 export * from './variant-cut-validation';
+export * from './performance-analysis-workflow-contracts';
+export * from './learning-confidence';
+export * from './learning-context';

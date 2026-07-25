@@ -55,6 +55,11 @@ import type {
   DeliveryProfileRecord,
 } from '../delivery-profile-repository';
 import type {
+  PerformanceDataSource,
+  PerformanceObservationRecord,
+} from '../performance-repository';
+import type { LearningDataSource, LearningRecordRecord } from '../learning-repository';
+import type {
   CreativeVariantRecord,
   VariantDataSource,
   VariantGenerationAttemptRecord,
@@ -158,7 +163,9 @@ export class InMemoryCampaignStore
     TimelineDataSource,
     SoundDesignDataSource,
     DeliveryProfileDataSource,
-    VariantDataSource
+    VariantDataSource,
+    PerformanceDataSource,
+    LearningDataSource
 {
   campaigns: CampaignRecord[] = [];
   audits: CampaignTransitionAuditRecord[] = [];
@@ -201,6 +208,8 @@ export class InMemoryCampaignStore
   variantGenerationJobRecords: VariantGenerationJobRecord[] = [];
   variantGenerationAttemptRecords: VariantGenerationAttemptRecord[] = [];
   creativeVariantRecords: CreativeVariantRecord[] = [];
+  performanceObservationRecords: PerformanceObservationRecord[] = [];
+  learningRecordRecords: LearningRecordRecord[] = [];
   renderJobRecords: RenderJobRecord[] = [];
   editDecisionListRecords: EditDecisionListRecord[] = [];
   editDecisionEntryRecords: EditDecisionEntryRecord[] = [];
@@ -1022,6 +1031,65 @@ export class InMemoryCampaignStore
       if (!variant) throw new Error(`creative variant ${where.id} not found`);
       Object.assign(variant, data);
       return variant;
+    },
+  };
+
+  performanceObservation: PerformanceDataSource['performanceObservation'] = {
+    create: async ({ data }) => {
+      const record: PerformanceObservationRecord = {
+        id: randomUUID(),
+        createdAt: new Date(),
+        ...data,
+      };
+      this.performanceObservationRecords.push(record);
+      return record;
+    },
+    findFirst: async ({ where }) => {
+      if ('id' in where) {
+        return (
+          this.performanceObservationRecords.find(
+            (o) => o.id === where.id && o.workspaceId === where.workspaceId,
+          ) ?? null
+        );
+      }
+      return (
+        this.performanceObservationRecords.find(
+          (o) => o.idempotencyKey === where.idempotencyKey && o.workspaceId === where.workspaceId,
+        ) ?? null
+      );
+    },
+    findMany: async ({ where }) =>
+      this.performanceObservationRecords.filter(
+        (o) =>
+          o.workspaceId === where.workspaceId &&
+          (where.campaignId === undefined || o.subject.campaignId === where.campaignId) &&
+          (where.creativeVariantId === undefined ||
+            o.subject.creativeVariantId === where.creativeVariantId),
+      ),
+  };
+
+  learningRecord: LearningDataSource['learningRecord'] = {
+    create: async ({ data }) => {
+      const record: LearningRecordRecord = { id: randomUUID(), createdAt: new Date(), ...data };
+      this.learningRecordRecords.push(record);
+      return record;
+    },
+    findFirst: async ({ where }) =>
+      this.learningRecordRecords.find(
+        (l) => l.id === where.id && l.workspaceId === where.workspaceId,
+      ) ?? null,
+    findMany: async ({ where }) =>
+      this.learningRecordRecords.filter(
+        (l) =>
+          l.workspaceId === where.workspaceId &&
+          (where.learningKey === undefined || l.learningKey === where.learningKey) &&
+          (where.sourceCampaignId === undefined || l.sourceCampaignId === where.sourceCampaignId),
+      ),
+    update: async ({ where, data }) => {
+      const record = this.learningRecordRecords.find((l) => l.id === where.id);
+      if (!record) throw new Error(`learning record ${where.id} not found`);
+      Object.assign(record, data);
+      return record;
     },
   };
 

@@ -235,20 +235,33 @@ const VALID_SAMPLES: Partial<Record<SpecialistAgentName, { input: unknown; resul
   },
   'performance-analyst': {
     input: {
-      metrics: [
+      observations: [
         {
+          observationId: '00000000-0000-0000-0000-0000000000a1',
           platform: 'TIKTOK',
-          impressions: 1000,
-          clicks: 50,
-          conversions: 5,
-          spendCents: 2000,
-          ctr: 0.05,
+          durationSeconds: 15,
+          periodStart: '2026-07-18T00:00:00.000Z',
+          periodEnd: '2026-07-25T00:00:00.000Z',
+          impressions: 30000,
+          clicks: 1500,
+          conversions: 90,
+          spendCents: 60000,
+          clickThroughRate: 0.05,
+          conversionRate: 0.06,
         },
       ],
     },
     result: {
       learnings: [
-        { insight: 'TikTok outperformed on CTR', appliesTo: 'strategy', tags: ['tiktok'] },
+        {
+          learningKey: 'short-hook-holds-attention',
+          insight: 'The 15s TikTok cut reached a 5% click-through rate across 30000 impressions.',
+          appliesTo: 'strategy',
+          tags: ['hook'],
+          platforms: ['TIKTOK'],
+          durationsSeconds: [15],
+          evidenceObservationIds: ['00000000-0000-0000-0000-0000000000a1'],
+        },
       ],
     },
   },

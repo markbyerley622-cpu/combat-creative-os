@@ -3,8 +3,11 @@ import {
   addMembership,
   createAssetWithProvenance,
   createQualityAssessmentForAsset,
+  createLearningRecord,
   createVariantSpecification,
   getOrCreateCreativeVariant,
+  ingestPerformanceObservation,
+  reviewLearningRecord,
   getOrCreateVariantGenerationAttempt,
   getOrCreateVariantGenerationJob,
   updateCreativeVariant,
@@ -32,6 +35,8 @@ export const FIXTURES = {
   campaignId: '44444444-4444-4444-4444-444444444444',
   /** M12: a second campaign parked at VARIANT_QA with all three variants cut. */
   variantCampaignId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+  /** M13: a distributed campaign with closed performance data and learnings. */
+  performanceCampaignId: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
 };
 
 function buildFakeWorkflowClient(): WorkflowClient {
@@ -329,10 +334,104 @@ async function seedVariants(store: InMemoryCampaignStore) {
   }
 }
 
+/**
+ * M13 fixture: a DISTRIBUTED campaign with two closed-window observations and
+ * two learnings — one APPROVED at MEDIUM confidence (injectable) and one
+ * PROPOSED at LOW confidence (never injectable, reviewable in the dashboard).
+ * Lets the performance and learning screens be exercised end to end without a
+ * platform connector, which M13 deliberately does not have.
+ */
+async function seedPerformance(store: InMemoryCampaignStore) {
+  const workspaceId = FIXTURES.workspaceId;
+  const campaignId = FIXTURES.performanceCampaignId;
+  store.seedCampaign({
+    id: campaignId,
+    workspaceId,
+    name: 'Combat Reviews Q3 Launch — performance',
+    currentStage: 'DISTRIBUTED',
+  });
+
+  const window = {
+    periodStart: new Date('2026-07-18T00:00:00Z'),
+    periodEnd: new Date('2026-07-25T00:00:00Z'),
+  };
+  const observations = [];
+  for (const [externalPostId, clicks] of [
+    ['reels-15s', 1_500],
+    ['reels-10s', 900],
+  ] as const) {
+    // eslint-disable-next-line no-await-in-loop -- deterministic ordered fixture setup
+    const { observation } = await ingestPerformanceObservation(store, workspaceId, {
+      subject: {
+        platform: 'INSTAGRAM_REELS',
+        externalPostId,
+        campaignId,
+        durationSeconds: externalPostId === 'reels-15s' ? 15 : 10,
+      },
+      source: 'FIXTURE',
+      ...window,
+      raw: {
+        impressions: 30_000,
+        clicks,
+        conversions: Math.round(clicks / 20),
+        spendCents: 60_000,
+      },
+      fixtureRef: 'fixtures/vertical-short-form-week-30.json',
+      now: new Date('2026-07-26T00:00:00Z'),
+    });
+    observations.push(observation);
+  }
+
+  const evidence = observations.map((o) => ({
+    performanceObservationId: o.id,
+    campaignId,
+    platform: 'INSTAGRAM_REELS' as const,
+    impressions: o.normalized.impressions,
+  }));
+
+  const { record: approved } = await createLearningRecord(store, workspaceId, {
+    learningKey: 'fifteen-second-cut-outperforms-ten',
+    insight:
+      'The 15s Reels cut reached a 5.0% click-through rate against 3.0% for the 10s cut over the same window.',
+    scope: 'STRATEGY',
+    applicability: {
+      platforms: ['INSTAGRAM_REELS'],
+      durationsSeconds: [15, 10],
+      tags: ['cut-length'],
+    },
+    confidence: 'MEDIUM',
+    evidence,
+    totalImpressions: 60_000,
+    sourceCampaignId: campaignId,
+    createdByAgentInvocationId: 'fixture-analyst-invocation-1',
+    promptVersionId: 'fixture-prompt-version-1',
+  });
+  await reviewLearningRecord(store, workspaceId, approved.id, {
+    status: 'APPROVED',
+    reviewedByUserId: FIXTURES.ownerUserId,
+  });
+
+  // A thin-evidence learning: stays PROPOSED and, even if approved, is never
+  // injected (LOW confidence is below the injection floor).
+  await createLearningRecord(store, workspaceId, {
+    learningKey: 'warm-lighting-may-help',
+    insight: 'Warm gym lighting appeared in the higher-converting cut of this single window.',
+    scope: 'CONCEPT',
+    applicability: { platforms: ['INSTAGRAM_REELS'], durationsSeconds: [], tags: ['lighting'] },
+    confidence: 'LOW',
+    evidence: [evidence[0]!],
+    totalImpressions: 30_000,
+    sourceCampaignId: campaignId,
+    createdByAgentInvocationId: 'fixture-analyst-invocation-2',
+    promptVersionId: 'fixture-prompt-version-1',
+  });
+}
+
 async function main() {
   const store = new InMemoryCampaignStore();
   await seed(store);
   await seedVariants(store);
+  await seedPerformance(store);
   const app = buildServer({
     logger: createLogger({ serviceName: 'api-fake', level: 'silent' }),
     approvalDb: store,
@@ -344,6 +443,7 @@ async function main() {
     soundDesignDb: store,
     finalQaDb: store,
     variantDb: store,
+    performanceDb: store,
     storageProvider: new MockStorageProvider(),
     reviewProvider: new MockReviewProvider(),
     workflowClient: buildFakeWorkflowClient(),

@@ -500,6 +500,98 @@ export interface VariantsView {
   budget: { workspace: BudgetStatusView | null; campaign: BudgetStatusView | null };
 }
 
+// --- M13 performance and learning ---
+
+export interface PerformanceObservationView {
+  id: string;
+  platform: string;
+  externalPostId: string;
+  creativeVariantId: string | null;
+  durationSeconds: number | null;
+  source: string;
+  fixtureRef: string | null;
+  periodStart: string;
+  periodEnd: string;
+  raw: {
+    impressions: number;
+    reach?: number;
+    clicks: number;
+    completions?: number;
+    conversions: number;
+    spendCents: number;
+  };
+  normalized: {
+    impressions: number;
+    clicks: number;
+    conversions: number;
+    spendCents: number;
+    clickThroughRate?: number;
+    completionRate?: number;
+    conversionRate?: number;
+    costPerClickCents?: number;
+    costPerConversionCents?: number;
+  };
+}
+
+export interface CampaignPerformanceView {
+  campaign: { currentStage: string };
+  /** Advisory only — the ingest endpoint re-checks the permission server-side. */
+  caller: { role: string; canIngest: boolean };
+  observations: PerformanceObservationView[];
+}
+
+export interface LearningEvidenceView {
+  performanceObservationId: string;
+  campaignId: string;
+  creativeVariantId?: string;
+  platform: string;
+  impressions: number;
+}
+
+export interface LearningRecordView {
+  id: string;
+  learningKey: string;
+  version: number;
+  insight: string;
+  scope: string;
+  confidence: string;
+  status: string;
+  applicability: { platforms: string[]; durationsSeconds: number[]; tags: string[] };
+  totalImpressions: number;
+  evidence: LearningEvidenceView[];
+  sourceCampaignId: string;
+  createdByAgentInvocationId: string;
+  reviewedByUserId: string | null;
+  superseded: boolean;
+  createdAt: string;
+}
+
+export interface LearningsView {
+  caller: { role: string; canReview: boolean };
+  learnings: LearningRecordView[];
+}
+
+/** Ingestion sources M13 supports — deliberately no real platform connector. */
+export const PERFORMANCE_SOURCE_OPTIONS = ['FIXTURE', 'MANUAL_ENTRY'] as const;
+export type PerformanceSourceOption = (typeof PERFORMANCE_SOURCE_OPTIONS)[number];
+
+export interface PerformanceObservationEntry {
+  platform: DeliveryPlatform;
+  externalPostId: string;
+  creativeVariantId?: string;
+  durationSeconds?: number;
+  periodStart: string;
+  periodEnd: string;
+  raw: {
+    impressions: number;
+    clicks: number;
+    conversions: number;
+    spendCents: number;
+    reach?: number;
+    completions?: number;
+  };
+}
+
 export interface ApiClientOptions {
   baseUrl?: string;
 }
@@ -735,6 +827,48 @@ export function createApiClient(
       request<{ cancelRequested: boolean }>(
         `/workspaces/${workspaceId}/campaigns/${campaignId}/variants/cancel`,
         { method: 'POST', body: JSON.stringify({ userId }) },
+        baseUrl,
+      ),
+    getCampaignPerformance: (campaignId: string) =>
+      request<CampaignPerformanceView>(
+        `/workspaces/${workspaceId}/campaigns/${campaignId}/performance?userId=${userId}`,
+        undefined,
+        baseUrl,
+      ),
+
+    /**
+     * Deterministic fixture / manual ingestion. There is no platform connector
+     * in M13 — `source` is FIXTURE or MANUAL_ENTRY only.
+     */
+    ingestPerformance: (
+      campaignId: string,
+      input: {
+        source: PerformanceSourceOption;
+        fixtureRef?: string;
+        observations: PerformanceObservationEntry[];
+      },
+    ) =>
+      request<{
+        ingested: number;
+        deduplicated: number;
+        observations: { observationId: string; externalPostId: string; alreadyExisted: boolean }[];
+      }>(
+        `/workspaces/${workspaceId}/campaigns/${campaignId}/performance/observations`,
+        { method: 'POST', body: JSON.stringify({ userId, ...input }) },
+        baseUrl,
+      ),
+
+    getLearnings: () =>
+      request<LearningsView>(
+        `/workspaces/${workspaceId}/learnings?userId=${userId}`,
+        undefined,
+        baseUrl,
+      ),
+
+    reviewLearning: (learningId: string, decision: 'APPROVED' | 'REJECTED') =>
+      request<{ id: string; status: string; version: number }>(
+        `/workspaces/${workspaceId}/learnings/${learningId}/review`,
+        { method: 'POST', body: JSON.stringify({ userId, decision }) },
         baseUrl,
       ),
   };

@@ -31,6 +31,8 @@ import { createFinalQaDatabase, type FinalQaDatabase } from './final-qa-database
 import { registerFinalQaRoutes } from './final-qa-routes';
 import { createVariantDatabase, type VariantDatabase } from './variant-database';
 import { registerVariantRoutes } from './variant-routes';
+import { createPerformanceDatabase, type PerformanceDatabase } from './performance-database';
+import { registerPerformanceRoutes } from './performance-routes';
 import { createWorkflowClient, type TemporalEnv } from './temporal-client';
 
 /**
@@ -78,6 +80,8 @@ export interface BuildServerOptions {
   finalQaDb?: FinalQaDatabase;
   /** Overrides the M12 variant routes' `*DataSource` adapter — tests inject an in-memory fake here. */
   variantDb?: VariantDatabase;
+  /** Overrides the M13 performance/learning routes' `*DataSource` adapter — tests inject an in-memory fake here. */
+  performanceDb?: PerformanceDatabase;
   /** The Frame.io-compatible review provider; defaults to the deterministic mock (no real Frame.io adapter exists — M8/§7.1). */
   reviewProvider?: ReviewProvider;
   workflowClient?: WorkflowClient;
@@ -110,6 +114,7 @@ export function buildServer({
   soundDesignDb = createSoundDesignDatabase(prisma),
   finalQaDb = createFinalQaDatabase(prisma),
   variantDb = createVariantDatabase(prisma),
+  performanceDb = createPerformanceDatabase(prisma),
   reviewProvider = new MockReviewProvider(),
   temporalEnv = { TEMPORAL_ADDRESS: 'localhost:7233', TEMPORAL_NAMESPACE: 'default' },
   workflowClient = createWorkflowClient(temporalEnv),
@@ -165,6 +170,7 @@ export function buildServer({
   registerSoundDesignRoutes(app, { db: soundDesignDb });
   registerFinalQaRoutes(app, { db: finalQaDb });
   registerVariantRoutes(app, { db: variantDb, storageProvider, workflowClient });
+  registerPerformanceRoutes(app, { db: performanceDb });
 
   return app;
 }

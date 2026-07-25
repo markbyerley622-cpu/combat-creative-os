@@ -73,7 +73,9 @@ shape.
 | VariantGenerationJob     | `schemas/variant-generation-job.ts`   | M12 — mutable status row grouping the bounded-retry render attempts for one VariantSpecification (same split as CompositionJob)                                                                                                                                          |
 | VariantGenerationAttempt | `schemas/variant-generation-job.ts`   | M12 — immutable append-only render attempt; provider ids, budget reservation + actual usage, typed failure                                                                                                                                                               |
 | CreativeVariant          | `schemas/creative-variant.ts`         | a rendered delivery-spec-conformant cut; M12 links it to its VariantSpecification and its VARIANT_QA assessment                                                                                                                                                          |
-| PerformanceMetrics       | `schemas/performance-metrics.ts`      | per CreativeVariant, per platform                                                                                                                                                                                                                                        |
+| PerformanceMetrics       | `schemas/performance-metrics.ts`      | M0 per-variant rollup shape; **superseded by `PerformanceObservation`** as the real ingestion entity (no post identity, no source, no window, caller-supplied `ctr`)                                                                                                     |
+| PerformanceObservation   | `schemas/performance-observation.ts`  | M13 — architecture.md §4.1's `PerformanceRecord`: one **immutable** measurement of one published creative over one **closed** window; post identity + source provenance + raw counters + derived rates. Idempotent per (post, platform, window)                          |
+| LearningRecord           | `schemas/learning-record.ts`          | M13 — architecture.md §4.1's `Learning`, promoted into a real table: **immutable**, versioned per `learningKey`, with explicit evidence references, **derived** confidence, applicability and agent/prompt provenance                                                    |
 | PromptTemplate           | `schemas/prompt-template.ts`          | one per agent/purpose                                                                                                                                                                                                                                                    |
 | PromptVersion            | `schemas/prompt-template.ts`          | monotonically versioned; pinned by ShotSpecification                                                                                                                                                                                                                     |
 | BudgetPolicy             | `schemas/budget-policy.ts`            | cap at WORKSPACE/CAMPAIGN/SHOT/PROVIDER level                                                                                                                                                                                                                            |
@@ -458,6 +460,24 @@ the pure `validateVariantCut`, against the persisted `Timeline` entries, the
 `RoughEditSpecification`'s caption overlays and the `SoundDesignPlan`'s discrete
 cues — never against a duration guess. M12 stops at EXPORTING (BLOCKED, no
 export implementation).
+
+**M13 adds no transition facts at all**, which is the point. Performance
+analysis writes only `PerformanceObservation` and `LearningRecord` rows;
+neither is read by `computeTransitionFacts`, so no amount of performance data
+or distilled learning can make a campaign transition become valid. The
+decoupling architecture.md §3.1 requires is therefore enforced by the fact
+layer as well as by the workflow's own wiring: `PerformanceAnalysisWorkflow`
+proxies one Activity, defines no signals, and carries no stage, approval, asset
+or export field in its state.
+
+Learning context flows the other way — from the knowledge store _into_ an agent
+prompt, never into a transition. `selectLearningContext` admits only APPROVED,
+non-superseded, workspace-scoped records at or above MEDIUM confidence whose
+applicability overlaps the target campaign, caps them at 5, and renders each
+with its confidence band, evidence weight and source record id. A learning is
+advisory context offered alongside the approved brief; the brief's own fields
+are passed verbatim and are not overridable by any learning, and a human with
+`APPROVE_CONCEPT` must approve a record before it is ever injected.
 
 M11 stops at VARIANT_GENERATION (BLOCKED, no Variant
 Generator until M12).

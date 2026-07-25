@@ -19,3 +19,8 @@ export * from './variant-workflow-activities';
 export * from './variant-workflow-signals';
 // variant-workflow-state is intentionally NOT re-exported here — same
 // name-collision rationale as compositing-workflow-state above.
+export * from './performance-analysis-workflow';
+export * from './performance-analysis-workflow-activities';
+export * from './performance-analysis-workflow-signals';
+// performance-analysis-workflow-state is intentionally NOT re-exported here —
+// same name-collision rationale as compositing/variant workflow state above.

@@ -174,6 +174,71 @@ describe('createApiClient — M10 sound design', () => {
   });
 });
 
+describe('createApiClient — M13 performance and learning', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('GETs a campaign performance history scoped to workspace + user', async () => {
+    const fetchMock = mockFetchOnce(200, { observations: [] });
+    vi.stubGlobal('fetch', fetchMock);
+    const client = createApiClient('ws-1', 'user-1', { baseUrl: 'http://api.test' });
+    await client.getCampaignPerformance('camp-1');
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://api.test/workspaces/ws-1/campaigns/camp-1/performance?userId=user-1',
+      expect.anything(),
+    );
+  });
+
+  it('POSTs a fixture ingestion batch', async () => {
+    const fetchMock = mockFetchOnce(202, { ingested: 1, deduplicated: 0, observations: [] });
+    vi.stubGlobal('fetch', fetchMock);
+    const client = createApiClient('ws-1', 'user-1', { baseUrl: 'http://api.test' });
+    const observations = [
+      {
+        platform: 'TIKTOK' as const,
+        externalPostId: 'post-1',
+        periodStart: '2026-07-18T00:00:00.000Z',
+        periodEnd: '2026-07-25T00:00:00.000Z',
+        raw: { impressions: 10, clicks: 1, conversions: 0, spendCents: 5 },
+      },
+    ];
+    await client.ingestPerformance('camp-1', { source: 'FIXTURE', observations });
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://api.test/workspaces/ws-1/campaigns/camp-1/performance/observations',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ userId: 'user-1', source: 'FIXTURE', observations }),
+      }),
+    );
+  });
+
+  it('GETs the workspace learning records', async () => {
+    const fetchMock = mockFetchOnce(200, { learnings: [] });
+    vi.stubGlobal('fetch', fetchMock);
+    const client = createApiClient('ws-1', 'user-1', { baseUrl: 'http://api.test' });
+    await client.getLearnings();
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://api.test/workspaces/ws-1/learnings?userId=user-1',
+      expect.anything(),
+    );
+  });
+
+  it('POSTs a learning review decision', async () => {
+    const fetchMock = mockFetchOnce(200, { id: 'l-1', status: 'APPROVED', version: 1 });
+    vi.stubGlobal('fetch', fetchMock);
+    const client = createApiClient('ws-1', 'user-1', { baseUrl: 'http://api.test' });
+    await client.reviewLearning('l-1', 'APPROVED');
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://api.test/workspaces/ws-1/learnings/l-1/review',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ userId: 'user-1', decision: 'APPROVED' }),
+      }),
+    );
+  });
+});
+
 describe('createApiClient — M12 delivery variants', () => {
   afterEach(() => {
     vi.unstubAllGlobals();

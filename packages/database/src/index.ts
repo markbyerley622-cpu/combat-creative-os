@@ -18,6 +18,8 @@ export * from './repositories/shot-generation-repository';
 export * from './repositories/quality-assessment-repository';
 export * from './repositories/delivery-profile-repository';
 export * from './repositories/variant-repositories';
+export * from './repositories/performance-repository';
+export * from './repositories/learning-repository';
 export * from './repositories/shot-selection-repository';
 export * from './repositories/candidate-eligibility-repository';
 export * from './repositories/rough-edit-specification-repository';

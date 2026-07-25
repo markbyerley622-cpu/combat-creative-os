@@ -4,59 +4,59 @@ This file is the operating contract for anyone (human or agent) working in
 this repository. It is deliberately short — for the full design rationale
 see `docs/architecture.md` and `docs/adr/`.
 
-Current milestone: **M12, delivery variants, done** — the existing
-`variant-generator` agent is wired into a new deterministic `VariantWorkflow`
-child of `CampaignProductionWorkflow` (one per VARIANT_GENERATION visit), which
-cuts one delivery variant per duration in the campaign's `DeliveryProfile`,
-renders each through the existing `MotionGraphicsProvider`, and **re-runs Final
-QA over every completed variant**.
+Current milestone: **M13, performance analysis & creative learning, done** —
+a deterministic, **provider-independent** learning loop. Closed-window
+performance data is ingested from fixtures or manual entry as immutable
+`PerformanceObservation`s (architecture.md §4.1's `PerformanceRecord`,
+implemented — post identity + source provenance + raw counters + derived rates,
+idempotent per `(post, platform, window)`); the existing `performance-analyst`
+agent distils them into `LearningRecord`s (§4.1's `Learning`, promoted out of
+the agents package into a real versioned table with explicit evidence
+references and full agent/prompt provenance).
 
-**Delivery-profile decision (resolves `docs/architecture.md` §7.2 open question
-5):** `VERTICAL_SHORT_FORM_V1` — Instagram Reels / TikTok / YouTube Shorts share
-one vertical contract, so one profile covers all three: 1080×1920, 9:16, 30fps,
-burned-in captions required, configurable safe-area metadata, durations
-15s/10s/6s, and the CTA must remain visible in the final two seconds for any
-variant of at least 10s (the 6s cutdown is exempt — "where duration permits").
-It is an immutable, versioned `DeliveryProfile` entity, not a constant; every
-`VariantSpecification` pins the exact profile key+version it was cut against.
+**Three properties the agent cannot talk its way past:** completed data only (a
+window that has not elapsed is refused at the persistence boundary and filtered
+out before analysis); evidence must be real (every cited observation id is
+checked against what was actually supplied — a bad citation is a typed
+`UNSUPPORTED_EVIDENCE` failure, not a persisted learning); and **confidence is
+derived, never asserted** (`deriveLearningConfidence` computes the band from
+observation count _and_ impression volume, so one observation is always LOW
+however large, and the agent's schema has no confidence field at all).
 
-`runVariantGeneratorActivity` **refuses any master that did not pass Final QA**,
-then hands the agent only the legal cut boundaries derived from the persisted
-`Timeline`, the discrete SFX/VO and caption spans it may not split, the parent
-CTA span, and the profile's requirements — never a repository, storage key,
-provider or other agent. Its answer is checked by the pure `validateVariantCut`
-**before anything is written** (duration-vs-target, boundaries on real
-`TimelineEntry` edges, no split clip/caption/CTA/audio cue, narrative order,
-gapless variant timeline, CTA retention + tail rule, caption and safe-area
-requirements); an illegal cut is a typed `INVALID_CUT` failure, not a persisted
-row. Source-asset pins are derived from the rough edit rather than trusted from
-the agent. Four new versioned, workspace-scoped entities — `DeliveryProfile`,
-`VariantSpecification` (**frozen once approved for export**; supersession is the
-only way to change a cut), `VariantGenerationJob`/`VariantGenerationAttempt` —
-carry the full provenance chain, budget reservation/actual usage and retry
-history. Only the Final QA re-run may promote a variant to `READY`, so a render
-alone can never satisfy `variantQAPassed`.
+`PerformanceAnalysisWorkflow` is a **separate top-level workflow**, decoupled
+structurally rather than by convention: it proxies exactly one Activity whose
+only writes are `LearningRecord` rows, defines **no signals**, carries no
+stage/approval/asset/export field, and never calls
+`advanceCampaignStageActivity` — so it cannot advance a stage, satisfy or bypass
+a human gate, modify an approved asset, or trigger an export. It adds no
+transition facts, so no amount of performance data can make a campaign
+transition valid.
 
-Approved FINAL_APPROVAL still enters VARIANT_GENERATION through the untouched
-FINAL human gate. On success the workflow advances VARIANT_GENERATION →
-VARIANT_QA → **EXPORTING, where it reaches BLOCKED** (no export implementation)
-— the exact M12 stopping point. A failing variant routes back through the
-documented VARIANT_QA → VARIANT_GENERATION edge via a bounded AUTO_RETRY
-(`maxVariantRepairAttempts`, since `variantQAFailed` is not exhaustible);
-exhausting it escalates to BLOCKED. `apps/api` gained a read-only
-`GET .../variants`, a signed-preview endpoint and one RBAC-gated
-`POST .../variants/cancel`; `apps/dashboard` gained a variant comparison screen.
-**No export, download or publish surface exists** — asserted by test. All three
-human gates remain unbypassable. See `docs/architecture.md` §8's M12 entry for
-the full accounting and interim decisions (variant renders reuse
-`MotionGraphicsProvider` and write **no real video bytes**, though the
-`VARIANT -> FINAL_MASTER + retained sources` provenance is real; a continuous
-MUSIC bed is deliberately not a hard cut boundary — it is re-mixed to length, so
-only discrete SFX/VO cues bound a cut; variant-QA loudness is nominal, not
-measured). Still no export/distribution, no real caller authentication, no real
+Approved learnings reach the Campaign Strategist and Creative Director as
+**bounded, attributable** context: `selectLearningContext` admits only APPROVED,
+non-superseded, workspace-scoped records at or above MEDIUM confidence whose
+applicability overlaps the target campaign, ranks by confidence and evidence
+weight, and caps at 5 items — each rendered with its confidence band, evidence
+count and source record id so any influenced claim is traceable. It is offered
+**alongside** the approved brief, never in place of it (brief fields are passed
+verbatim and are not overridable), and a human with `APPROVE_CONCEPT` must
+approve a record before it is ever injected. Injection is opt-in via an optional
+`learningDb` dep, so every pre-M13 caller behaves exactly as before.
+`apps/api` gained ingestion (`MANAGE_CAMPAIGNS`), performance history and
+learning listing (`VIEW_REPORTING`) and learning review (`APPROVE_CONCEPT`);
+`apps/dashboard` gained performance and learning-review screens.
+
+**Explicitly deferred: real platform integration.** There is no ad-platform API
+client, OAuth flow, scraper, webhook or credential anywhere — `PerformanceSource`
+is `FIXTURE | MANUAL_ENTRY` only, and the dashboard says so in plain text. A real
+connector would add one source value feeding the same ingestion Activity and
+would change nothing downstream. Also deferred: the `PROMPTING` learning scope is
+persistable but unconsumed, and no scheduler triggers the analysis workflow (it is
+started explicitly). See `docs/architecture.md` §8's M13 entry for the full
+accounting. Still no export/distribution, no real caller authentication, no real
 Veo/Runway/ComfyUI adapter (only the deterministic mock — do not connect one or
-spend money without an explicit, separate decision), **Final QA still performs
-no licensing check** (§7.2 open question 1), and no
+spend money without an explicit, separate decision), **Final QA still performs no
+licensing check** (§7.2 open question 1), and no
 live-Postgres/Temporal/MinIO/ffmpeg environment in this session —
 `apps/api/src/dev-fake-server.ts` (in-memory-backed) is what both `apps/api`'s
 own tests and `apps/dashboard`'s Playwright suite run against instead. Anthropic

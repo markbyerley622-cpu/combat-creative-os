@@ -50,6 +50,8 @@ model Workspace {
   campaignTransitionAudits CampaignTransitionAudit[]
   agentInvocations         AgentInvocation[]
   deliveryProfiles         DeliveryProfile[]
+  performanceObservations  PerformanceObservation[]
+  learningRecords          LearningRecord[]
 
   @@map("workspaces")
 }
@@ -324,6 +326,39 @@ enum VariantGenerationFailureReason {
   STALE_MASTER
 }
 
+/// M13 — where a performance observation came from. Deliberately excludes any
+/// real ad-platform connector: no social/ad API integration, scraping or
+/// credential exists (architecture.md §8's M13 entry). A real connector adds a
+/// value here without changing anything downstream.
+enum PerformanceSource {
+  FIXTURE
+  MANUAL_ENTRY
+}
+
+/// M13 — which agent a learning may ever be offered to. Only STRATEGY and
+/// CONCEPT are consumed today (architecture.md §5: "strategy/concept only").
+enum LearningScope {
+  STRATEGY
+  CONCEPT
+  PROMPTING
+}
+
+/// M13 — derived from evidence volume by `deriveLearningConfidence`, never
+/// asserted by the agent that wrote the insight.
+enum LearningConfidence {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+/// M13 — a learning is written PROPOSED; a human approves it before any agent
+/// can see it.
+enum LearningStatus {
+  PROPOSED
+  APPROVED
+  REJECTED
+}
+
 enum TransitionAuditResult {
   APPLIED
   REJECTED_INVALID_TRANSITION
@@ -373,6 +408,8 @@ model Campaign {
   creativeVariants       CreativeVariant[]
   variantSpecifications  VariantSpecification[]
   variantGenerationJobs  VariantGenerationJob[]
+  performanceObservations PerformanceObservation[]
+  learningRecords         LearningRecord[]
   humanApprovals         HumanApproval[]
   transitionAudits     CampaignTransitionAudit[]
   agentInvocations     AgentInvocation[]
@@ -1313,8 +1350,9 @@ model CreativeVariant {
   campaign              Campaign               @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   deliverySpecification DeliverySpecification  @relation(fields: [deliverySpecificationId], references: [id], onDelete: Restrict)
   variantSpecification  VariantSpecification?  @relation(fields: [variantSpecificationId], references: [id], onDelete: SetNull)
-  asset                 Asset?                 @relation(fields: [assetId], references: [id], onDelete: SetNull)
-  performanceMetrics    PerformanceMetrics[]
+  asset                   Asset?                   @relation(fields: [assetId], references: [id], onDelete: SetNull)
+  performanceMetrics      PerformanceMetrics[]
+  performanceObservations PerformanceObservation[]
 
   @@index([workspaceId])
   @@index([variantSpecificationId])
@@ -1493,6 +1531,88 @@ model PerformanceMetrics {
   @@index([workspaceId])
   @@index([creativeVariantId])
   @@map("performance_metrics")
+}
+
+/// M13 — one immutable measurement of one published creative over one closed
+/// reporting window. This is architecture.md §4.1's `PerformanceRecord`; it
+/// supersedes the thin `PerformanceMetrics` shape above (no post identity, no
+/// source provenance, no reporting window, caller-supplied `ctr`), the same way
+/// M6's ShotSpecification superseded ShotPrompt. Ingestion is idempotent on
+/// `(workspaceId, idempotencyKey)`, so a repeated fixture/manual entry for the
+/// same post+window returns the existing row.
+model PerformanceObservation {
+  id                 String            @id @default(uuid())
+  workspaceId        String
+  campaignId         String
+  platform           DeliveryPlatform
+  /// The platform's own post identifier. Opaque; never parsed.
+  externalPostId     String
+  externalAccountId  String?
+  creativeVariantId  String?
+  variantAssetId     String?
+  durationSeconds    Int?
+  source             PerformanceSource
+  /// Closed reporting window — `periodEnd` must already have elapsed.
+  periodStart        DateTime
+  periodEnd          DateTime
+  /// Raw counters as reported, and the rates derived from them. Validated
+  /// nested structures, same approach RoughEditSpecification uses.
+  raw                Json
+  normalized         Json
+  idempotencyKey     String
+  ingestedByUserId   String?
+  fixtureRef         String?
+  createdAt          DateTime          @default(now())
+
+  workspace        Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  campaign         Campaign         @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  creativeVariant  CreativeVariant? @relation(fields: [creativeVariantId], references: [id], onDelete: SetNull)
+
+  @@unique([workspaceId, idempotencyKey])
+  @@index([workspaceId])
+  @@index([campaignId])
+  @@index([creativeVariantId])
+  @@map("performance_observations")
+}
+
+/// M13 — a distilled, attributable, versioned creative insight. This is
+/// architecture.md §4.1's `Learning`, promoted from the local
+/// performance-analyst schema into a real table. Immutable + versioned: a
+/// revision writes a new version and marks the prior one superseded, so a
+/// Strategy produced under version N stays explicable. `evidence` is an array
+/// of PerformanceObservation references — a learning with no evidence is not
+/// persistable, and `confidence` is derived from that evidence's volume.
+model LearningRecord {
+  id                         String             @id @default(uuid())
+  workspaceId                String
+  version                    Int
+  /// Stable identity across versions — a revision keeps the key, bumps version.
+  learningKey                String
+  insight                    String
+  scope                      LearningScope
+  /// Applicability restrictions (platforms/durations/tags); an empty array on a
+  /// dimension means unrestricted there.
+  applicability              Json
+  confidence                 LearningConfidence
+  /// Explicit PerformanceObservation references, never a prose citation.
+  evidence                   Json
+  totalImpressions           Int
+  status                     LearningStatus     @default(PROPOSED)
+  sourceCampaignId           String
+  createdByAgentInvocationId String
+  promptVersionId            String
+  reviewedByUserId           String?
+  reviewedAt                 DateTime?
+  supersededAt               DateTime?
+  createdAt                  DateTime           @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  campaign  Campaign  @relation(fields: [sourceCampaignId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, learningKey, version])
+  @@index([workspaceId])
+  @@index([sourceCampaignId])
+  @@map("learning_records")
 }
 
 model PromptTemplate {

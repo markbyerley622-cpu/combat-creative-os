@@ -7,6 +7,7 @@ import type {
   CampaignBriefDataSource,
   CreativeConceptDataSource,
   HumanApprovalDataSource,
+  LearningDataSource,
   ScriptWithShotsDataSource,
   StrategyDataSource,
 } from '@combat/database';
@@ -17,8 +18,10 @@ import {
   getLatestAcceptedCampaignBrief,
   latestApprovalForGate,
   listHumanApprovals,
+  loadLearningContext,
 } from '@combat/database';
 import type { ExecuteSpecialistAgentInput, ExecuteSpecialistAgentOutput } from '@combat/domain';
+import { formatLearningContext } from '@combat/domain';
 
 /**
  * Sequences the three M4 text agents — Campaign Strategist -> Creative
@@ -72,6 +75,12 @@ export interface RunStrategyConceptScriptActivityDeps {
   readonly creativeConceptDb: CreativeConceptDataSource;
   readonly scriptDb: ScriptWithShotsDataSource;
   readonly humanApprovalDb: HumanApprovalDataSource;
+  /**
+   * M13: the cross-campaign learning store. Optional so every existing caller
+   * and test keeps working unchanged — with no store injected, both agents
+   * receive an empty `priorLearnings`, exactly as before M13.
+   */
+  readonly learningDb?: LearningDataSource;
 }
 
 function agentIdempotencyKey(
@@ -115,6 +124,34 @@ export function createRunStrategyConceptScriptActivity(
         ? latestConceptDecision?.comments
         : undefined;
 
+    // M13: bounded, attributed learning context. Everything restrictive about
+    // this lives in `@combat/domain`'s pure `selectLearningContext` (APPROVED
+    // and non-superseded only, scope match, minimum confidence, applicability
+    // overlap with THIS campaign's platforms/durations, hard item cap) — so the
+    // payload cannot grow with workspace history and is never an unrestricted
+    // dump of everything ever learned. It is advisory context offered alongside
+    // the approved brief below, never in place of it: the brief's own fields
+    // are passed verbatim and are not derived from, filtered by, or overridable
+    // by any learning.
+    const strategyLearnings = deps.learningDb
+      ? formatLearningContext(
+          await loadLearningContext(deps.learningDb, workspaceId, {
+            scope: 'STRATEGY',
+            targetPlatforms: brief.targetPlatforms,
+            targetDurationsSeconds: brief.durationsSeconds,
+          }),
+        )
+      : [];
+    const conceptLearnings = deps.learningDb
+      ? formatLearningContext(
+          await loadLearningContext(deps.learningDb, workspaceId, {
+            scope: 'CONCEPT',
+            targetPlatforms: brief.targetPlatforms,
+            targetDurationsSeconds: brief.durationsSeconds,
+          }),
+        )
+      : [];
+
     // Field mapping from the M4 CampaignBriefContent shape (packages/domain)
     // to CampaignStrategistInputSchema (packages/agents), which predates the
     // full M4 brief contract and only has room for the fields it originally
@@ -140,7 +177,7 @@ export function createRunStrategyConceptScriptActivity(
         budgetCents: brief.budgetCents,
         keyMessages: brief.requiredMessaging,
         mandatories: brief.productFeatures,
-        priorLearnings: [],
+        priorLearnings: strategyLearnings,
         revisionFeedback,
       },
       context: { campaignId, priorArtifactRefs: [], budgetRemainingCents: brief.budgetCents },
@@ -179,6 +216,7 @@ export function createRunStrategyConceptScriptActivity(
         strategy: strategyResult.strategy,
         mandatories: brief.productFeatures,
         durationsSeconds: brief.durationsSeconds,
+        priorLearnings: conceptLearnings,
         revisionFeedback,
       },
       context: {

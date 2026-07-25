@@ -707,10 +707,13 @@ _content only_ — no `id`/`workspaceId`/foreign keys, which a future Activity
 assigns at persistence time (agents don't write to the database).
 `RevisionFeedback` above is `packages/agents/src/shared/quality-finding.ts`'s
 `QualityFindingSchema`, reusing `@combat/domain`'s `QualityFailureCategory`/
-`QualityFailureSeverity` enums. `Learning` is not yet a persisted
-`@combat/domain` entity — Performance Analyst's `LearningSchema` is defined
-locally in `packages/agents/src/performance-analyst/schema.ts` pending a
-database milestone that promotes it into a real table. The three
+`QualityFailureSeverity` enums. `Learning` **is now a persisted
+`@combat/domain` entity** (M13) — `schemas/learning-record.ts`'s
+`LearningRecord` plus a Prisma table, promoted out of the local
+`packages/agents/src/performance-analyst/schema.ts` definition exactly as that
+file's doc comment anticipated. The agent's own schema keeps only the
+content-shaped `ProposedLearning`, with no confidence field: confidence is
+derived downstream from evidence volume, never asserted by the model. The three
 placeholder agents (Asset Manager, Video Generation Coordinator,
 Motion-Compositing Coordinator) each still get this table's contract
 preserved in their own `schema.ts`, unimplemented — see ADR-0003.
@@ -1622,10 +1625,95 @@ subjectStage])` idempotency constraint. `createQualityAssessmentForCandidate`
   control, reviewer cannot cancel, two forged-request refusals). No paid API
   calls, no real media.
 
-- **M13 — Performance Analyst loop.** Separate `PerformanceAnalysisWorkflow`,
-  `Learning` ingestion, wired as optional context into Strategist/Creative
-  Director. _Test:_ fixture performance data produces expected `Learning`
-  records and that they're surfaced in a subsequent Strategist call.
+- **M13 — Performance analysis & creative learning. Done (2026-07-26), with the
+  deferrals this item records.** A deterministic, **provider-independent**
+  learning loop: closed-window performance data is ingested from fixtures or
+  manual entry, the existing `performance-analyst` agent distils it into
+  evidence-cited `LearningRecord`s in a separate top-level
+  `PerformanceAnalysisWorkflow`, and approved learnings reach the Campaign
+  Strategist and Creative Director as bounded, attributable context.
+
+  **Entities.** `PerformanceObservation` (this is §4.1's `PerformanceRecord`,
+  implemented — one immutable measurement of one published creative over one
+  **closed** reporting window, carrying post identity, source provenance, raw
+  counters and derived rates; it supersedes the thin M0 `PerformanceMetrics`
+  shape, which had no post identity, no source, no window and accepted a
+  caller-supplied `ctr`). `LearningRecord` (this is §4.1's `Learning`,
+  promoted from the agent package into a real table — immutable, versioned per
+  `learningKey`, carrying explicit evidence references, derived confidence,
+  applicability and full agent/prompt provenance). Ingestion is idempotent on
+  `(post, platform, window)`; a learning revision writes a new version and
+  supersedes the prior one.
+
+  **Three properties the agent cannot talk its way past.** (1) _Completed data
+  only_ — an observation whose window has not elapsed is refused at the
+  persistence boundary and filtered out before analysis. (2) _Evidence must be
+  real_ — every `evidenceObservationId` an insight cites is checked against the
+  observations actually supplied; a citation to anything else is a typed
+  `UNSUPPORTED_EVIDENCE` failure, not a persisted learning. (3) _Confidence is
+  derived, never asserted_ — `deriveLearningConfidence` computes the band from
+  observation count **and** impression volume (MEDIUM at ≥2/5,000; HIGH at
+  ≥4/50,000), so a single observation is always LOW however large, and the
+  agent's schema has no confidence field to assert one with.
+
+  **Decoupling is structural, not conventional.** `PerformanceAnalysisWorkflow`
+  is a separate top-level workflow (§3.1/§3.2), and it _cannot_ reach production
+  state: it proxies exactly one Activity whose only writes are `LearningRecord`
+  rows, defines **no signals at all**, carries no stage/approval/asset/export
+  field in its state or output, and never calls `advanceCampaignStageActivity`.
+  There is simply no wiring through which it could advance a stage, satisfy or
+  bypass a human gate, modify an approved asset, or trigger an export.
+
+  **Bounded context injection.** `selectLearningContext` (pure, in
+  `@combat/domain`) admits only APPROVED, non-superseded records in the caller's
+  workspace, scoped to the requesting agent, at or above MEDIUM confidence, whose
+  applicability overlaps _this_ campaign's platforms and durations — then ranks
+  by confidence and evidence weight and caps at 5 items. Each surviving item is
+  rendered with its confidence band, evidence weight and source `LearningRecord`
+  id, so any claim in a resulting Strategy is traceable. It is offered
+  **alongside** the approved brief, never in place of it: every brief-derived
+  field is passed verbatim and is not filterable or overridable by a learning,
+  and a fresh learning is `PROPOSED` until a human with `APPROVE_CONCEPT`
+  approves it. `CreativeDirectorInputSchema` gained the same bounded
+  `priorLearnings` field the Strategist already had; injection is opt-in via an
+  optional `learningDb` dep, so every pre-M13 caller behaves exactly as before.
+
+  **Surfaces.** `apps/api` gained `POST .../performance/observations` (RBAC:
+  `MANAGE_CAMPAIGNS`), `GET .../performance` (`VIEW_REPORTING`),
+  `GET /workspaces/:id/learnings` (`VIEW_REPORTING`) and
+  `POST .../learnings/:id/review` (`APPROVE_CONCEPT`); `apps/dashboard` gained a
+  campaign-performance screen and a learning-review screen showing evidence,
+  applicability and whether a record clears the injection floor.
+
+  **Explicitly deferred: real platform integration.** There is no ad-platform
+  API client, OAuth flow, scraper, webhook or credential anywhere in M13 —
+  `PerformanceSource` is `FIXTURE | MANUAL_ENTRY` only, and the dashboard says
+  so in plain text. A real connector would add one `PerformanceSource` value
+  feeding the same ingestion Activity, and would change nothing about
+  normalization, confidence derivation, learning persistence or context
+  injection. Also deferred: the `PROMPTING` learning scope is modeled and
+  persistable but nothing consumes it (§5 scopes injection to strategy/concept),
+  and no scheduler triggers `PerformanceAnalysisWorkflow` — it is started
+  explicitly. No live Postgres/Temporal in this environment (the two new models
+  are unmigrated — see docs/domain-model.md §8). _Test:_ 30 pure domain tests
+  (metric validation, normalization with undefined-not-zero rates, the full
+  confidence-band ladder, and every context-selection exclusion/cap/attribution
+  rule); 19 repository tests (idempotent ingestion, closed-window refusal,
+  invalid-metric rejection, versioning/supersession, review transitions,
+  workspace isolation of the knowledge store, and deterministic fixture metrics
+  producing exactly the expected confidence); 15 Activity tests (fixture and
+  manual ingestion, batch-level rejection, evidence checking, thin-sample
+  capping, idempotent replay, workspace isolation, and an explicit assertion
+  that analysis leaves campaign stage/approvals/assets/variants/audits
+  untouched); 15 workflow tests (reducer, SKIPPED-vs-BLOCKED, replay safety,
+  and three decoupling proofs — only the analyst Activity is proxied, no signal
+  exists, no production field appears in the output); 10 injection tests
+  (context reaches both agents attributed, scope routing, the brief passed
+  verbatim, the item cap, and every exclusion); 26 `apps/api` route tests
+  including the RBAC matrix and cross-workspace rejection; 4 dashboard
+  api-client tests and 9 Playwright e2e tests. No paid API calls, no real
+  platform traffic.
+
 - **M14 — Production hardening.** RBAC enforcement audit across every mutation
   path in `apps/api` (every endpoint checked against the full permission matrix
   in §2.2, not just the gates), full audit-trail completeness review, chaos/retry
