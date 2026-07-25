@@ -73,7 +73,22 @@ const VALID_SAMPLES: Partial<Record<SpecialistAgentName, { input: unknown; resul
       visualDirection: 'v',
       providerId: 'mock',
     },
-    result: { providerId: 'mock', promptText: 'prompt', params: {} },
+    result: {
+      providerId: 'mock',
+      promptText: 'prompt',
+      params: {},
+      visualObjective: 'o',
+      action: 'a',
+      subject: 's',
+      environment: 'e',
+      cameraMovement: 'static',
+      lensFraming: 'wide',
+      lighting: 'soft',
+      colorTreatment: 'neutral',
+      motionIntensity: 'LOW',
+      transitionIn: 'CUT',
+      transitionOut: 'CUT',
+    },
   },
   'visual-quality-controller': {
     input: {

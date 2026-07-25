@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { CampaignStage } from '@combat/domain';
+import type { AssetKind, CampaignStage } from '@combat/domain';
 import type {
   AgentInvocationDataSource,
   AgentInvocationRecord,
@@ -31,11 +31,20 @@ import type {
 import type { HumanApprovalDataSource, HumanApprovalRecord } from '../human-approval-repository';
 import type { MembershipDataSource, MembershipRecord } from '../membership-repository';
 import type {
-  GenerationPromptRecord,
   PromptDataSource,
   PromptTemplateRecord,
   PromptVersionRecord,
 } from '../prompt-repository';
+import type {
+  ShotSpecificationDataSource,
+  ShotSpecificationRecord,
+} from '../shot-specification-repository';
+import type {
+  GenerationCandidateRecord,
+  ShotGenerationAttemptRecord,
+  ShotGenerationDataSource,
+  ShotGenerationJobRecord,
+} from '../shot-generation-repository';
 import type {
   CampaignBriefFactRow,
   CreativeConceptFactRow,
@@ -43,12 +52,13 @@ import type {
   DeliverySpecificationFactRow,
   EditDecisionListFactRow,
   GenerationCandidateFactRow,
-  GenerationPromptFactRow,
   QualityAssessmentFactRow,
   QualityFailureFactRow,
   RenderJobFactRow,
   ScriptFactRow,
   ShotFactRow,
+  ShotGenerationJobFactRow,
+  ShotSpecificationFactRow,
   SoundCueFactRow,
   TimelineFactRow,
   TransitionFactsDataSource,
@@ -89,7 +99,9 @@ export class InMemoryCampaignStore
     ScriptDataSource,
     ShotDataSource,
     MembershipDataSource,
-    LicenseDataSource
+    LicenseDataSource,
+    ShotSpecificationDataSource,
+    ShotGenerationDataSource
 {
   campaigns: CampaignRecord[] = [];
   audits: CampaignTransitionAuditRecord[] = [];
@@ -106,8 +118,14 @@ export class InMemoryCampaignStore
   creativeConceptRecords: CreativeConceptRecord[] = [];
   scriptRecords: ScriptRecord[] = [];
   shotRecords: ShotRecord[] = [];
-  generationPrompts: (GenerationPromptFactRow & Partial<GenerationPromptRecord>)[] = [];
-  generationCandidates: GenerationCandidateFactRow[] = [];
+  shotSpecifications: (ShotSpecificationFactRow & Partial<ShotSpecificationRecord>)[] = [];
+  shotGenerationJobs: ShotGenerationJobFactRow[] = [];
+  generationCandidates: (GenerationCandidateFactRow & Partial<GenerationCandidateRecord>)[] = [];
+  /** Full rows written via `createShotSpecification`/`getOrCreateShotGenerationJob`/`getOrCreateShotGenerationAttempt`/`createGenerationCandidate` (M6) — kept separate from the legacy minimal fixture arrays above for the same reason `campaignBriefRecords` is kept separate from `briefs`. */
+  shotSpecificationRecords: ShotSpecificationRecord[] = [];
+  shotGenerationJobRecords: ShotGenerationJobRecord[] = [];
+  shotGenerationAttemptRecords: ShotGenerationAttemptRecord[] = [];
+  generationCandidateRecords: GenerationCandidateRecord[] = [];
   qualityAssessments: QualityAssessmentFactRow[] = [];
   qualityFailures: QualityFailureFactRow[] = [];
   renderJobs: RenderJobFactRow[] = [];
@@ -323,27 +341,171 @@ export class InMemoryCampaignStore
       return shot;
     },
   };
-  generationPrompt: TransitionFactsDataSource['generationPrompt'] &
-    PromptDataSource['generationPrompt'] = {
-    findMany: async ({ where }) =>
-      this.generationPrompts.filter((p) => where.shotId.in.includes(p.shotId)),
+  shotSpecification: TransitionFactsDataSource['shotSpecification'] &
+    ShotSpecificationDataSource['shotSpecification'] = {
+    findMany: async (args: {
+      where: { shotId: { in: string[] } } | { shotId: string; workspaceId?: string };
+    }) => {
+      const { where } = args;
+      if (typeof where.shotId === 'string') {
+        const scoped = where as { shotId: string; workspaceId?: string };
+        const { shotId, workspaceId } = scoped;
+        return this.shotSpecificationRecords.filter(
+          (s) =>
+            s.shotId === shotId && (workspaceId === undefined || s.workspaceId === workspaceId),
+        );
+      }
+      const shotIds = where.shotId.in;
+      return [
+        ...this.shotSpecificationRecords.filter((s) => shotIds.includes(s.shotId)),
+        // Legacy fixtures only populate ShotSpecificationFactRow's 2 fields and are only ever
+        // read back through transition-facts.ts's narrow (shotId-only) consumption —
+        // this cast is safe in practice, never exercised by the real repository functions.
+        ...(this.shotSpecifications.filter((s) =>
+          shotIds.includes(s.shotId),
+        ) as unknown as ShotSpecificationRecord[]),
+      ];
+    },
     create: async ({ data }) => {
-      const record: GenerationPromptRecord = { id: randomUUID(), createdAt: new Date(), ...data };
-      this.generationPrompts.push(record);
+      const record: ShotSpecificationRecord = { id: randomUUID(), createdAt: new Date(), ...data };
+      this.shotSpecificationRecords.push(record);
       return record;
     },
-    findFirst: async ({ where }) => {
-      const found = this.generationPrompts.find(
-        (p) => p.id === where.id && p.workspaceId === where.workspaceId,
+    findFirst: async ({ where }) =>
+      this.shotSpecificationRecords.find(
+        (s) => s.id === where.id && s.workspaceId === where.workspaceId,
+      ) ?? null,
+  };
+  shotGenerationJob: TransitionFactsDataSource['shotGenerationJob'] &
+    ShotGenerationDataSource['shotGenerationJob'] = {
+    findMany: async ({ where }) => [
+      ...this.shotGenerationJobRecords.filter((j) =>
+        where.shotSpecificationId.in.includes(j.shotSpecificationId),
+      ),
+      ...this.shotGenerationJobs.filter((j) =>
+        where.shotSpecificationId.in.includes(j.shotSpecificationId),
+      ),
+    ],
+    findFirst: async (args: {
+      where:
+        { shotSpecificationId: string; workspaceId?: string } | { id: string; workspaceId: string };
+    }) => {
+      const { where } = args;
+      if ('id' in where) {
+        return (
+          this.shotGenerationJobRecords.find(
+            (j) => j.id === where.id && j.workspaceId === where.workspaceId,
+          ) ?? null
+        );
+      }
+      return (
+        this.shotGenerationJobRecords.find(
+          (j) =>
+            j.shotSpecificationId === where.shotSpecificationId &&
+            (where.workspaceId === undefined || j.workspaceId === where.workspaceId),
+        ) ?? null
       );
-      return (found as GenerationPromptRecord | undefined) ?? null;
+    },
+    create: async ({ data }) => {
+      const now = new Date();
+      const record: ShotGenerationJobRecord = {
+        id: randomUUID(),
+        createdAt: now,
+        updatedAt: now,
+        ...data,
+      };
+      this.shotGenerationJobRecords.push(record);
+      return record;
+    },
+    update: async ({ where, data }) => {
+      const job = this.shotGenerationJobRecords.find((j) => j.id === where.id);
+      if (!job) throw new Error(`shot generation job ${where.id} not found`);
+      Object.assign(job, data);
+      job.updatedAt = new Date();
+      return job;
     },
   };
-  generationCandidate: TransitionFactsDataSource['generationCandidate'] = {
+  shotGenerationAttempt: ShotGenerationDataSource['shotGenerationAttempt'] = {
+    findFirst: async (args: {
+      where:
+        | { shotGenerationJobId: string; idempotencyKey: string }
+        | { id: string; workspaceId: string };
+    }) => {
+      const { where } = args;
+      if ('id' in where) {
+        return (
+          this.shotGenerationAttemptRecords.find(
+            (a) => a.id === where.id && a.workspaceId === where.workspaceId,
+          ) ?? null
+        );
+      }
+      return (
+        this.shotGenerationAttemptRecords.find(
+          (a) =>
+            a.shotGenerationJobId === where.shotGenerationJobId &&
+            a.idempotencyKey === where.idempotencyKey,
+        ) ?? null
+      );
+    },
     findMany: async ({ where }) =>
-      this.generationCandidates.filter((c) =>
-        where.generationPromptId.in.includes(c.generationPromptId),
+      this.shotGenerationAttemptRecords.filter(
+        (a) => a.shotGenerationJobId === where.shotGenerationJobId,
       ),
+    create: async ({ data }) => {
+      const record: ShotGenerationAttemptRecord = {
+        id: randomUUID(),
+        createdAt: new Date(),
+        ...data,
+      };
+      this.shotGenerationAttemptRecords.push(record);
+      return record;
+    },
+    update: async ({ where, data }) => {
+      const attempt = this.shotGenerationAttemptRecords.find((a) => a.id === where.id);
+      if (!attempt) throw new Error(`shot generation attempt ${where.id} not found`);
+      Object.assign(attempt, data);
+      return attempt;
+    },
+  };
+  generationCandidate: TransitionFactsDataSource['generationCandidate'] &
+    ShotGenerationDataSource['generationCandidate'] = {
+    findMany: async (args: {
+      where: { shotSpecificationId: { in: string[] } } | { shotGenerationAttemptId: string };
+    }) => {
+      const { where } = args;
+      if ('shotGenerationAttemptId' in where) {
+        return this.generationCandidateRecords.filter(
+          (c) => c.shotGenerationAttemptId === where.shotGenerationAttemptId,
+        );
+      }
+      return [
+        ...this.generationCandidateRecords.filter((c) =>
+          where.shotSpecificationId.in.includes(c.shotSpecificationId),
+        ),
+        // Same legacy-fixture rationale as shotSpecification.findMany above.
+        ...(this.generationCandidates.filter((c) =>
+          where.shotSpecificationId.in.includes(c.shotSpecificationId),
+        ) as unknown as GenerationCandidateRecord[]),
+      ];
+    },
+    create: async ({ data }) => {
+      const now = new Date();
+      const record: GenerationCandidateRecord = {
+        id: randomUUID(),
+        createdAt: now,
+        updatedAt: now,
+        ...data,
+      };
+      this.generationCandidateRecords.push(record);
+      return record;
+    },
+    update: async ({ where, data }) => {
+      const candidate = this.generationCandidateRecords.find((c) => c.id === where.id);
+      if (!candidate) throw new Error(`generation candidate ${where.id} not found`);
+      Object.assign(candidate, data);
+      candidate.updatedAt = new Date();
+      return candidate;
+    },
   };
   qualityAssessment: TransitionFactsDataSource['qualityAssessment'] = {
     findMany: async ({ where }) => {
@@ -422,13 +584,27 @@ export class InMemoryCampaignStore
     },
     findFirst: async ({ where }) =>
       this.assets.find((a) => a.id === where.id && a.workspaceId === where.workspaceId) ?? null,
-    findMany: async ({ where }) =>
-      this.assets.filter(
+    findMany: async (args: {
+      where:
+        | { workspaceId: string; checksum: string; kind: AssetKind }
+        | { workspaceId: string; campaignId: string; kind?: AssetKind };
+    }) => {
+      const { where } = args;
+      if ('checksum' in where) {
+        return this.assets.filter(
+          (a) =>
+            a.workspaceId === where.workspaceId &&
+            a.checksum === where.checksum &&
+            a.kind === where.kind,
+        );
+      }
+      return this.assets.filter(
         (a) =>
           a.workspaceId === where.workspaceId &&
-          a.checksum === where.checksum &&
-          a.kind === where.kind,
-      ),
+          a.campaignId === where.campaignId &&
+          (where.kind === undefined || a.kind === where.kind),
+      );
+    },
     update: async ({ where, data }) => {
       const asset = this.assets.find((a) => a.id === where.id);
       if (!asset) throw new Error(`asset ${where.id} not found`);
@@ -471,6 +647,13 @@ export class InMemoryCampaignStore
       this.promptTemplates.push(template);
       return template;
     },
+    findFirst: async ({ where }) =>
+      this.promptTemplates.find(
+        (t) =>
+          t.workspaceId === where.workspaceId &&
+          t.agentKey === where.agentKey &&
+          t.name === where.name,
+      ) ?? null,
   };
   promptVersion: PromptDataSource['promptVersion'] = {
     create: async ({ data }) => {

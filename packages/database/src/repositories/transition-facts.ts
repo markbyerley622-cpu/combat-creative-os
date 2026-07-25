@@ -45,15 +45,20 @@ export interface ShotFactRow {
   id: string;
   scriptId: string;
 }
-export interface GenerationPromptFactRow {
+export interface ShotSpecificationFactRow {
   id: string;
   shotId: string;
 }
+export interface ShotGenerationJobFactRow {
+  id: string;
+  shotSpecificationId: string;
+  attemptCount: number;
+  maxAttempts: number;
+}
 export interface GenerationCandidateFactRow {
   id: string;
-  generationPromptId: string;
+  shotSpecificationId: string;
   status: GenerationCandidateStatus;
-  attempt: number;
 }
 export interface QualityAssessmentFactRow {
   id: string;
@@ -99,7 +104,8 @@ export interface TransitionFactInputs {
   concepts: CreativeConceptFactRow[];
   scripts: ScriptFactRow[];
   shots: ShotFactRow[];
-  generationPrompts: GenerationPromptFactRow[];
+  shotSpecifications: ShotSpecificationFactRow[];
+  shotGenerationJobs: ShotGenerationJobFactRow[];
   generationCandidates: GenerationCandidateFactRow[];
   qualityAssessments: QualityAssessmentFactRow[];
   qualityFailures: QualityFailureFactRow[];
@@ -125,12 +131,17 @@ export interface TransitionFactsDataSource {
   };
   script: { findMany(args: { where: { campaignId: string } }): Promise<ScriptFactRow[]> };
   shot: { findMany(args: { where: { scriptId: { in: string[] } } }): Promise<ShotFactRow[]> };
-  generationPrompt: {
-    findMany(args: { where: { shotId: { in: string[] } } }): Promise<GenerationPromptFactRow[]>;
+  shotSpecification: {
+    findMany(args: { where: { shotId: { in: string[] } } }): Promise<ShotSpecificationFactRow[]>;
+  };
+  shotGenerationJob: {
+    findMany(args: {
+      where: { shotSpecificationId: { in: string[] } };
+    }): Promise<ShotGenerationJobFactRow[]>;
   };
   generationCandidate: {
     findMany(args: {
-      where: { generationPromptId: { in: string[] } };
+      where: { shotSpecificationId: { in: string[] } };
     }): Promise<GenerationCandidateFactRow[]>;
   };
   qualityAssessment: {
@@ -203,16 +214,19 @@ export async function loadTransitionFactInputs(
     scriptIds.length > 0 ? await db.shot.findMany({ where: { scriptId: { in: scriptIds } } }) : [];
 
   const shotIds = shots.map((s) => s.id);
-  const generationPrompts =
+  const shotSpecifications =
     shotIds.length > 0
-      ? await db.generationPrompt.findMany({ where: { shotId: { in: shotIds } } })
+      ? await db.shotSpecification.findMany({ where: { shotId: { in: shotIds } } })
       : [];
 
-  const promptIds = generationPrompts.map((p) => p.id);
-  const generationCandidates =
-    promptIds.length > 0
-      ? await db.generationCandidate.findMany({ where: { generationPromptId: { in: promptIds } } })
-      : [];
+  const specIds = shotSpecifications.map((s) => s.id);
+  const [shotGenerationJobs, generationCandidates] =
+    specIds.length > 0
+      ? await Promise.all([
+          db.shotGenerationJob.findMany({ where: { shotSpecificationId: { in: specIds } } }),
+          db.generationCandidate.findMany({ where: { shotSpecificationId: { in: specIds } } }),
+        ])
+      : [[], []];
 
   const candidateIds = generationCandidates.map((c) => c.id);
   const qualityAssessments = await db.qualityAssessment.findMany({
@@ -237,7 +251,8 @@ export async function loadTransitionFactInputs(
     concepts,
     scripts,
     shots,
-    generationPrompts,
+    shotSpecifications,
+    shotGenerationJobs,
     generationCandidates,
     qualityAssessments,
     qualityFailures,
@@ -292,19 +307,20 @@ export function computeTransitionFacts(
     ? inputs.shots.filter((s) => s.scriptId === latestScript.id)
     : [];
   const shotIdsForLatestScript = new Set(shotsForLatestScript.map((s) => s.id));
-  const promptsForShots = inputs.generationPrompts.filter((p) =>
-    shotIdsForLatestScript.has(p.shotId),
+  const specsForShots = inputs.shotSpecifications.filter((s) =>
+    shotIdsForLatestScript.has(s.shotId),
   );
 
   const candidatesByShotId = new Map<string, GenerationCandidateFactRow[]>();
-  for (const prompt of promptsForShots) {
-    const candidates = inputs.generationCandidates.filter(
-      (c) => c.generationPromptId === prompt.id,
-    );
-    candidatesByShotId.set(prompt.shotId, [
-      ...(candidatesByShotId.get(prompt.shotId) ?? []),
+  const jobsByShotId = new Map<string, ShotGenerationJobFactRow[]>();
+  for (const spec of specsForShots) {
+    const candidates = inputs.generationCandidates.filter((c) => c.shotSpecificationId === spec.id);
+    candidatesByShotId.set(spec.shotId, [
+      ...(candidatesByShotId.get(spec.shotId) ?? []),
       ...candidates,
     ]);
+    const jobs = inputs.shotGenerationJobs.filter((j) => j.shotSpecificationId === spec.id);
+    jobsByShotId.set(spec.shotId, [...(jobsByShotId.get(spec.shotId) ?? []), ...jobs]);
   }
 
   function shotHasSucceededCandidate(shotId: string): boolean {
@@ -323,10 +339,10 @@ export function computeTransitionFacts(
   }
 
   function shotRetryAllowed(shotId: string, subjectStage: CampaignStage): boolean {
-    const candidates = candidatesByShotId.get(shotId) ?? [];
     if (shotPassedCheck(shotId, subjectStage)) return false;
-    const maxAttempt = candidates.reduce((max, c) => Math.max(max, c.attempt), 0);
-    return maxAttempt < MAX_SHOT_GENERATION_ATTEMPTS;
+    const jobs = jobsByShotId.get(shotId) ?? [];
+    if (jobs.length === 0) return true; // no dispatch attempted yet -> a first attempt is always allowed
+    return jobs.some((j) => j.attemptCount < j.maxAttempts);
   }
 
   /** Does an asset-based assessment for `subjectStage` exist with `pass === expectPass`, optionally requiring a specific failure category? */
@@ -391,7 +407,7 @@ export function computeTransitionFacts(
       case 'allShotsHavePrompts':
         facts.allShotsHavePrompts =
           shotsForLatestScript.length > 0 &&
-          shotsForLatestScript.every((s) => promptsForShots.some((p) => p.shotId === s.id));
+          shotsForLatestScript.every((s) => specsForShots.some((spec) => spec.shotId === s.id));
         break;
       case 'allShotsHaveCandidate':
         facts.allShotsHaveCandidate =

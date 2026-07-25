@@ -3,3 +3,7 @@ export * from './campaign-production-workflow';
 export * from './campaign-production-workflow-activities';
 export * from './campaign-production-workflow-signals';
 export * from './campaign-production-workflow-state';
+export * from './shot-generation-workflow';
+export * from './shot-generation-workflow-activities';
+export * from './shot-generation-workflow-signals';
+export * from './shot-generation-workflow-state';

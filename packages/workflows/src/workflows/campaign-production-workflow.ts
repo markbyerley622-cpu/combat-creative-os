@@ -1,4 +1,4 @@
-import { condition, proxyActivities, setHandler } from '@temporalio/workflow';
+import { condition, executeChild, proxyActivities, setHandler } from '@temporalio/workflow';
 import type {
   CampaignProductionWorkflowInput,
   CampaignProductionWorkflowOutput,
@@ -14,11 +14,15 @@ import {
   getStatusQuery,
   selectShotsSignal,
 } from './campaign-production-workflow-signals';
+import type { shotGenerationWorkflow } from './shot-generation-workflow';
 import {
   applyAutoForwardResult,
   applyBoundExceeded,
   applyGateAdvanceResult,
+  applyLoadLatestShotSpecificationsResult,
+  applyRunShotPromptEngineerResult,
   applyRunStrategyConceptScriptResult,
+  applyShotGenerationWorkflowResult,
   buildAutoForwardIdempotencyKey,
   buildGateIdempotencyKey,
   decideGateSignal,
@@ -40,6 +44,8 @@ const {
   advanceCampaignStageActivity,
   verifyHumanApprovalActivity,
   runStrategyConceptScriptActivity,
+  runShotPromptEngineerActivity,
+  loadLatestShotSpecificationsActivity,
 } = proxyActivities<CampaignProductionActivities>({
   // Longer than the other two activities' effective budget: this one makes
   // three sequential reasoning-provider calls plus their persistence writes,
@@ -102,6 +108,87 @@ export async function campaignProductionWorkflow(
       }
 
       autoForwardAttempt += 1;
+
+      // M6: PROMPTING is where the Shot Prompt Engineer runs, once per shot
+      // in the latest script, ahead of the SHOT_GENERATION stage — same
+      // "run before the auto-forward attempt" placement as STRATEGY_REVIEW's
+      // hook above. There is no REVISION edge onto PROMPTING in the current
+      // lifecycle graph (docs/domain-model.md §4), so this only ever runs
+      // once per campaign in practice; `autoForwardAttempt` is still used
+      // for the idempotency key (rather than a gate-tied revision count, as
+      // STRATEGY_REVIEW uses) since no gate currently targets a PROMPTING
+      // revisit.
+      if (state.currentStage === 'PROMPTING') {
+        const promptResult = await runShotPromptEngineerActivity({
+          workspaceId: input.workspaceId,
+          campaignId: input.campaignId,
+          workflowRunId: input.workflowRunId,
+          providerId: input.videoProviderId,
+          revisionAttempt: autoForwardAttempt,
+        });
+        state = applyRunShotPromptEngineerResult(state, promptResult);
+        if (state.status !== 'RUNNING') {
+          continue;
+        }
+      }
+
+      // M6: SHOT_GENERATION resolves the current visit's ShotSpecifications
+      // (first visit from PROMPTING, or a revision revisit from
+      // VISUAL_QA/CONTINUITY_QA/HUMAN_SHOT_SELECTION — all three land here
+      // directly, docs/domain-model.md §4's revision-loop edges) and runs
+      // `ShotGenerationWorkflow` as a child workflow to completion before
+      // the normal AUTO_FORWARD attempt below, which will then find
+      // `allShotsHaveCandidate` true. `executeChild` (not `startChild`) is
+      // used because this stage's auto-forward must wait for every shot's
+      // generation to resolve before proceeding — never composite ahead of
+      // that (CLAUDE.md: "Do not weaken ... approval gates" and M6
+      // requirement 7: "no compositing begins" before successful
+      // generation). The child is referenced by its registered workflow
+      // *type name*, not a runtime import of `shotGenerationWorkflow` itself
+      // — `import type` only supplies the type for `executeChild`'s generic
+      // inference, keeping this file free of any non-type-only import
+      // (CLAUDE.md "Architecture boundaries").
+      if (state.currentStage === 'SHOT_GENERATION') {
+        const specResult = await loadLatestShotSpecificationsActivity({
+          workspaceId: input.workspaceId,
+          campaignId: input.campaignId,
+        });
+        state = applyLoadLatestShotSpecificationsResult(state, specResult);
+        if (state.status !== 'RUNNING') {
+          continue;
+        }
+        if (specResult.ok) {
+          const childResult = await executeChild<typeof shotGenerationWorkflow>(
+            'shotGenerationWorkflow',
+            {
+              workflowId: `${input.workflowRunId}:SHOT_GENERATION:${autoForwardAttempt}`,
+              args: [
+                {
+                  workspaceId: input.workspaceId,
+                  campaignId: input.campaignId,
+                  workflowRunId: input.workflowRunId,
+                  shotSpecificationIds: specResult.shotSpecificationIds,
+                  // Matches shot-generation-workflow-contracts.ts's
+                  // DEFAULT_MAX_GENERATION_ATTEMPTS/DEFAULT_GENERATION_BATCH_SIZE/
+                  // DEFAULT_POLL_INTERVAL_MS — supplied explicitly rather than
+                  // imported as values, since workflow files may only import
+                  // @temporalio/workflow and type-only signatures (CLAUDE.md
+                  // "Architecture boundaries"); Zod `.default()`s never apply
+                  // along this path because nothing on it ever calls `.parse()`.
+                  maxAttempts: 3,
+                  batchSize: 3,
+                  pollIntervalMs: 2000,
+                },
+              ],
+            },
+          );
+          state = applyShotGenerationWorkflowResult(state, childResult);
+          if (state.status !== 'RUNNING') {
+            continue;
+          }
+        }
+      }
+
       const result = await advanceCampaignStageActivity({
         mode: 'AUTO_FORWARD',
         workspaceId: input.workspaceId,

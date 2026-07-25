@@ -10,7 +10,7 @@
 // aggregate roots that are queried/created directly by API/activity code
 // (Campaign, Asset, HumanApproval, PromptTemplate, BudgetPolicy,
 // BudgetLedgerEntry, CampaignTransitionAudit) — deeply-nested child tables
-// (Shot, GenerationPrompt, QualityFailure, etc.) rely on their immediate
+// (Shot, ShotSpecification, QualityFailure, etc.) rely on their immediate
 // parent's FK chain up to Campaign/Workspace for referential integrity, and
 // carry `workspaceId` as a denormalized, indexed scoping column so the
 // repository layer can always filter directly on it without joining up the
@@ -166,6 +166,51 @@ enum GenerationCandidateStatus {
   SUCCEEDED
   FAILED
   TIMED_OUT
+  CANCELLED
+}
+
+enum ShotGenerationJobStatus {
+  PENDING
+  DISPATCHED
+  SUCCEEDED
+  FAILED
+  BUDGET_EXCEEDED
+  CANCELLED
+}
+
+/// Per-attempt provider job status, mirrored from `@combat/providers`'s `JobStatus`.
+enum ShotGenerationAttemptStatus {
+  QUEUED
+  SUBMITTED
+  POLLING
+  SUCCEEDED
+  FAILED
+  TIMED_OUT
+  CANCELLED
+}
+
+enum ShotGenerationFailureReason {
+  UNSUPPORTED_CAPABILITY
+  PROVIDER_TIMEOUT
+  PROVIDER_REJECTED
+  PROVIDER_ERROR
+  BUDGET_EXCEEDED
+}
+
+enum MotionIntensity {
+  STATIC
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum TextSafeArea {
+  TOP
+  BOTTOM
+  LEFT
+  RIGHT
+  CENTER
+  FULL_SAFE
 }
 
 // SHOT_UNUSABLE/COMPOSITING_TECHNICAL/EDIT_TIMING/AUDIO_TECHNICAL drive typed
@@ -470,9 +515,9 @@ model Shot {
   createdAt        DateTime   @default(now())
   updatedAt        DateTime   @updatedAt
 
-  script            Script             @relation(fields: [scriptId], references: [id], onDelete: Cascade)
-  generationPrompts GenerationPrompt[]
-  timelineEntries   TimelineEntry[]
+  script             Script               @relation(fields: [scriptId], references: [id], onDelete: Cascade)
+  shotSpecifications ShotSpecification[]
+  timelineEntries    TimelineEntry[]
 
   @@unique([scriptId, index])
   @@index([workspaceId])
@@ -535,46 +580,162 @@ model TimelineEntry {
   @@map("timeline_entries")
 }
 
-/// `promptVersionId` is a required (non-nullable) FK — CLAUDE.md "Prompt
-/// version used for every generation must be recorded" is enforced at the
-/// database level, not left to callers to remember.
-model GenerationPrompt {
-  id              String   @id @default(uuid())
-  workspaceId     String
-  shotId          String
-  promptVersionId String
-  providerId      String
-  promptText      String
-  negativePrompt  String?
-  params          Json     @default("{}")
-  createdAt       DateTime @default(now())
+/// Canonical, immutable, versioned generation brief for one shot (M6
+/// requirement 3) — the entity the Shot Prompt Engineer agent's output is
+/// persisted as. Supersedes the earlier, thinner `GenerationPrompt` model:
+/// same slot in the ER graph (a versioned prompt per shot per provider —
+/// docs/architecture.md §4), extended with the full structured brief a real
+/// shot-generation dispatch needs (framing, continuity, licensing, quality
+/// rubric, etc). `promptVersionId` stays a required (non-nullable) FK —
+/// CLAUDE.md "Prompt version used for every generation must be recorded" is
+/// enforced at the database level, not left to callers to remember.
+/// `campaignId`/`creativeConceptId`/`creativeConceptVersion`/`scriptId`/
+/// `scriptVersion` are point-in-time-pinned plain columns, not live FKs —
+/// this row must keep recording which concept/script version it was
+/// generated against even if a later revision supersedes those upstream
+/// rows (same "denormalized snapshot, not a live join" rationale as
+/// AssetProvenance.derivedFromAssetIds).
+model ShotSpecification {
+  id                     String   @id @default(uuid())
+  workspaceId            String
+  campaignId             String
+  creativeConceptId      String
+  creativeConceptVersion Int
+  scriptId               String
+  scriptVersion          Int
+  shotId                 String
+  version                Int
 
-  shot          Shot                @relation(fields: [shotId], references: [id], onDelete: Cascade)
-  promptVersion PromptVersion       @relation(fields: [promptVersionId], references: [id], onDelete: Restrict)
+  shotNumber              Int
+  sequencePosition        Int
+  intendedDurationSeconds Float
+
+  visualObjective          String
+  action                   String
+  subject                  String
+  environment              String
+  cameraMovement           String
+  lensFraming              String
+  lighting                 String
+  colorTreatment           String
+  motionIntensity          MotionIntensity
+  transitionIn             TransitionType
+  transitionOut            TransitionType
+  textSafeAreas            TextSafeArea[]
+  appInterfaceRequirements String?
+
+  referenceAssetIds       String[]
+  continuityRequirements  String[]
+
+  providerId        String
+  promptVersionId    String
+  generationPrompt   String
+  negativePrompt     String?
+  generationParams   Json     @default("{}")
+
+  outputRequirements Json     @default("{}")
+  qualityRubric      String[]
+  licensingConstraints String[]
+
+  createdByAgentInvocationId String
+  createdAt                  DateTime @default(now())
+
+  shot          Shot                  @relation(fields: [shotId], references: [id], onDelete: Cascade)
+  promptVersion PromptVersion         @relation(fields: [promptVersionId], references: [id], onDelete: Restrict)
   candidates    GenerationCandidate[]
+  generationJobs ShotGenerationJob[]
 
+  @@unique([shotId, version])
   @@index([workspaceId])
   @@index([shotId])
-  @@map("generation_prompts")
+  @@index([campaignId])
+  @@map("shot_specifications")
+}
+
+/// Groups the bounded-retry attempt sequence for one ShotSpecification.
+/// Mutable status/updatedAt row — same pattern already established by
+/// RenderJob/CreativeVariant — because a job's status legitimately changes
+/// as attempts are dispatched and resolved.
+model ShotGenerationJob {
+  id                      String                  @id @default(uuid())
+  workspaceId             String
+  campaignId              String
+  shotSpecificationId     String
+  status                  ShotGenerationJobStatus @default(PENDING)
+  requestedCandidateCount Int
+  maxAttempts             Int
+  attemptCount            Int                     @default(0)
+  createdAt               DateTime                @default(now())
+  updatedAt               DateTime                @updatedAt
+
+  shotSpecification ShotSpecification       @relation(fields: [shotSpecificationId], references: [id], onDelete: Cascade)
+  attempts          ShotGenerationAttempt[]
+
+  @@unique([shotSpecificationId])
+  @@index([workspaceId])
+  @@index([campaignId])
+  @@map("shot_generation_jobs")
+}
+
+/// One bounded-retry attempt within a ShotGenerationJob — append-only retry
+/// history. `idempotencyKey` is unique per job so a replayed/retried
+/// Activity call for the same attempt never double-submits to the provider
+/// or double-reserves budget (CLAUDE.md workflow-idempotency rules).
+model ShotGenerationAttempt {
+  id                      String                      @id @default(uuid())
+  workspaceId             String
+  shotGenerationJobId     String
+  attemptNumber           Int
+  idempotencyKey          String
+  providerId              String
+  providerJobId           String?
+  status                  ShotGenerationAttemptStatus @default(QUEUED)
+  requestedCandidateCount Int
+  seed                    Int?
+  generationParams        Json                        @default("{}")
+  budgetReservationId     String?
+  estimatedCostCents      Int?
+  actualCostCents         Int?
+  failureReason           ShotGenerationFailureReason?
+  failureRetryable        Boolean?
+  failureMessage          String?
+  startedAt               DateTime                    @default(now())
+  completedAt             DateTime?
+  createdAt               DateTime                    @default(now())
+
+  shotGenerationJob ShotGenerationJob     @relation(fields: [shotGenerationJobId], references: [id], onDelete: Cascade)
+  candidates        GenerationCandidate[]
+
+  @@unique([shotGenerationJobId, idempotencyKey])
+  @@index([workspaceId])
+  @@index([shotGenerationJobId])
+  @@map("shot_generation_attempts")
 }
 
 model GenerationCandidate {
-  id                 String                    @id @default(uuid())
-  workspaceId        String
-  generationPromptId String
-  assetId            String?
-  providerJobRef     String?
-  status             GenerationCandidateStatus @default(PENDING)
-  attempt            Int
-  createdAt          DateTime                  @default(now())
-  updatedAt          DateTime                  @updatedAt
+  id                      String                    @id @default(uuid())
+  workspaceId             String
+  shotSpecificationId     String
+  shotGenerationAttemptId String
+  candidateIndex          Int
+  assetId                 String?
+  providerCandidateRef    String?
+  seed                    Int?
+  durationSeconds         Float?
+  aspectRatio             String?
+  status                  GenerationCandidateStatus @default(PENDING)
+  createdAt               DateTime                  @default(now())
+  updatedAt               DateTime                  @updatedAt
 
-  generationPrompt   GenerationPrompt    @relation(fields: [generationPromptId], references: [id], onDelete: Cascade)
-  asset              Asset?              @relation(fields: [assetId], references: [id], onDelete: SetNull)
-  qualityAssessments QualityAssessment[]
+  shotSpecification     ShotSpecification     @relation(fields: [shotSpecificationId], references: [id], onDelete: Cascade)
+  shotGenerationAttempt ShotGenerationAttempt @relation(fields: [shotGenerationAttemptId], references: [id], onDelete: Cascade)
+  asset                 Asset?                @relation(fields: [assetId], references: [id], onDelete: SetNull)
+  qualityAssessments    QualityAssessment[]
 
+  @@unique([shotGenerationAttemptId, candidateIndex])
   @@index([workspaceId])
-  @@index([generationPromptId])
+  @@index([shotSpecificationId])
+  @@index([shotGenerationAttemptId])
   @@map("generation_candidates")
 }
 
@@ -892,8 +1053,9 @@ model PromptTemplate {
 }
 
 /// `version` is monotonically increasing per template, never reused —
-/// GenerationPrompt.promptVersionId pins a generation to exactly one of these
-/// rows so "prompt version used for every generation" is always reconstructible.
+/// ShotSpecification.promptVersionId pins a generation to exactly one of
+/// these rows so "prompt version used for every generation" is always
+/// reconstructible.
 model PromptVersion {
   id               String   @id @default(uuid())
   workspaceId      String
@@ -903,8 +1065,8 @@ model PromptVersion {
   isActive         Boolean  @default(false)
   createdAt        DateTime @default(now())
 
-  promptTemplate    PromptTemplate     @relation(fields: [promptTemplateId], references: [id], onDelete: Cascade)
-  generationPrompts GenerationPrompt[]
+  promptTemplate     PromptTemplate      @relation(fields: [promptTemplateId], references: [id], onDelete: Cascade)
+  shotSpecifications ShotSpecification[]
 
   @@unique([promptTemplateId, version])
   @@index([workspaceId])

@@ -23,17 +23,26 @@ interface HandlerDefinition {
 let signalHandlers = new Map<string, AnyFn>();
 let queryHandlers = new Map<string, AnyFn>();
 let activityImpls: Record<string, (...args: unknown[]) => Promise<unknown>> = {};
+let childWorkflowImpls: Record<string, (...args: unknown[]) => Promise<unknown>> = {};
 
 export function resetFakeWorkflowRuntime(): void {
   signalHandlers = new Map();
   queryHandlers = new Map();
   activityImpls = {};
+  childWorkflowImpls = {};
 }
 
 export function setFakeActivityImpls(
   impls: Record<string, (...args: unknown[]) => Promise<unknown>>,
 ): void {
   activityImpls = impls;
+}
+
+/** Registers fake implementations for `executeChild`/`startChild` targets, keyed by workflow type name (the string form, matching how a real Worker registers workflows). */
+export function setFakeChildWorkflowImpls(
+  impls: Record<string, (...args: unknown[]) => Promise<unknown>>,
+): void {
+  childWorkflowImpls = impls;
 }
 
 export function fireSignal(name: string, payload: unknown): void {
@@ -94,4 +103,29 @@ export function fakeCondition(fn: () => boolean): Promise<true> {
     };
     check();
   });
+}
+
+/** Fake `executeChild` — looks up the workflow-type-named impl registered via `setFakeChildWorkflowImpls` and invokes it with `options.args`, matching `executeChild`'s real call shape closely enough for wiring tests (no separate child Workflow Execution, no `startChild`/handle distinction). */
+export async function fakeExecuteChild(
+  workflowType: string,
+  options: { args?: unknown[] },
+): Promise<unknown> {
+  const impl = childWorkflowImpls[workflowType];
+  if (!impl) {
+    throw new Error(
+      `fake-temporal-workflow: no child workflow impl registered for "${workflowType}"`,
+    );
+  }
+  return impl(...(options.args ?? []));
+}
+
+/**
+ * A deterministic, instant stand-in for `@temporalio/workflow`'s `sleep` —
+ * yields one `setImmediate` turn (so other pending microtasks/signals get a
+ * chance to run first, same rationale as `fakeCondition`) rather than
+ * actually waiting `ms`. Tests that poll a mock provider through several
+ * non-terminal states run in milliseconds instead of minutes.
+ */
+export function fakeSleep(_ms: number): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
 }

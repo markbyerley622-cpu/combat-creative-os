@@ -295,12 +295,17 @@ the wrong lifetime for a durable execution that's meant to complete.
 - **`CampaignProductionWorkflow`** (parent, one per production run): drives the
   linear stage sequence above via Activities, awaits the three approval gates via
   **Signals**, exposes current state via **Queries**.
-- **`ShotGenerationWorkflow`** (child, one per shot, run in parallel via
-  `Promise.all`/`startChild`): owns the `GENERATION ⇄ VISUAL_QC` retry loop for a
-  single shot — submit N candidates, poll/await provider completion, run Visual QC
-  per candidate, decide retry vs. escalate. This isolates the only truly
-  unbounded-iteration part of the pipeline into a child workflow with its own
-  bounded retry policy, so the parent stays simple and linear.
+- **`ShotGenerationWorkflow`** (child; M6, done — one instance per PROMPTING/
+  SHOT_GENERATION visit, covering every shot in that visit via bounded
+  parallel `Promise.all` batches internally, not one workflow instance per
+  shot as this bullet originally sketched — see §8's M6 entry for why):
+  dispatches each shot's generation, polls to a terminal state via `sleep`,
+  retries a poll-time failure up to a bounded attempt count before
+  escalating that shot, and reports per-shot results back to the parent.
+  Visual QC is not yet part of this loop (M7); today's retry loop covers
+  only the provider-dispatch/poll `GENERATION` half. This isolates the only
+  truly unbounded-iteration part of the pipeline into a child workflow with
+  its own bounded retry policy, so the parent stays simple and linear.
 - **`CompositingWorkflow`** (child, one per shot needing motion graphics, parallel):
   owns the After Effects/aerender + Figma asset dispatch and polling.
 - **`PerformanceAnalysisWorkflow`** (separate top-level workflow, decoupled as above).
@@ -351,7 +356,7 @@ loops):
 - `WorkflowRunStatus`: `RUNNING | AWAITING_APPROVAL | FAILED | CANCELLED | COMPLETED`
 - `ShotStatus`: `PENDING | GENERATING | QC_REVIEW | NEEDS_HUMAN | BUDGET_EXCEEDED | SELECTED | REJECTED`
 - `ApprovalGateStatus`: `PENDING | APPROVED | CHANGES_REQUESTED | REJECTED`
-- `GenerationJobStatus`: `QUEUED | SUBMITTED | POLLING | SUCCEEDED | FAILED | TIMED_OUT`
+- `GenerationJobStatus` (implemented M6 as `JobStatus`/`ShotGenerationAttemptStatus`): `QUEUED | SUBMITTED | POLLING | SUCCEEDED | FAILED | TIMED_OUT | CANCELLED`
 
 ---
 
@@ -498,7 +503,9 @@ Provider-specific status, resolved per review:
   single failed shot without re-running the whole set). Neither is connected with
   real credentials, and no real spend happens, until explicitly decided later —
   the interface and both adapter stubs are built now so that decision doesn't
-  block anything else.
+  block anything else. Extended in M6 — see §8's M6 entry for the full
+  accounting; `video-generation-profiles.ts` documents illustrative Veo/Runway
+  capability shapes, not real adapters.
 - **Motion graphics** (After Effects): `aerender` is **not** run inside Docker or
   any container in this architecture. It is treated as an external Windows render
   worker reachable only through `MotionGraphicsProvider` — a job-submission
@@ -515,20 +522,30 @@ Provider-specific status, resolved per review:
   the mock.
 
 ```ts
-// providers/video-gen — illustrative signatures, not final API
+// providers/video-generation — the real M6 interface (packages/providers/src/video-generation.ts)
 interface VideoGenerationProvider {
+  readonly name: string;
+  getCapabilities(): VideoGenerationCapabilities; // supported modes, aspect ratios, duration range, reference-image/video support, seed/negative-prompt support, max candidates
+
   submit(input: {
     idempotencyKey: string;
-    prompt: ShotPrompt;
+    shotId: string;
+    mode: 'TEXT_TO_VIDEO' | 'IMAGE_TO_VIDEO';
+    promptText: string;
+    negativePrompt?: string;
+    referenceImages?: readonly { assetId: string; weight?: number }[];
+    referenceVideo?: { description: string; styleNotes?: string; sourceAssetId?: string }; // metadata only — never uploaded bytes
     candidateCount: number;
-    params: ProviderGenerationParams;
+    params: VideoGenerationParams; // durationSeconds, aspectRatio, resolution?, frameRate?, seed?, negativePrompt?, providerOptions?
   }): Promise<GenerationJobHandle>;
 
-  getStatus(handle: GenerationJobHandle): Promise<GenerationJobStatus>;
+  getStatus(handle: GenerationJobHandle): Promise<JobStatus>; // QUEUED|SUBMITTED|POLLING|SUCCEEDED|FAILED|TIMED_OUT|CANCELLED
+  getFailure(handle: GenerationJobHandle): Promise<VideoGenerationFailure | null>; // non-null only once terminal-failed
   fetchResult(handle: GenerationJobHandle): Promise<GeneratedCandidateRef[]>;
+  getUsage(handle: GenerationJobHandle): Promise<VideoGenerationUsage>; // costCents, currency, computeUnits
   cancel(handle: GenerationJobHandle): Promise<void>;
-  // Providers may deliver results via webhook instead of polling; the webhook
-  // receiver normalizes both into the same GenerationJobStatus transitions.
+  // Providers may deliver results via webhook instead of polling in a future
+  // real adapter; the mock and every M6 Activity are polling-based only.
 }
 
 interface DesignProvider {
@@ -680,7 +697,10 @@ by Shot Prompt Engineer or the workflow's retry router):
 **Implemented schemas (ADR-0003).** `packages/agents/src/*/schema.ts` implements
 this table's shape for the eleven built agents, field-for-field consistent
 with the domain entities each stage eventually persists (`CreativeConcept`,
-`Script`/`Shot`, `GenerationPrompt`, `QualityAssessment`/`QualityFailure`,
+`Script`/`Shot`, `ShotSpecification` (M6 — supersedes the table's illustrative
+`ShotPrompt`/the earlier, thinner `GenerationPrompt`; Shot Prompt Engineer's
+real output is the fuller cinematographic-field-set shape §8's M6 entry
+describes, not the table row above), `QualityAssessment`/`QualityFailure`,
 `Timeline`/`TimelineEntry`, `SoundCue`, `CreativeVariant`) but scoped to
 _content only_ — no `id`/`workspaceId`/foreign keys, which a future Activity
 assigns at persistence time (agents don't write to the database).
@@ -1064,13 +1084,108 @@ reasoning.claude.ts`) is unit-tested with an injected fake client instead,
   and fixture video files" as this document's original placeholder line
   said before this milestone actually shipped; that placeholder is
   superseded by this entry, not still accurate.
-- **M6 — Video generation.** `providers/video-gen` deterministic mock for both
-  Veo and Runway shapes; Shot Prompt Engineer; `ShotGenerationWorkflow` with
-  multi-level budget checks (workspace/campaign/shot/provider) and idempotency
-  enforcement. _Test:_ mock-provider integration test covering the full
-  submit→poll→candidate loop, budget-exceeded path at each of the four levels,
-  and ledger reservation/charge/release correctness. No real provider credentials
-  used — that remains a future, separately-approved step per §7.1.
+- **M6 — Shot prompting & video-generation orchestration. Done (2026-07-25),
+  with the interim narrowings this item records.** `VideoGenerationProvider`
+  (§5) gained `getCapabilities`, text-to-video/image-to-video `mode`,
+  reference images/reference-video metadata (never real bytes — a
+  `description`/`styleNotes` object, "without uploading copyrighted
+  footage"), `getFailure`, `getUsage`, and a widened `JobStatus` (added
+  `CANCELLED`); `video-generation-profiles.ts` documents illustrative
+  Veo/Runway capability shapes, and `MockVideoGenerationProvider`
+  (`video-generation.mock.ts`) is idempotent by `idempotencyKey`, rejects
+  unsupported capability combinations before any state is recorded,
+  supports configurable latency (`pollsUntilTerminal`, call-count-based,
+  never wall-clock) and forced-failure injection, and never writes a binary
+  file. The Shot Prompt Engineer agent's output contract was extended in
+  place (prompt version bumped 1→2, `ShotPromptEngineerResultSchema` gained
+  the full cinematographic field set — `visualObjective`/`action`/
+  `subject`/`environment`/`cameraMovement`/`lensFraming`/`lighting`/
+  `colorTreatment`/`motionIntensity`/`transitionIn`/`transitionOut`/
+  `textSafeAreas`/`continuityRequirements`/`qualityRubric`) rather than a
+  new agent, since it is still the same specialist, just with a richer
+  output — `runShotPromptEngineerActivity` runs it once per shot in the
+  campaign's latest script, resolves/validates the licensed
+  `UPLOADED_SOURCE` reference-asset pool (fails the whole batch on any
+  unlicensed asset), bridges the agent's code-level prompt version into a
+  DB-level `PromptTemplate`/`PromptVersion` row
+  (`getOrCreatePromptVersionForAgent`), and persists the result as an
+  immutable versioned `ShotSpecification` (§4, superseding the earlier,
+  thinner `GenerationPrompt` — same ER slot, extended field set).
+  `ShotGenerationWorkflow` (§3.2) is a deterministic child workflow — one
+  instance per PROMPTING/SHOT_GENERATION visit covering every shot in that
+  visit, not one instance per shot, despite this document's original
+  per-shot phrasing — dispatching shots in bounded parallel batches
+  (`Promise.all` per batch, batches run sequentially), polling each via
+  `sleep` (never busy-polling) to a terminal state, retrying a poll-time
+  FAILED/TIMED_OUT attempt up to `MAX_SHOT_GENERATION_ATTEMPTS` (3, matching
+  domain-model.md §4.4) before reporting `RETRY_EXHAUSTED`, and supporting
+  cancellation (a `cancelShotGenerationSignal`) and progress inspection (a
+  `getShotGenerationProgress` query) — all decision logic lives in a pure
+  reducer (`shot-generation-workflow-state.ts`), unit-tested without any
+  Temporal runtime, exactly like `campaign-production-workflow-state.ts`'s
+  precedent. Three new Activities —
+  `dispatchShotGenerationActivity`/`pollShotGenerationActivity`/
+  `cancelShotGenerationActivity` — check and reserve budget at all four
+  `BudgetLevel`s (workspace/campaign/shot/provider) before every dispatch,
+  release the full reservation on a non-retryable/terminal failure or
+  cancellation, and charge the provider's actual `getUsage()` cost (with any
+  remainder released) on success; the fifth, "generation-attempt"
+  granularity CLAUDE.md's budget rules ask for is satisfied by giving every
+  attempt its own idempotency-key-scoped reservation under the existing
+  four levels, not a fifth `BudgetLevel` enum value (§4.3's four-level
+  design stays the explicitly resolved decision domain-model.md §8
+  anticipated this milestone would exercise at generation-dispatch
+  granularity). A successful candidate is registered through the existing
+  asset lifecycle (`createAssetWithProvenance`, `AssetKind.VIDEO_CANDIDATE`,
+  `generatedByActivity: 'pollShotGenerationActivity'`) — no new asset path.
+  **Two narrowings**: (1) a dispatch-time failure (spec not found,
+  unsupported capability, budget exceeded, or a provider error before any
+  job existed) is terminal for that shot with no retry — only a poll-time
+  terminal FAILED/TIMED_OUT (a job that was actually submitted) enters the
+  bounded-retry loop, since retrying an unsupported capability or a
+  not-found spec cannot succeed and a dispatch-time budget/provider failure
+  is surfaced for a human/operator rather than blindly resubmitted; (2)
+  there is no provider-selection mechanism yet, so
+  `CampaignProductionWorkflowInput` gained a single campaign-wide
+  `videoProviderId` (default `'mock-video-generation'`) rather than a
+  per-shot or per-workspace provider config. `CampaignProductionWorkflow`
+  now runs `runShotPromptEngineerActivity` on every `PROMPTING` visit and,
+  at `SHOT_GENERATION`, resolves the visit's `ShotSpecification`s
+  (`loadLatestShotSpecificationsActivity` — a DB-driven lookup, not a
+  workflow-held variable, so a revision revisit from
+  VISUAL_QA/CONTINUITY_QA/HUMAN_SHOT_SELECTION, which per §3.1's revision
+  edges lands directly on SHOT_GENERATION rather than back on PROMPTING, is
+  still self-sufficient) before `executeChild`-ing `ShotGenerationWorkflow`
+  and only proceeding to the normal auto-forward attempt once it resolves —
+  a BLOCKED/CANCELLED child result escalates the parent straight to
+  BLOCKED, so no compositing ever begins ahead of successful generation.
+  `apps/api` gained one read-only `GET .../shot-generation` endpoint
+  (workspace-member-readable, no new permission) returning, per shot, its
+  latest specification, generation job, full attempt history, and
+  candidates, plus workspace/campaign budget consumption; `apps/dashboard`
+  gained a matching read-only page (polling every 4s like the existing
+  production-progress screen) that renders every candidate as an explicit
+  placeholder card (`hasMedia: false`, no `<video>` element) since the mock
+  provider never produces real media. _Test:_ deterministic-provider
+  coverage (idempotent resubmission, capability rejection, text-to-video/
+  image-to-video, configurable latency, forced failures, cancellation) in
+  `packages/providers`; agent schema/prompt-snapshot coverage in
+  `packages/agents`; `runShotPromptEngineerActivity` coverage (persistence,
+  idempotency, a second revision version, stale-script-vs-concept
+  rejection, unlicensed-reference rejection, agent failure) and the three
+  generation Activities' coverage (all four budget levels, reservation
+  release on both budget-exceeded and provider failure, estimated-vs-actual
+  cost true-up, capability rejection, idempotent dispatch, cancellation) in
+  `packages/workflows`; a 12-test pure-reducer suite plus a 7-test
+  fake-runtime wiring suite for `ShotGenerationWorkflow` itself (bounded
+  batches proven via an in-flight concurrency counter, bounded retry exactly
+  exhausting at `maxAttempts`, cancellation mid-poll, progress query);
+  3 wiring tests extending `campaign-production-workflow`'s existing fake-
+  runtime suite (PROMPTING → SHOT_GENERATION → the child workflow →
+  HUMAN_SHOT_SELECTION, a Shot Prompt Engineer failure blocking before any
+  advance, a BLOCKED child result blocking before compositing); 5 `apps/api`
+  route tests. No real provider credentials used anywhere — that remains a
+  future, separately-approved step per §7.1.
 - **M7 — Visual QC & Continuity.** Visual Quality Controller, Continuity
   Controller, the `VISUAL_QC ⇄ GENERATION` and `CONTINUITY_CHECK ⇄ GENERATION`
   retry routing. _Test:_ fixture candidate sets (known-good/known-bad frames)

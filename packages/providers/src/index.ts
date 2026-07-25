@@ -1,6 +1,7 @@
 export * from './types';
 export * from './video-generation';
 export * from './video-generation.mock';
+export * from './video-generation-profiles';
 export * from './design';
 export * from './design.mock';
 export * from './motion-graphics';

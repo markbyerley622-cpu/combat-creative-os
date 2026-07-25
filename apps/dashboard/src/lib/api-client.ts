@@ -108,6 +108,92 @@ export interface CampaignStatus {
   workflow: WorkflowSnapshot | null;
 }
 
+export interface ShotSpecificationView {
+  id: string;
+  version: number;
+  visualObjective: string;
+  action: string;
+  subject: string;
+  environment: string;
+  cameraMovement: string;
+  lensFraming: string;
+  lighting: string;
+  colorTreatment: string;
+  motionIntensity: string;
+  transitionIn: string;
+  transitionOut: string;
+  textSafeAreas: string[];
+  providerId: string;
+  generationPrompt: string;
+  negativePrompt?: string;
+  qualityRubric: string[];
+  licensingConstraints: string[];
+  referenceAssetIds: string[];
+  createdAt: string;
+}
+
+export interface ShotGenerationJobView {
+  id: string;
+  status: string;
+  requestedCandidateCount: number;
+  maxAttempts: number;
+  attemptCount: number;
+  updatedAt: string;
+}
+
+export interface ShotGenerationAttemptView {
+  id: string;
+  attemptNumber: number;
+  status: string;
+  providerId: string;
+  providerJobId?: string;
+  estimatedCostCents?: number;
+  actualCostCents?: number;
+  failureReason?: string;
+  failureRetryable?: boolean;
+  failureMessage?: string;
+  startedAt: string;
+  completedAt?: string;
+}
+
+export interface GenerationCandidateView {
+  id: string;
+  candidateIndex: number;
+  status: string;
+  assetId?: string;
+  seed?: number;
+  durationSeconds?: number;
+  aspectRatio?: string;
+  /** Always `false` — the mock video-generation provider never produces real media (see apps/api's shot-generation-routes.ts doc comment); render a placeholder, never a video element. */
+  hasMedia: false;
+}
+
+export interface ShotGenerationShotView {
+  shotId: string;
+  index: number;
+  description: string;
+  durationFrames: number;
+  beat: string;
+  specification: ShotSpecificationView | null;
+  generationJob: ShotGenerationJobView | null;
+  attempts: ShotGenerationAttemptView[];
+  candidates: GenerationCandidateView[];
+}
+
+export interface BudgetStatusView {
+  level: string;
+  scopeId: string;
+  limitCents: number;
+  spentCents: number;
+  remainingCents: number;
+}
+
+export interface ShotGenerationView {
+  script: { id: string; version: number; totalDurationFrames: number } | null;
+  shots: ShotGenerationShotView[];
+  budget: { workspace: BudgetStatusView | null; campaign: BudgetStatusView | null };
+}
+
 export interface ConceptApprovalState {
   currentStage: string;
   isPending: boolean;
@@ -199,6 +285,13 @@ export function createApiClient(
     getScript: (campaignId: string) =>
       request<{ script: Script | null; shots: Shot[] }>(
         `/workspaces/${workspaceId}/campaigns/${campaignId}/script?userId=${userId}`,
+        undefined,
+        baseUrl,
+      ),
+
+    getShotGeneration: (campaignId: string) =>
+      request<ShotGenerationView>(
+        `/workspaces/${workspaceId}/campaigns/${campaignId}/shot-generation?userId=${userId}`,
         undefined,
         baseUrl,
       ),

@@ -12,7 +12,7 @@ export type PromptTemplate = z.infer<typeof PromptTemplateSchema>;
 
 /**
  * `version` is a monotonically increasing integer per template, never reused
- * — see GenerationPrompt.promptVersionId, which pins a generation to exactly
+ * — see ShotSpecification.promptVersionId, which pins a generation to exactly
  * one of these rows so "prompt version used for every generation" is always
  * reconstructible.
  */

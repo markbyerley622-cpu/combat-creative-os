@@ -67,6 +67,34 @@ export function computeSpentCents(entries: BudgetLedgerEntryRecord[]): number {
   }, 0);
 }
 
+export interface BudgetStatus {
+  readonly level: BudgetLevel;
+  readonly scopeId: string;
+  readonly limitCents: number;
+  readonly spentCents: number;
+  readonly remainingCents: number;
+}
+
+/** Read-only budget-consumption summary for one (level, scopeId) — `null` when no policy is configured there (an uncapped scope has nothing to report). Used by apps/api's read-only shot-generation views (M6 requirement 9). */
+export async function getBudgetStatus(
+  db: BudgetDataSource,
+  workspaceId: string,
+  level: BudgetLevel,
+  scopeId: string,
+): Promise<BudgetStatus | null> {
+  const policy = await db.budgetPolicy.findFirst({ where: { workspaceId, level, scopeId } });
+  if (!policy) return null;
+  const entries = await db.budgetLedgerEntry.findMany({ where: { budgetPolicyId: policy.id } });
+  const spentCents = computeSpentCents(entries);
+  return {
+    level,
+    scopeId,
+    limitCents: policy.limitCents,
+    spentCents,
+    remainingCents: policy.limitCents - spentCents,
+  };
+}
+
 export interface BudgetCheckRequest {
   workspaceId: string;
   level: BudgetLevel;

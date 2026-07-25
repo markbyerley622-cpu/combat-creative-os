@@ -6,7 +6,8 @@
  */
 export type IdempotencyKey = string;
 
-export type JobStatus = 'QUEUED' | 'SUBMITTED' | 'POLLING' | 'SUCCEEDED' | 'FAILED' | 'TIMED_OUT';
+export type JobStatus =
+  'QUEUED' | 'SUBMITTED' | 'POLLING' | 'SUCCEEDED' | 'FAILED' | 'TIMED_OUT' | 'CANCELLED';
 
 export interface AssetRef {
   assetId: string;

@@ -25,6 +25,16 @@ export const CampaignProductionWorkflowInputSchema = z.object({
   /** The campaign's persisted stage at the moment this workflow run was started. */
   initialStage: CampaignStageSchema.default('DRAFT'),
   maxRevisionsPerGate: z.number().int().positive().default(DEFAULT_MAX_REVISIONS_PER_GATE),
+  /**
+   * M6: the `VideoGenerationProvider` the PROMPTING stage's Shot Prompt
+   * Engineer targets and SHOT_GENERATION dispatches to. A single
+   * campaign-wide default rather than a per-shot or per-workspace provider
+   * config — there is no provider-selection mechanism in this milestone
+   * (docs/architecture.md §7.1: no real Veo/Runway adapter exists yet, only
+   * the deterministic mock), so this is an explicit, documented MVP
+   * simplification rather than a hidden constant.
+   */
+  videoProviderId: z.string().min(1).default('mock-video-generation'),
 });
 export type CampaignProductionWorkflowInput = z.infer<typeof CampaignProductionWorkflowInputSchema>;
 

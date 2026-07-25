@@ -32,4 +32,22 @@ export interface CampaignProductionActivities {
   runStrategyConceptScriptActivity(
     input: activities.RunStrategyConceptScriptInput,
   ): Promise<activities.RunStrategyConceptScriptOutput>;
+  /**
+   * M6: runs the Shot Prompt Engineer once per shot in the campaign's latest
+   * script for one PROMPTING visit, persisting each result as an immutable
+   * versioned `ShotSpecification`. See run-shot-prompt-engineer-activity.ts's
+   * doc comment.
+   */
+  runShotPromptEngineerActivity(
+    input: activities.RunShotPromptEngineerInput,
+  ): Promise<activities.RunShotPromptEngineerOutput>;
+  /**
+   * M6: resolves the `ShotSpecification` ids for the current SHOT_GENERATION
+   * visit (first visit or a revision revisit — see
+   * load-latest-shot-specifications-activity.ts's doc comment) before
+   * starting `ShotGenerationWorkflow` as a child workflow.
+   */
+  loadLatestShotSpecificationsActivity(
+    input: activities.LoadLatestShotSpecificationsInput,
+  ): Promise<activities.LoadLatestShotSpecificationsOutput>;
 }

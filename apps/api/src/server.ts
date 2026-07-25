@@ -14,6 +14,11 @@ import { createAssetDatabase, type AssetDatabase } from './asset-database';
 import { registerAssetRoutes, type AssetRouteLimits } from './asset-routes';
 import { createCampaignDatabase, type CampaignDatabase } from './campaign-database';
 import { registerCampaignRoutes } from './campaign-routes';
+import {
+  createShotGenerationDatabase,
+  type ShotGenerationDatabase,
+} from './shot-generation-database';
+import { registerShotGenerationRoutes } from './shot-generation-routes';
 import { createWorkflowClient, type TemporalEnv } from './temporal-client';
 
 /**
@@ -49,6 +54,8 @@ export interface BuildServerOptions {
   campaignDb?: CampaignDatabase;
   /** Overrides the M5 asset routes' `*DataSource` adapter — tests inject an in-memory fake here. */
   assetDb?: AssetDatabase;
+  /** Overrides the M6 shot-generation read routes' `*DataSource` adapter — tests inject an in-memory fake here. */
+  shotGenerationDb?: ShotGenerationDatabase;
   workflowClient?: WorkflowClient;
   temporalEnv?: TemporalEnv;
   /** Overrides the real MinIO adapter — tests inject `MockStorageProvider` here. */
@@ -73,6 +80,7 @@ export function buildServer({
   approvalDb = createApprovalDatabase(prisma),
   campaignDb = createCampaignDatabase(prisma),
   assetDb = createAssetDatabase(prisma),
+  shotGenerationDb = createShotGenerationDatabase(prisma),
   temporalEnv = { TEMPORAL_ADDRESS: 'localhost:7233', TEMPORAL_NAMESPACE: 'default' },
   workflowClient = createWorkflowClient(temporalEnv),
   minioConfig = DEFAULT_MINIO_CONFIG,
@@ -116,6 +124,7 @@ export function buildServer({
   registerApprovalRoutes(app, { db: approvalDb, workflowClient });
   registerCampaignRoutes(app, { db: campaignDb, workflowClient });
   registerAssetRoutes(app, { db: assetDb, storageProvider, limits: assetLimits });
+  registerShotGenerationRoutes(app, { db: shotGenerationDb });
 
   return app;
 }

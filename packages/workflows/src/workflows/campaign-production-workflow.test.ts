@@ -121,6 +121,7 @@ describe('campaignProductionWorkflow (wired via fake @temporalio/workflow runtim
       workflowRunId: 'run-1',
       initialStage: 'DRAFT',
       maxRevisionsPerGate: 3,
+      videoProviderId: 'mock-video-generation',
     });
 
     await vi.waitFor(() => expect(runQuery<string | null>('getPendingGate')).toBe('CONCEPT'));
@@ -207,6 +208,7 @@ describe('campaignProductionWorkflow (wired via fake @temporalio/workflow runtim
       workflowRunId: 'run-2',
       initialStage: 'CONCEPT_REVIEW',
       maxRevisionsPerGate: 3,
+      videoProviderId: 'mock-video-generation',
     });
 
     await vi.waitFor(() => expect(runQuery('getPendingGate')).toBe('CONCEPT'));
@@ -287,6 +289,7 @@ describe('campaignProductionWorkflow (wired via fake @temporalio/workflow runtim
       workflowRunId: 'run-3',
       initialStage: 'CONCEPT_REVIEW',
       maxRevisionsPerGate: 1,
+      videoProviderId: 'mock-video-generation',
     });
 
     await vi.waitFor(() => expect(runQuery('getPendingGate')).toBe('CONCEPT'));
@@ -353,6 +356,7 @@ describe('campaignProductionWorkflow (wired via fake @temporalio/workflow runtim
       workflowRunId: 'run-4',
       initialStage: 'CONCEPT_REVIEW',
       maxRevisionsPerGate: 3,
+      videoProviderId: 'mock-video-generation',
     });
 
     await vi.waitFor(() => expect(runQuery('getPendingGate')).toBe('CONCEPT'));
@@ -420,6 +424,7 @@ describe('campaignProductionWorkflow (wired via fake @temporalio/workflow runtim
       workflowRunId: 'run-5',
       initialStage: 'CONCEPT_REVIEW',
       maxRevisionsPerGate: 3,
+      videoProviderId: 'mock-video-generation',
     });
 
     await vi.waitFor(() => expect(runQuery('getPendingGate')).toBe('CONCEPT'));

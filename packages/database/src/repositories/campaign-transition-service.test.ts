@@ -37,14 +37,19 @@ function seedAllFactsTrue(
   store.scripts.push({ id: scriptId, campaignId, version: 1 });
   const shotId = randomUUID();
   store.shots.push({ id: shotId, scriptId });
-  const promptId = randomUUID();
-  store.generationPrompts.push({ id: promptId, shotId });
+  const specId = randomUUID();
+  store.shotSpecifications.push({ id: specId, shotId });
+  store.shotGenerationJobs.push({
+    id: randomUUID(),
+    shotSpecificationId: specId,
+    attemptCount: 1,
+    maxAttempts: 3,
+  });
   const candidateId = randomUUID();
   store.generationCandidates.push({
     id: candidateId,
-    generationPromptId: promptId,
+    shotSpecificationId: specId,
     status: 'SUCCEEDED',
-    attempt: 1,
   });
   store.qualityAssessments.push({
     id: randomUUID(),
@@ -100,16 +105,21 @@ function seedAllRevisionFactsTrue(
   store.scripts.push({ id: scriptId, campaignId, version: 1 });
   const shotId = randomUUID();
   store.shots.push({ id: shotId, scriptId });
-  const promptId = randomUUID();
-  store.generationPrompts.push({ id: promptId, shotId });
+  const specId = randomUUID();
+  store.shotSpecifications.push({ id: specId, shotId });
+  store.shotGenerationJobs.push({
+    id: randomUUID(),
+    shotSpecificationId: specId,
+    attemptCount: 1,
+    maxAttempts: 3,
+  });
   const candidateId = randomUUID();
   store.generationCandidates.push({
     id: candidateId,
-    generationPromptId: promptId,
+    shotSpecificationId: specId,
     status: 'FAILED',
-    attempt: 1,
   });
-  // No passing VISUAL_QA/CONTINUITY_QA assessment for this candidate -> both retries stay allowed (attempt 1 < MAX 3).
+  // No passing VISUAL_QA/CONTINUITY_QA assessment for this candidate -> both retries stay allowed (attemptCount 1 < maxAttempts 3).
 
   const compositingAssessmentId = randomUUID();
   store.qualityAssessments.push({

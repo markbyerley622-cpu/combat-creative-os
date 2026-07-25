@@ -88,6 +88,85 @@ export function applyRunStrategyConceptScriptResult(
   };
 }
 
+/**
+ * Applies the result of the PROMPTING artifact-generation Activity
+ * (`runShotPromptEngineerActivity`), run before every AUTO_FORWARD attempt
+ * out of PROMPTING — same shape as `applyRunStrategyConceptScriptResult`
+ * above: success leaves state unchanged (the normal AUTO_FORWARD call now
+ * finds `allShotsHavePrompts` true), failure escalates straight to BLOCKED.
+ */
+export function applyRunShotPromptEngineerResult(
+  state: CampaignProductionWorkflowState,
+  result: activities.RunShotPromptEngineerOutput,
+): CampaignProductionWorkflowState {
+  if (result.ok) {
+    return state;
+  }
+  const detail =
+    result.reason === 'AGENT_FAILED'
+      ? `${result.agentName} (shot ${result.shotId}): ${result.detail}`
+      : result.reason === 'UNLICENSED_REFERENCE_ASSET'
+        ? `${result.detail} (asset ${result.assetId})`
+        : result.detail;
+  return {
+    ...state,
+    status: 'BLOCKED',
+    blockedReason: `PROMPTING artifact generation failed (${result.reason}): ${detail}`,
+  };
+}
+
+/**
+ * Applies the result of resolving which `ShotSpecification`s the current
+ * SHOT_GENERATION visit targets (`loadLatestShotSpecificationsActivity`),
+ * run before starting `ShotGenerationWorkflow` as a child. Failure escalates
+ * straight to BLOCKED, same as every other pre-AUTO_FORWARD Activity in this
+ * reducer.
+ */
+export function applyLoadLatestShotSpecificationsResult(
+  state: CampaignProductionWorkflowState,
+  result: activities.LoadLatestShotSpecificationsOutput,
+): CampaignProductionWorkflowState {
+  if (result.ok) {
+    return state;
+  }
+  return {
+    ...state,
+    status: 'BLOCKED',
+    blockedReason: `SHOT_GENERATION could not resolve shot specifications (${result.reason}): ${result.detail}`,
+  };
+}
+
+/**
+ * Applies the result of the `ShotGenerationWorkflow` child run for one
+ * SHOT_GENERATION visit. COMPLETED leaves state unchanged (the normal
+ * AUTO_FORWARD call now finds `allShotsHaveCandidate` true); BLOCKED/
+ * CANCELLED escalates straight to BLOCKED — no compositing begins, because
+ * the AUTO_FORWARD loop never runs again once `status` leaves 'RUNNING'
+ * (CLAUDE.md: "escalate to a human state rather than retrying forever").
+ */
+export function applyShotGenerationWorkflowResult(
+  state: CampaignProductionWorkflowState,
+  result: {
+    status: 'COMPLETED' | 'BLOCKED' | 'CANCELLED';
+    shotResults: readonly { shotSpecificationId: string; status: string; failureReason?: string }[];
+  },
+): CampaignProductionWorkflowState {
+  if (result.status === 'COMPLETED') {
+    return state;
+  }
+  const failedShots = result.shotResults
+    .filter((s) => s.status !== 'SUCCEEDED')
+    .map(
+      (s) => `${s.shotSpecificationId}:${s.status}${s.failureReason ? `(${s.failureReason})` : ''}`,
+    )
+    .join(', ');
+  return {
+    ...state,
+    status: 'BLOCKED',
+    blockedReason: `SHOT_GENERATION child workflow ended ${result.status}: ${failedShots}`,
+  };
+}
+
 export type GateSignalDecision =
   { readonly kind: 'IGNORE' } | { readonly kind: 'VERIFY'; readonly approvalId: string };
 

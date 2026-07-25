@@ -4,37 +4,46 @@ This file is the operating contract for anyone (human or agent) working in
 this repository. It is deliberately short — for the full design rationale
 see `docs/architecture.md` and `docs/adr/`.
 
-Current milestone: **M5, storage & media pipeline, done** — `StorageProvider`
-(`packages/providers`) gained `getObject`/`objectExists`/
-`getPresignedUploadUrl`/an explicitly-authorized-only `deleteObject`, backed
-by a real MinIO/S3 adapter (`storage.minio.ts`, `@aws-sdk/client-s3`) and an
-extended `MockStorageProvider`. New `packages/media` wraps ffprobe/ffmpeg
-behind an injected `CommandRunner` (array-args `execFile`, never a shell) for
-image/video/audio inspection and thumbnail/proxy generation, with a
-deterministic `MockMediaProvider` for tests. Asset ingestion is a new
-`Asset.kind = 'UPLOADED_SOURCE'` path (`ingestAssetActivity` /
-`inspectMediaActivity` / `generateMediaProxyActivity` in
-`packages/workflows`) with workspace-wide checksum dedup, mandatory
-licensing, and a `PENDING`/`READY`/`FAILED` `ingestionStatus`; `apps/api`
-gained `request-upload`/`confirm-upload`/asset-metadata/download-url
-endpoints reusing the existing `MANAGE_ASSETS` permission. See
-`docs/architecture.md` §8's M5 entry for the full accounting, including why
-none of the three new Activities is wired into `CampaignProductionWorkflow`
-yet and why `inspectMediaActivity` (ffprobe) is deliberately not called
-synchronously from `apps/api` — see also `docs/domain-model.md` §6.1 for the
-asset lifecycle. Still no real caller authentication (a dev-only
-`workspaceId`/`userId` picker in `apps/dashboard/src/lib/session.tsx` stands
-in), no real external generation provider (Veo, Runway, Figma, aerender,
-Frame.io) beyond Claude/Anthropic, and no live-Postgres/Temporal/MinIO/ffmpeg
-environment in this session — `apps/api/src/dev-fake-server.ts`
-(in-memory-backed) is what both `apps/api`'s own tests and
-`apps/dashboard`'s Playwright suite run against instead, and every M5 test
-(including `storage.minio.ts`'s) runs against mocked SDK calls or
-`FakeCommandRunner`/`MockMediaProvider`, never a real MinIO/ffmpeg install.
-Anthropic is reachable via `@combat/providers`'s `ClaudeReasoningProvider`,
-but only when explicitly configured (`REASONING_PROVIDER=claude` +
-`ANTHROPIC_API_KEY`); the default `mock` provider is what every automated
-test uses.
+Current milestone: **M6, shot prompting & video-generation orchestration,
+done** — `VideoGenerationProvider` (`packages/providers`) gained text-to-
+video/image-to-video modes, reference images/video metadata, capability
+profiles (`video-generation-profiles.ts`, illustrative Veo/Runway shapes),
+and a fully deterministic `MockVideoGenerationProvider` (idempotent by key,
+configurable latency/failure injection, never writes binary media). The
+Shot Prompt Engineer agent's output contract was extended (prompt v2) to a
+complete cinematographic brief, persisted by `runShotPromptEngineerActivity`
+as an immutable versioned `ShotSpecification` (`packages/domain`,
+superseding the earlier thin `GenerationPrompt`). `ShotGenerationWorkflow`
+(`packages/workflows/src/workflows`) is a deterministic child workflow —
+bounded parallel batches, per-shot bounded-retry polling via `sleep`, typed
+failure routing, cancellation, a progress query — driven by
+`dispatchShotGenerationActivity`/`pollShotGenerationActivity`/
+`cancelShotGenerationActivity`, which reserve/release/charge budget at all
+four `BudgetLevel`s per attempt and register successful candidates through
+the existing asset lifecycle (`AssetKind.VIDEO_CANDIDATE`).
+`CampaignProductionWorkflow` now runs the Shot Prompt Engineer at PROMPTING
+and starts `ShotGenerationWorkflow` as a child at SHOT_GENERATION, gated the
+same way STRATEGY_REVIEW's M4 hook is — no compositing begins unless every
+shot's generation resolved. `apps/api` gained one read-only
+`GET .../shot-generation` endpoint (specifications, job/attempt/candidate
+state, budget consumption); `apps/dashboard` gained a matching read-only
+page that renders mock candidates as explicit placeholders, never a fake
+video. See `docs/architecture.md` §8's M6 entry for the full accounting,
+including the documented interim narrowings (dispatch-time failures are
+terminal, not retried; a single campaign-wide `videoProviderId` rather than
+per-shot provider selection; SHOT/PROVIDER budget levels checked only at
+generation-dispatch granularity, as docs/domain-model.md §8 anticipated) and
+why the real runtime workflow legitimately reaches `BLOCKED` at VISUAL_QA
+(no QC agent exists until M7) rather than a defect. Still no real caller
+authentication, no real Veo/Runway/ComfyUI adapter (only the deterministic
+mock — do not connect one or spend money without an explicit, separate
+decision), and no live-Postgres/Temporal/MinIO/ffmpeg environment in this
+session — `apps/api/src/dev-fake-server.ts` (in-memory-backed) is what both
+`apps/api`'s own tests and `apps/dashboard`'s Playwright suite run against
+instead. Anthropic is reachable via `@combat/providers`'s
+`ClaudeReasoningProvider`, but only when explicitly configured
+(`REASONING_PROVIDER=claude` + `ANTHROPIC_API_KEY`); the default `mock`
+provider is what every automated test uses.
 
 ## Context and token efficiency
 

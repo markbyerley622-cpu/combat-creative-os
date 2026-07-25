@@ -70,9 +70,67 @@ export const GENERATION_CANDIDATE_STATUSES = [
   'SUCCEEDED',
   'FAILED',
   'TIMED_OUT',
+  'CANCELLED',
 ] as const;
 export const GenerationCandidateStatusSchema = z.enum(GENERATION_CANDIDATE_STATUSES);
 export type GenerationCandidateStatus = z.infer<typeof GenerationCandidateStatusSchema>;
+
+/**
+ * A `ShotGenerationJob` groups the bounded-retry attempt sequence for one
+ * `ShotSpecification` (packages/domain's ShotGenerationJobSchema). Mirrors
+ * the same "mutable status row, immutable attempt history" split already
+ * established by RenderJob/CreativeVariant in this file.
+ */
+export const SHOT_GENERATION_JOB_STATUSES = [
+  'PENDING',
+  'DISPATCHED',
+  'SUCCEEDED',
+  'FAILED',
+  'BUDGET_EXCEEDED',
+  'CANCELLED',
+] as const;
+export const ShotGenerationJobStatusSchema = z.enum(SHOT_GENERATION_JOB_STATUSES);
+export type ShotGenerationJobStatus = z.infer<typeof ShotGenerationJobStatusSchema>;
+
+/**
+ * Per-attempt provider job status, mirrored locally from
+ * `packages/providers`'s `JobStatus` — same "mirror rather than depend"
+ * precedent as `ShotBeatSchema` above, kept because `packages/domain` must
+ * not depend on `packages/providers` (dependency direction: workflows ->
+ * domain only; activities -> providers).
+ */
+export const SHOT_GENERATION_ATTEMPT_STATUSES = [
+  'QUEUED',
+  'SUBMITTED',
+  'POLLING',
+  'SUCCEEDED',
+  'FAILED',
+  'TIMED_OUT',
+  'CANCELLED',
+] as const;
+export const ShotGenerationAttemptStatusSchema = z.enum(SHOT_GENERATION_ATTEMPT_STATUSES);
+export type ShotGenerationAttemptStatus = z.infer<typeof ShotGenerationAttemptStatusSchema>;
+
+/** Coarse motion-intensity direction a Shot Prompt Engineer output can request from the generation provider. */
+export const MOTION_INTENSITIES = ['STATIC', 'LOW', 'MEDIUM', 'HIGH'] as const;
+export const MotionIntensitySchema = z.enum(MOTION_INTENSITIES);
+export type MotionIntensity = z.infer<typeof MotionIntensitySchema>;
+
+/** Screen regions a shot must keep clear for overlaid text/UI — feeds downstream compositing, not enforced by the video-generation provider itself. */
+export const TEXT_SAFE_AREAS = ['TOP', 'BOTTOM', 'LEFT', 'RIGHT', 'CENTER', 'FULL_SAFE'] as const;
+export const TextSafeAreaSchema = z.enum(TEXT_SAFE_AREAS);
+export type TextSafeArea = z.infer<typeof TextSafeAreaSchema>;
+
+/** Mirrored from `@combat/providers`'s `VideoGenerationFailureReason` — same "mirror rather than depend" rationale as `ShotGenerationAttemptStatusSchema` above. */
+export const SHOT_GENERATION_FAILURE_REASONS = [
+  'UNSUPPORTED_CAPABILITY',
+  'PROVIDER_TIMEOUT',
+  'PROVIDER_REJECTED',
+  'PROVIDER_ERROR',
+  'BUDGET_EXCEEDED',
+] as const;
+export const ShotGenerationFailureReasonSchema = z.enum(SHOT_GENERATION_FAILURE_REASONS);
+export type ShotGenerationFailureReason = z.infer<typeof ShotGenerationFailureReasonSchema>;
 
 /**
  * `SHOT_UNUSABLE`, `COMPOSITING_TECHNICAL`, `EDIT_TIMING`, and `AUDIO_TECHNICAL`

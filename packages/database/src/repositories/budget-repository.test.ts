@@ -4,6 +4,7 @@ import {
   checkAndReserveBudget,
   chargeBudget,
   computeSpentCents,
+  getBudgetStatus,
   releaseBudget,
 } from './budget-repository';
 import { InMemoryCampaignStore } from './test-helpers/in-memory-campaign-store';
@@ -149,5 +150,38 @@ describe('budget checks — reservation, charge, release, idempotency', () => {
     const entries = await store.budgetLedgerEntry.findMany({ where: { budgetPolicyId: policyId } });
     expect(entries).toHaveLength(3);
     expect(computeSpentCents(entries)).toBe(500 + 500 - 200);
+  });
+
+  it('getBudgetStatus reports limit/spent/remaining for a configured policy, null for an unconfigured one', async () => {
+    const store = new InMemoryCampaignStore();
+    const workspaceId = randomUUID();
+    const campaignId = randomUUID();
+    store.budgetPolicies.push({
+      id: randomUUID(),
+      workspaceId,
+      level: 'CAMPAIGN',
+      scopeId: campaignId,
+      limitCents: 10_000,
+    });
+    await checkAndReserveBudget(store, {
+      workspaceId,
+      level: 'CAMPAIGN',
+      scopeId: campaignId,
+      requiredCents: 3000,
+      idempotencyKey: randomUUID(),
+      campaignId,
+    });
+
+    const status = await getBudgetStatus(store, workspaceId, 'CAMPAIGN', campaignId);
+    expect(status).toEqual({
+      level: 'CAMPAIGN',
+      scopeId: campaignId,
+      limitCents: 10_000,
+      spentCents: 3000,
+      remainingCents: 7000,
+    });
+
+    const uncapped = await getBudgetStatus(store, workspaceId, 'WORKSPACE', workspaceId);
+    expect(uncapped).toBeNull();
   });
 });

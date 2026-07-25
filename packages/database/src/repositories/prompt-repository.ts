@@ -17,22 +17,14 @@ export interface PromptVersionRecord {
   createdAt: Date;
 }
 
-export interface GenerationPromptRecord {
-  id: string;
-  workspaceId: string;
-  shotId: string;
-  promptVersionId: string;
-  providerId: string;
-  promptText: string;
-  negativePrompt?: string;
-  createdAt: Date;
-}
-
 export interface PromptDataSource {
   promptTemplate: {
     create(args: {
       data: { workspaceId: string; agentKey: string; name: string; description?: string };
     }): Promise<PromptTemplateRecord>;
+    findFirst(args: {
+      where: { workspaceId: string; agentKey: string; name: string };
+    }): Promise<PromptTemplateRecord | null>;
   };
   promptVersion: {
     create(args: {
@@ -45,28 +37,18 @@ export interface PromptDataSource {
     }): Promise<PromptVersionRecord>;
     findMany(args: { where: { promptTemplateId: string } }): Promise<PromptVersionRecord[]>;
   };
-  generationPrompt: {
-    create(args: {
-      data: {
-        workspaceId: string;
-        shotId: string;
-        promptVersionId: string;
-        providerId: string;
-        promptText: string;
-        negativePrompt?: string;
-      };
-    }): Promise<GenerationPromptRecord>;
-    findFirst(args: {
-      where: { id: string; workspaceId: string };
-    }): Promise<GenerationPromptRecord | null>;
-  };
 }
 
+/** Idempotent: `(workspaceId, agentKey, name)` is unique (Prisma `@@unique`) — a retried call returns the existing template instead of violating that constraint. */
 export async function createPromptTemplate(
   db: PromptDataSource,
   workspaceId: string,
   input: { agentKey: string; name: string; description?: string },
 ): Promise<PromptTemplateRecord> {
+  const existing = await db.promptTemplate.findFirst({
+    where: { workspaceId, agentKey: input.agentKey, name: input.name },
+  });
+  if (existing) return existing;
   return db.promptTemplate.create({
     data: {
       workspaceId,
@@ -77,12 +59,17 @@ export async function createPromptTemplate(
   });
 }
 
-/** `version` must be the next monotonic integer for this template — callers compute it from `nextPromptVersionNumber`. */
+/** `version` must be the next monotonic integer for this template — callers compute it from `nextPromptVersionNumber`. Idempotent: `(promptTemplateId, version)` is unique (Prisma `@@unique`) — a retried call returns the existing row instead of violating that constraint. */
 export async function createPromptVersion(
   db: PromptDataSource,
   workspaceId: string,
   input: { promptTemplateId: string; version: number; systemPrompt: string },
 ): Promise<PromptVersionRecord> {
+  const existing = await db.promptVersion.findMany({
+    where: { promptTemplateId: input.promptTemplateId },
+  });
+  const match = existing.find((v) => v.version === input.version);
+  if (match) return match;
   return db.promptVersion.create({
     data: {
       workspaceId,
@@ -102,37 +89,25 @@ export async function nextPromptVersionNumber(
 }
 
 /**
- * Records a generation prompt with its pinned `promptVersionId` — CLAUDE.md
- * "Prompt version used for every generation must be recorded". There is no
- * variant of this function that omits `promptVersionId`.
+ * Bridges an in-code `AgentDefinition.promptVersion` (`@combat/agent-runtime`'s
+ * `PromptTemplate`, keyed by an integer `version` per agent) into this
+ * package's DB-level `PromptTemplate`/`PromptVersion` rows, so
+ * `ShotSpecification.promptVersionId` (a mandatory FK) always has something
+ * concrete to point at. Idempotent end-to-end via the two functions above —
+ * safe to call on every Activity invocation, not just the first.
  */
-export async function recordGenerationPrompt(
+export async function getOrCreatePromptVersionForAgent(
   db: PromptDataSource,
   workspaceId: string,
-  input: {
-    shotId: string;
-    promptVersionId: string;
-    providerId: string;
-    promptText: string;
-    negativePrompt?: string;
-  },
-): Promise<GenerationPromptRecord> {
-  return db.generationPrompt.create({
-    data: {
-      workspaceId,
-      shotId: input.shotId,
-      promptVersionId: input.promptVersionId,
-      providerId: input.providerId,
-      promptText: input.promptText,
-      negativePrompt: input.negativePrompt,
-    },
+  input: { agentKey: string; version: number; systemPrompt: string },
+): Promise<PromptVersionRecord> {
+  const template = await createPromptTemplate(db, workspaceId, {
+    agentKey: input.agentKey,
+    name: `${input.agentKey}-v${input.version}`,
   });
-}
-
-export async function getGenerationPrompt(
-  db: PromptDataSource,
-  workspaceId: string,
-  generationPromptId: string,
-): Promise<GenerationPromptRecord | null> {
-  return db.generationPrompt.findFirst({ where: { id: generationPromptId, workspaceId } });
+  return createPromptVersion(db, workspaceId, {
+    promptTemplateId: template.id,
+    version: input.version,
+    systemPrompt: input.systemPrompt,
+  });
 }

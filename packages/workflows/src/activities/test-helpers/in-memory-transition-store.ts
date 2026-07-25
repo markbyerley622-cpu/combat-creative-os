@@ -18,12 +18,13 @@ import type {
   DeliverySpecificationFactRow,
   EditDecisionListFactRow,
   GenerationCandidateFactRow,
-  GenerationPromptFactRow,
   QualityAssessmentFactRow,
   QualityFailureFactRow,
   RenderJobFactRow,
   ScriptFactRow,
   ShotFactRow,
+  ShotGenerationJobFactRow,
+  ShotSpecificationFactRow,
   SoundCueFactRow,
   TimelineFactRow,
   TransitionFactsDataSource,
@@ -49,7 +50,8 @@ export class InMemoryTransitionStore
   concepts: CreativeConceptFactRow[] = [];
   scripts: ScriptFactRow[] = [];
   shots: ShotFactRow[] = [];
-  generationPrompts: GenerationPromptFactRow[] = [];
+  shotSpecifications: ShotSpecificationFactRow[] = [];
+  shotGenerationJobs: ShotGenerationJobFactRow[] = [];
   generationCandidates: GenerationCandidateFactRow[] = [];
   qualityAssessments: QualityAssessmentFactRow[] = [];
   qualityFailures: QualityFailureFactRow[] = [];
@@ -183,14 +185,20 @@ export class InMemoryTransitionStore
   shot: TransitionFactsDataSource['shot'] = {
     findMany: async ({ where }) => this.shots.filter((s) => where.scriptId.in.includes(s.scriptId)),
   };
-  generationPrompt: TransitionFactsDataSource['generationPrompt'] = {
+  shotSpecification: TransitionFactsDataSource['shotSpecification'] = {
     findMany: async ({ where }) =>
-      this.generationPrompts.filter((p) => where.shotId.in.includes(p.shotId)),
+      this.shotSpecifications.filter((s) => where.shotId.in.includes(s.shotId)),
+  };
+  shotGenerationJob: TransitionFactsDataSource['shotGenerationJob'] = {
+    findMany: async ({ where }) =>
+      this.shotGenerationJobs.filter((j) =>
+        where.shotSpecificationId.in.includes(j.shotSpecificationId),
+      ),
   };
   generationCandidate: TransitionFactsDataSource['generationCandidate'] = {
     findMany: async ({ where }) =>
       this.generationCandidates.filter((c) =>
-        where.generationPromptId.in.includes(c.generationPromptId),
+        where.shotSpecificationId.in.includes(c.shotSpecificationId),
       ),
   };
   qualityAssessment: TransitionFactsDataSource['qualityAssessment'] = {

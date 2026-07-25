@@ -43,6 +43,14 @@ function ProductionProgress({ campaignId }: { campaignId: string }) {
   if (!status) return <LoadingState label="Loading campaign status…" />;
 
   const isAwaitingConcept = status.workflow?.pendingGate === 'CONCEPT';
+  const SHOT_GENERATION_STAGES = [
+    'PROMPTING',
+    'SHOT_GENERATION',
+    'VISUAL_QA',
+    'CONTINUITY_QA',
+    'HUMAN_SHOT_SELECTION',
+  ];
+  const showsShotGeneration = SHOT_GENERATION_STAGES.includes(status.currentStage);
 
   return (
     <div>
@@ -58,6 +66,13 @@ function ProductionProgress({ campaignId }: { campaignId: string }) {
       {isAwaitingConcept && (
         <p>
           <Link href={`/campaigns/${campaignId}/concept-review`}>Review the concept →</Link>
+        </p>
+      )}
+      {showsShotGeneration && (
+        <p>
+          <Link href={`/campaigns/${campaignId}/shot-generation`}>
+            View shot generation progress →
+          </Link>
         </p>
       )}
       {status.workflow?.status === 'BLOCKED' && (

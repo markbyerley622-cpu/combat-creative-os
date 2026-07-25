@@ -49,9 +49,11 @@ export interface AssetDataSource {
     }): Promise<AssetRecord>;
     findFirst(args: { where: { id: string; workspaceId: string } }): Promise<AssetRecord | null>;
     /** `workspaceId` optional on the where clause for the same structural-compatibility reason as other M4/M5 repositories that widen an existing narrow query shape — see creative-concept-repository.ts's doc comment for the pattern this follows. */
-    findMany(args: {
-      where: { workspaceId: string; checksum: string; kind: AssetKind };
-    }): Promise<AssetRecord[]>;
+    findMany(
+      args:
+        | { where: { workspaceId: string; checksum: string; kind: AssetKind } }
+        | { where: { workspaceId: string; campaignId: string; kind?: AssetKind } },
+    ): Promise<AssetRecord[]>;
     update(args: {
       where: { id: string };
       data: {
@@ -153,6 +155,16 @@ export async function findAssetByChecksum(
 ): Promise<AssetRecord | undefined> {
   const matches = await db.asset.findMany({ where: { workspaceId, checksum, kind } });
   return matches[0];
+}
+
+/** All assets collected for a campaign, optionally narrowed to one `AssetKind` — the reference-asset pool a shot-generation dispatch can draw from. */
+export async function listAssetsForCampaign(
+  db: AssetDataSource,
+  workspaceId: string,
+  campaignId: string,
+  kind?: AssetKind,
+): Promise<AssetRecord[]> {
+  return db.asset.findMany({ where: { workspaceId, campaignId, kind } });
 }
 
 /**

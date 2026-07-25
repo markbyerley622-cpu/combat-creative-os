@@ -39,33 +39,33 @@ shape.
 
 ## 2. The 24 required domain schemas
 
-| Schema                  | File                                  | Notes                                                                                           |
-| ----------------------- | ------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| CampaignBrief           | `schemas/campaign.ts`                 | versioned, immutable once `acceptedAt` is set                                                   |
-| AudienceProfile         | `schemas/audience-profile.ts`         | child of a CampaignBrief                                                                        |
-| CreativeConcept         | `schemas/creative-concept.ts`         | versioned                                                                                       |
-| VisualLanguage          | `schemas/creative-concept.ts`         | 1:1 with a CreativeConcept version                                                              |
-| Script                  | `schemas/script.ts`                   | versioned                                                                                       |
-| Timeline                | `schemas/timeline.ts`                 | versioned; `entries` reference Shot + TransitionSpecification                                   |
-| Shot                    | `schemas/shot.ts`                     | belongs to a Script                                                                             |
-| TransitionSpecification | `schemas/transition-specification.ts` | reusable cut/dissolve/wipe/fade definition                                                      |
-| GenerationPrompt        | `schemas/generation-prompt.ts`        | `promptVersionId` is **mandatory**                                                              |
-| GenerationCandidate     | `schemas/generation-candidate.ts`     | one video-gen attempt                                                                           |
-| QualityAssessment       | `schemas/quality-assessment.ts`       | assesses a candidate _or_ a stage-output asset (XOR); `subjectStage` disambiguates which stage  |
-| QualityFailure          | `schemas/quality-assessment.ts`       | structured failure detail on an assessment; `category` drives typed revision routing (§4.2)     |
-| HumanApproval           | `schemas/human-approval.ts`           | **immutable** — insert-only repository; `repairTarget` required for a rejected `FINAL` decision |
-| Asset                   | `schemas/asset.ts`                    | polymorphic; always has a ProvenanceRecord                                                      |
-| AssetProvenance         | `schemas/asset.ts`                    | lineage edge list (`derivedFromAssetIds`)                                                       |
-| LicenseRecord           | `schemas/license-record.ts`           | 0..1 on Asset                                                                                   |
-| RenderJob               | `schemas/render-job.ts`               | COMPOSITING or EXPORT                                                                           |
-| SoundCue                | `schemas/sound-cue.ts`                | belongs to a Timeline                                                                           |
-| EditDecisionList        | `schemas/edit-decision-list.ts`       | versioned; `entries` reference Asset                                                            |
-| DeliverySpecification   | `schemas/delivery-specification.ts`   | per platform/aspect-ratio                                                                       |
-| CreativeVariant         | `schemas/creative-variant.ts`         | a rendered delivery-spec-conformant cut                                                         |
-| PerformanceMetrics      | `schemas/performance-metrics.ts`      | per CreativeVariant, per platform                                                               |
-| PromptTemplate          | `schemas/prompt-template.ts`          | one per agent/purpose                                                                           |
-| PromptVersion           | `schemas/prompt-template.ts`          | monotonically versioned; pinned by GenerationPrompt                                             |
-| BudgetPolicy            | `schemas/budget-policy.ts`            | cap at WORKSPACE/CAMPAIGN/SHOT/PROVIDER level                                                   |
+| Schema                  | File                                  | Notes                                                                                                                                                                                                      |
+| ----------------------- | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| CampaignBrief           | `schemas/campaign.ts`                 | versioned, immutable once `acceptedAt` is set                                                                                                                                                              |
+| AudienceProfile         | `schemas/audience-profile.ts`         | child of a CampaignBrief                                                                                                                                                                                   |
+| CreativeConcept         | `schemas/creative-concept.ts`         | versioned                                                                                                                                                                                                  |
+| VisualLanguage          | `schemas/creative-concept.ts`         | 1:1 with a CreativeConcept version                                                                                                                                                                         |
+| Script                  | `schemas/script.ts`                   | versioned                                                                                                                                                                                                  |
+| Timeline                | `schemas/timeline.ts`                 | versioned; `entries` reference Shot + TransitionSpecification                                                                                                                                              |
+| Shot                    | `schemas/shot.ts`                     | belongs to a Script                                                                                                                                                                                        |
+| TransitionSpecification | `schemas/transition-specification.ts` | reusable cut/dissolve/wipe/fade definition                                                                                                                                                                 |
+| ShotSpecification       | `schemas/shot-specification.ts`       | M6 — supersedes the originally-scoped, thinner `GenerationPrompt`; `promptVersionId` is **mandatory**; versioned per shot, full cinematographic brief (see §8's M6 accounting via docs/architecture.md §8) |
+| GenerationCandidate     | `schemas/generation-candidate.ts`     | one requested video-gen output within a `ShotGenerationAttempt`                                                                                                                                            |
+| QualityAssessment       | `schemas/quality-assessment.ts`       | assesses a candidate _or_ a stage-output asset (XOR); `subjectStage` disambiguates which stage                                                                                                             |
+| QualityFailure          | `schemas/quality-assessment.ts`       | structured failure detail on an assessment; `category` drives typed revision routing (§4.2)                                                                                                                |
+| HumanApproval           | `schemas/human-approval.ts`           | **immutable** — insert-only repository; `repairTarget` required for a rejected `FINAL` decision                                                                                                            |
+| Asset                   | `schemas/asset.ts`                    | polymorphic; always has a ProvenanceRecord                                                                                                                                                                 |
+| AssetProvenance         | `schemas/asset.ts`                    | lineage edge list (`derivedFromAssetIds`)                                                                                                                                                                  |
+| LicenseRecord           | `schemas/license-record.ts`           | 0..1 on Asset                                                                                                                                                                                              |
+| RenderJob               | `schemas/render-job.ts`               | COMPOSITING or EXPORT                                                                                                                                                                                      |
+| SoundCue                | `schemas/sound-cue.ts`                | belongs to a Timeline                                                                                                                                                                                      |
+| EditDecisionList        | `schemas/edit-decision-list.ts`       | versioned; `entries` reference Asset                                                                                                                                                                       |
+| DeliverySpecification   | `schemas/delivery-specification.ts`   | per platform/aspect-ratio                                                                                                                                                                                  |
+| CreativeVariant         | `schemas/creative-variant.ts`         | a rendered delivery-spec-conformant cut                                                                                                                                                                    |
+| PerformanceMetrics      | `schemas/performance-metrics.ts`      | per CreativeVariant, per platform                                                                                                                                                                          |
+| PromptTemplate          | `schemas/prompt-template.ts`          | one per agent/purpose                                                                                                                                                                                      |
+| PromptVersion           | `schemas/prompt-template.ts`          | monotonically versioned; pinned by ShotSpecification                                                                                                                                                       |
+| BudgetPolicy            | `schemas/budget-policy.ts`            | cap at WORKSPACE/CAMPAIGN/SHOT/PROVIDER level                                                                                                                                                              |
 
 Three supporting tables exist beyond the literal 24, because the explicit
 requirements ("audited", "idempotent", "immutable approval records") need
@@ -77,6 +77,21 @@ somewhere to live:
 - **CampaignTransitionAudit** — the append-only, per-attempt audit trail and
   idempotency mechanism (`workflow/transition-audit.ts`).
 
+M6 added two more, for the same reason — `ShotGenerationWorkflow`'s
+bounded-retry attempt history and per-attempt provider-job identity need
+somewhere to live that isn't overloaded onto `GenerationCandidate`:
+
+- **ShotGenerationJob** (`schemas/shot-generation-job.ts`) — one per
+  `ShotSpecification`, mutable status/`attemptCount` row (same "mutable
+  status, immutable content" split as `RenderJob`/`CreativeVariant`), groups
+  the attempt sequence below.
+- **ShotGenerationAttempt** (`schemas/shot-generation-attempt.ts`) — one row
+  per bounded-retry attempt (append-only retry history), carrying
+  `idempotencyKey`, `providerId`/`providerJobId`, `generationParams`,
+  `estimatedCostCents`/`actualCostCents`, and terminal failure detail.
+  `GenerationCandidate` now references its producing attempt
+  (`shotGenerationAttemptId`) rather than carrying its own `attempt` number.
+
 ---
 
 ## 3. Tenancy scoping
@@ -85,7 +100,7 @@ Every table above carries a `workspaceId` column with an index (CLAUDE.md).
 A real FK-with-cascade to `Workspace` is declared only on the aggregate roots
 queried directly by API/activity code — `Campaign`, `Asset`, `HumanApproval`,
 `PromptTemplate`, `BudgetPolicy`, `BudgetLedgerEntry`, `CampaignTransitionAudit`.
-Deeply-nested child tables (`Shot`, `GenerationPrompt`, `QualityFailure`, …)
+Deeply-nested child tables (`Shot`, `ShotSpecification`, `QualityFailure`, …)
 rely on their immediate parent's FK chain up to `Campaign`/`Workspace` for
 referential integrity, and carry `workspaceId` as a denormalized, indexed
 scoping column so the repository layer can always filter directly on it
@@ -289,8 +304,11 @@ released before returning.
 `VISUAL_QA -> SHOT_GENERATION` and `CONTINUITY_QA -> SHOT_GENERATION` (each a
 retry) are only valid while `visualQARetryAllowed`/`continuityQARetryAllowed`
 is true: a shot that hasn't yet passed the respective check and whose
-highest `GenerationCandidate.attempt` is still below
-`MAX_SHOT_GENERATION_ATTEMPTS` (3, matching architecture.md §3.3's stated
+`ShotGenerationJob.attemptCount` is still below its `maxAttempts` (M6 —
+before `ShotGenerationJob` existed, this was tracked as a per-candidate
+`attempt` field; that field is gone, superseded by the job's own
+`attemptCount`/`maxAttempts`, both set from
+`MAX_SHOT_GENERATION_ATTEMPTS`, 3, matching architecture.md §3.3's stated
 default). Once a shot exhausts its attempts, the fact is false and the
 workflow-level caller must route it to `HUMAN_SHOT_SELECTION` as a
 `NEEDS_HUMAN` shot instead of retrying forever — there is no unbounded loop
@@ -421,11 +439,16 @@ writes to the same key and dedupes to the same `Asset` row, matching
 
 `PromptTemplate` (one per agent/purpose) has many `PromptVersion` rows,
 versioned by a monotonically increasing integer (`nextPromptVersionNumber`).
-`GenerationPrompt.promptVersionId` is a **mandatory**, non-nullable field
+`ShotSpecification.promptVersionId` is a **mandatory**, non-nullable field
 (both in the Zod schema and the Prisma FK) — there is no
-`recordGenerationPrompt` call that can omit it. Given a `GenerationPrompt`
+`createShotSpecification` call that can omit it. Given a `ShotSpecification`
 row, the exact system prompt text used for that generation is always
-reconstructible via `promptVersionId -> PromptVersion.systemPrompt`.
+reconstructible via `promptVersionId -> PromptVersion.systemPrompt`. M6's
+`getOrCreatePromptVersionForAgent` (`packages/database`) is the idempotent
+bridge from an in-code `AgentDefinition.promptVersion` (an integer per
+agent, e.g. Shot Prompt Engineer's prompt v2) to this DB-level
+`PromptTemplate`/`PromptVersion` pair — it is what every
+`ShotSpecification.promptVersionId` is ultimately resolved from.
 
 ---
 
@@ -457,11 +480,16 @@ execute-specialist-agent-activity.ts`) but is not one of this document's
 - No specialist agent, provider integration, or dashboard UI exists yet
   (out of scope for this milestone — see `packages/agents/README.md`).
 - The four-level (workspace/campaign/shot/provider) budget check is fully
-  implemented in `budget-repository.ts` and exercised at the WORKSPACE and
-  CAMPAIGN levels by the transition service; SHOT- and PROVIDER-level checks
-  are expected to be invoked at generation-dispatch granularity inside the
-  future `ShotGenerationWorkflow` activity (architecture.md §3.3), not at the
-  campaign-stage-transition granularity this milestone implements.
+  implemented in `budget-repository.ts`, exercised at the WORKSPACE and
+  CAMPAIGN levels by the transition service, and — as this note previously
+  anticipated — now also exercised at the SHOT and PROVIDER levels by M6's
+  `dispatchShotGenerationActivity`/`pollShotGenerationActivity`/
+  `cancelShotGenerationActivity` at generation-dispatch granularity
+  (architecture.md §8's M6 entry), not campaign-stage-transition granularity.
+  The "generation-attempt" level CLAUDE.md's budget rules also ask for is
+  satisfied by giving every `ShotGenerationAttempt` its own
+  idempotency-key-scoped reservation under these same four levels, not a
+  fifth `BudgetLevel` enum value.
 - The `COMPOSITING`, `SOUND_DESIGN`, and `EXPORTING` same-stage technical-retry
   loops are not yet bounded by an attempt counter (§4.4) — only the
   shot-generation retry loop (`VISUAL_QA`/`CONTINUITY_QA`) is bounded in this

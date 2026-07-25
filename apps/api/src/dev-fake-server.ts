@@ -139,6 +139,7 @@ async function main() {
     approvalDb: store,
     campaignDb: store,
     assetDb: store,
+    shotGenerationDb: store,
     storageProvider: new MockStorageProvider(),
     workflowClient: buildFakeWorkflowClient(),
   });

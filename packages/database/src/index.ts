@@ -13,6 +13,8 @@ export * from './repositories/campaign-transition-service';
 export * from './repositories/asset-repository';
 export * from './repositories/license-repository';
 export * from './repositories/prompt-repository';
+export * from './repositories/shot-specification-repository';
+export * from './repositories/shot-generation-repository';
 export * from './repositories/agent-invocation-repository';
 // Exported deliberately (not just used internally) — this fake is the one
 // in-memory implementation of every *DataSource interface this package

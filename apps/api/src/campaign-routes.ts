@@ -243,6 +243,10 @@ export function registerCampaignRoutes(
               workflowRunId: randomUUID(),
               initialStage: campaign.currentStage,
               maxRevisionsPerGate: DEFAULT_MAX_REVISIONS_PER_GATE,
+              // M6: no provider-selection mechanism exists yet (see
+              // campaign-production-workflow-contracts.ts's doc comment) —
+              // every campaign targets the deterministic mock provider.
+              videoProviderId: 'mock-video-generation',
             },
           ],
         });
