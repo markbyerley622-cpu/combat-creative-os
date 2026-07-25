@@ -92,4 +92,14 @@ export interface CampaignProductionActivities {
   runSoundDirectorActivity(
     input: activities.RunSoundDirectorInput,
   ): Promise<activities.RunSoundDirectorOutput>;
+  /**
+   * M11: runs the Final QA Controller at FINAL_QA over the campaign's
+   * registered FINAL_MASTER asset, persisting the immutable asset-based
+   * QualityAssessment (+ typed QualityFailures) that `finalQAPassed` /
+   * `finalQARepairTargetIs*` read, and reporting the repair target a failing
+   * master routes to. See run-final-qa-controller-activity.ts's doc comment.
+   */
+  runFinalQaControllerActivity(
+    input: activities.RunFinalQaControllerInput,
+  ): Promise<activities.RunFinalQaControllerOutput>;
 }

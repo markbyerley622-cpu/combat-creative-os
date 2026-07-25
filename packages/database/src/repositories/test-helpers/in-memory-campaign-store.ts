@@ -616,13 +616,18 @@ export class InMemoryCampaignStore
     findFirst: async ({
       where,
     }: {
-      where: { generationCandidateId: string; subjectStage: CampaignStage; workspaceId: string };
+      where:
+        | { generationCandidateId: string; subjectStage: CampaignStage; workspaceId: string }
+        | { assetId: string; subjectStage: CampaignStage; workspaceId: string };
     }) =>
-      this.qualityAssessmentRecords.find(
-        (qa) =>
-          qa.generationCandidateId === where.generationCandidateId &&
-          qa.subjectStage === where.subjectStage &&
-          qa.workspaceId === where.workspaceId,
+      this.qualityAssessmentRecords.find((qa) =>
+        'assetId' in where
+          ? qa.assetId === where.assetId &&
+            qa.subjectStage === where.subjectStage &&
+            qa.workspaceId === where.workspaceId
+          : qa.generationCandidateId === where.generationCandidateId &&
+            qa.subjectStage === where.subjectStage &&
+            qa.workspaceId === where.workspaceId,
       ) ?? null,
     create: async ({ data }: { data: Omit<QualityAssessmentRecord, 'id' | 'createdAt'> }) => {
       const record: QualityAssessmentRecord = { id: randomUUID(), createdAt: new Date(), ...data };

@@ -451,8 +451,9 @@ erDiagram
   (`assetId, derivedFromAssetId[], producedByInvocationId, providerJobRef`).
 - **`LicensingMetadata`** is `0..1` on `Asset` deliberately — internally generated
   intermediate assets (proxies, thumbnails) don't need it; anything that could ship
-  in a final ad does, and Final QA checks for its presence before allowing
-  `FINAL_APPROVAL` to be requested.
+  in a final ad does, and Final QA is intended to check for its presence before
+  allowing `FINAL_APPROVAL` to be requested. **Not implemented as of M11** — see
+  §7.2 open question 1; the check is blocked on the licensing policy itself.
 - **`Budget`** and **`BudgetLedger`** are separate: `Budget` rows are configured
   caps at each of the four required levels (workspace, campaign, shot, provider —
   a shot can have its own cap independent of the campaign's, and a provider can
@@ -903,7 +904,14 @@ depend on them (noted per item).
    AI-generated ads is a legal question, not a software one — `LicensingMetadata`
    models it, but the actual policy (what's allowed, who signs off) needs
    Combat Reviews' legal input before Final QA's licensing check can be
-   meaningfully strict rather than a rubber stamp. _Blocks: M11._
+   meaningfully strict rather than a rubber stamp. **M11 shipped without it**:
+   the Final QA Controller's rubric covers technical delivery, captions, brand
+   safety and edit continuity, but performs *no* licensing check, so the claim
+   under `Asset`/`LicensingMetadata` below ("Final QA checks for its presence
+   before allowing `FINAL_APPROVAL` to be requested") is not yet true — a
+   FINAL_MASTER with no `LicensingMetadata` reaches the FINAL gate today, and
+   the human approver is the only licensing control. _Blocks: production launch;
+   no longer blocks M11._
 2. **Claude multimodal QA reliability and cost at production scale** is
    unverified — Visual QC and Final QA both lean on it. Needs an empirical spike
    (accuracy against a labeled sample, cost per shot) before trusting it as a
@@ -1401,10 +1409,9 @@ subjectStage])` idempotency constraint. `createQualityAssessmentForCandidate`
   Activity retry (Timeline/plan idempotent per `(campaign, version)`; cue+stem
   creation skipped once cues exist). The existence of SoundCues on the
   campaign's Timeline is what the `soundDesignComplete` fact reads, so on
-  success the workflow auto-forwards SOUND_DESIGN → **FINAL_QA, where it
-  legitimately reaches BLOCKED** (no Final QA Controller until M11) — the exact
-  M10 stopping point; a Sound Director failure escalates to BLOCKED without
-  advancing. `apps/api` gained one read-only `GET .../sound-design` route
+  success the workflow auto-forwards SOUND_DESIGN → **FINAL_QA** (which M10 left
+  BLOCKED and M11 now assesses — see the M11 entry); a Sound Director failure
+  escalates to BLOCKED without advancing. `apps/api` gained one read-only `GET .../sound-design` route
   (plan + timeline + cues + budget + workflow stage, member-readable, no
   preview since stems carry no bytes); `apps/dashboard` gained a matching
   read-only screen rendering each cue's stem as an explicit placeholder.
@@ -1422,14 +1429,85 @@ subjectStage])` idempotency constraint. `createQualityAssessmentForCandidate`
   provenance, idempotent retry, no-rough-edit + agent-failure rejection,
   workspace isolation); timeline + sound-design repository tests (versioning,
   fact visibility, workspace scoping); a 2-test SOUND_DESIGN parent-wiring
-  suite (SOUND_DESIGN → FINAL_QA BLOCKED stopping point, Sound-Director-failure
-  escalation); 4 `apps/api` route tests + a dashboard api-client test. No paid
-  API calls, no real media.
-- **M11 — Final QA & Final Approval gate.** Final QA Controller (ffmpeg technical
-  checks + multimodal review), `apps/dashboard` Final Approval UI calling
-  `apps/api`. _Test:_ fixture masters with known technical defects assert correct
-  pass/fail/routing; RBAC test confirming only `CREATIVE_DIRECTOR`/`OWNER_ADMIN`
-  can approve.
+  suite (SOUND_DESIGN → FINAL_QA handoff, Sound-Director-failure escalation);
+  4 `apps/api` route tests + a dashboard api-client test. No paid API calls, no
+  real media.
+- **M11 — Final QA & Final Approval gate. Done (2026-07-25), with the interim
+  decisions this item records.** The existing `final-qa-controller` agent is
+  wired into `CampaignProductionWorkflow` at FINAL_QA through
+  `runFinalQaControllerActivity` (`packages/workflows/src/activities`): it
+  registers the campaign's `FINAL_MASTER` asset (deterministic checksum derived
+  from `(timeline, soundDesignPlan.version)`, deduped, no bytes) with a real
+  provenance chain `FINAL_MASTER -> ROUGH_CUT + SOUND_STEM[]`, derives the
+  master's technical probe and delivery specification from persisted production
+  facts, runs the agent through the same `executeSpecialistAgentActivity`
+  boundary every other agent uses (the agent never touches a
+  repository/provider/other agent), and persists the verdict as the **immutable
+  asset-based `QualityAssessment`** (`subjectStage: 'FINAL_QA'`, unique per
+  `(assetId, subjectStage)` — `createQualityAssessmentForAsset` in
+  `packages/database`) plus one typed `QualityFailure` per finding. This is the
+  first asset-based assessment the system writes; the candidate-based path
+  (M7) is unchanged, and `transition-facts.ts`'s `finalQAPassed` /
+  `finalQARepairTargetIs*` / `finalQAAudioFailure` derivations already read
+  exactly this shape.
+
+  On a pass the workflow auto-forwards FINAL_QA → FINAL_APPROVAL, where the
+  **FINAL human gate still applies unchanged** — the workflow never satisfies it
+  itself; only `apps/api`'s existing `POST .../approvals/final` records the
+  `HumanApproval` and signals, and `verifyHumanApprovalActivity` re-verifies it.
+  On a failure the workflow issues a **repair-targeted `AUTO_RETRY`**: the
+  Activity maps the findings' typed categories through `QUALITY_FAILURE_ROUTING`
+  and selects the most upstream of FINAL_QA's three revision edges
+  (COMPOSITING | ROUGH_CUT | SOUND_DESIGN — re-compositing regenerates
+  everything behind it, so repairing downstream first would only be redone).
+  `advanceCampaignStageActivity`'s AUTO_RETRY mode gained a `repairTarget` for
+  this; it still filters to **non-gated** revision edges only and refuses an
+  ambiguous multi-edge retry that supplies no target, so no automated retry can
+  cross a human approval gate. A failure with no routable category, and every
+  other Activity-level failure, escalates to BLOCKED rather than guessing an
+  edge. `apps/api` gained one read-only `GET .../final-qa` route (verdict +
+  findings + master + delivery context + budget + whether the caller holds
+  `APPROVE_FINAL_MASTER`); `apps/dashboard` gained a Final Approval screen that
+  renders the verdict and calls the existing approval endpoint. UI visibility is
+  not authorization — the permission is enforced server-side on the approval
+  route regardless of what the read route reports.
+
+  **Interim decisions**: (1) the technical probe is **derived, not probed** —
+  there is no real master media in this environment (the rough-edit render is
+  the mock MotionGraphicsProvider's output, `sizeBytes: 0`, no bytes; stems are
+  mock `SOUND_STEM` assets), so duration comes from the assembled `Timeline`'s
+  real frame count / frame rate, resolution from the rough edit's declared
+  output format, and caption presence from whether the edit actually carries a
+  CAPTION overlay. These are genuine conformance checks. **Loudness is nominal,
+  not measured**: with no audio bytes there is no ffmpeg `loudnorm` pass, so the
+  master is reported at the delivery target and the loudness criterion is
+  advisory until a real render worker exists. (2) No `DeliverySpecification` row
+  is created — per-platform delivery requirements are §7.2 open question 5,
+  which blocks M12, so the master is judged against what the campaign's accepted
+  brief actually asked for (first requested duration) plus the rough edit's
+  declared format, not against invented platform rules. (3) The `FINAL_MASTER`
+  is a mock asset with no bytes for the same reason the M10 stems are; the
+  assessment + findings are the reviewable artifact and the dashboard renders an
+  explicit preview placeholder rather than a player. **M11 stopping point:** an
+  approved final master advances FINAL_APPROVAL → **VARIANT_GENERATION, where it
+  legitimately reaches BLOCKED** (no Variant Generator until M12). No variants,
+  no export, no distribution, no real providers; no live
+  Postgres/Temporal/MinIO/ffmpeg (the `QualityAssessment.assetId` column already
+  exists in the Prisma schema, so M11 needed no migration). _Test:_ 18
+  `runFinalQaControllerActivity` tests including fixture masters with known
+  technical defects (over-duration, missing caption burn) asserting the derived
+  probe surfaces them, and per-category pass/fail/routing
+  (`COMPOSITING_TECHNICAL` → COMPOSITING, `EDIT_TIMING` → ROUGH_CUT,
+  `AUDIO_TECHNICAL` → SOUND_DESIGN, most-upstream-wins, unroutable → escalate),
+  plus idempotent retry, workspace isolation and agent-failure rejection; 6
+  asset-based quality-assessment repository tests; 6 FINAL_QA AUTO_RETRY routing
+  tests on `advanceCampaignStageActivity` (including "an AUTO_RETRY can never
+  cross the FINAL gate"); an 8-test FINAL_QA parent-wiring suite (gate opens and
+  is crossed only on a verified approval, repair routing per target, BLOCKED
+  paths, and "a passing master never satisfies the FINAL gate on its own"); 11
+  `apps/api` route tests including the RBAC matrix confirming only
+  `CREATIVE_DIRECTOR`/`OWNER_ADMIN` may approve; 3 dashboard api-client tests.
+  No paid API calls, no real media.
 - **M12 — Variants.** Variant Generator (15/10/6s), variant QA reusing Final QA
   logic. _Test:_ cut-point correctness against fixture timelines; QA re-run per
   variant.

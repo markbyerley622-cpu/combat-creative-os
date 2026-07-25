@@ -4,6 +4,7 @@ import type * as activities from '../activities';
 import type { CompositingWorkflowOutput } from '@combat/domain';
 import {
   resetFakeWorkflowRuntime,
+  runQuery,
   setFakeActivityImpls,
   setFakeChildWorkflowImpls,
 } from '../test-helpers/fake-temporal-workflow';
@@ -48,16 +49,18 @@ describe('campaignProductionWorkflow — COMPOSITING wiring (M9)', () => {
   beforeEach(() => resetFakeWorkflowRuntime());
   afterEach(() => vi.restoreAllMocks());
 
-  it('runs the CompositingWorkflow child, advances COMPOSITING -> ROUGH_CUT -> SOUND_DESIGN -> FINAL_QA (M10 stopping point)', async () => {
+  it('runs the CompositingWorkflow child, advances COMPOSITING -> ROUGH_CUT -> SOUND_DESIGN -> FINAL_QA -> the FINAL gate (M11 stopping point)', async () => {
     const advance = vi
       .fn<AdvanceFn>()
       .mockResolvedValueOnce({ ok: true, toStage: 'ROUGH_CUT' }) // COMPOSITING -> ROUGH_CUT (compositingComplete)
       .mockResolvedValueOnce({ ok: true, toStage: 'SOUND_DESIGN' }) // ROUGH_CUT -> SOUND_DESIGN (roughCutAssembled)
       .mockResolvedValueOnce({ ok: true, toStage: 'FINAL_QA' }) // SOUND_DESIGN -> FINAL_QA (soundDesignComplete, M10)
+      .mockResolvedValueOnce({ ok: true, toStage: 'FINAL_APPROVAL' }) // FINAL_QA -> FINAL_APPROVAL (finalQAPassed, M11)
       .mockResolvedValueOnce({
         ok: false,
-        reason: 'MISSING_PREREQUISITE',
-        detail: 'finalQAPassed is false',
+        reason: 'GATE_REQUIRED',
+        gate: 'FINAL',
+        targetStage: 'VARIANT_GENERATION',
       });
     const verify = vi
       .fn<VerifySelectionFn>()
@@ -79,15 +82,27 @@ describe('campaignProductionWorkflow — COMPOSITING wiring (M9)', () => {
         version: 1,
         cueCount: 2,
       })) as never,
+      // M11: FINAL_QA runs the Final QA Controller before its AUTO_FORWARD.
+      runFinalQaControllerActivity: (async () => ({
+        ok: true,
+        pass: true,
+        assessmentId: 'qa-1',
+        finalMasterAssetId: 'master-1',
+        overallScore: 1,
+        blockingFindingCount: 0,
+      })) as never,
     });
     setFakeChildWorkflowImpls({ compositingWorkflow: child as never });
 
-    const result = await run('run-comp-1');
+    const resultPromise = run('run-comp-1');
+    // The campaign now runs the whole automated tail and parks on the FINAL
+    // human gate — the M11 stopping point (no Variant Generator until M12).
+    await vi.waitFor(() => expect(runQuery<string | null>('getPendingGate')).toBe('FINAL'));
     expect(child).toHaveBeenCalledTimes(1);
     expect(verify).toHaveBeenCalledTimes(1);
-    expect(result.status).toBe('BLOCKED');
-    expect(result.finalStage).toBe('FINAL_QA');
-    expect(result.blockedReason).toContain('finalQAPassed');
+    expect(runQuery('getCurrentStage')).toBe('FINAL_APPROVAL');
+    expect(runQuery('getStatus')).toBe('AWAITING_APPROVAL');
+    void resultPromise;
   });
 
   it('escalates to BLOCKED (no advance) when the CompositingWorkflow child ends BLOCKED', async () => {

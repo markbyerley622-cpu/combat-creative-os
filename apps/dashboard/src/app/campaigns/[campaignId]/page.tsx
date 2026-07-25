@@ -54,6 +54,10 @@ function ProductionProgress({ campaignId }: { campaignId: string }) {
   const showsShotSelection = status.currentStage === 'HUMAN_SHOT_SELECTION';
   const showsCompositing = status.currentStage === 'COMPOSITING';
   const showsSoundDesign = status.currentStage === 'SOUND_DESIGN';
+  // M11: the Final QA verdict and the FINAL gate live on one screen — visible
+  // from FINAL_QA (verdict only) through FINAL_APPROVAL (verdict + gate).
+  const showsFinalApproval =
+    status.currentStage === 'FINAL_QA' || status.currentStage === 'FINAL_APPROVAL';
 
   return (
     <div>
@@ -91,6 +95,11 @@ function ProductionProgress({ campaignId }: { campaignId: string }) {
       {showsSoundDesign && (
         <p>
           <Link href={`/campaigns/${campaignId}/sound-design`}>View sound design →</Link>
+        </p>
+      )}
+      {showsFinalApproval && (
+        <p>
+          <Link href={`/campaigns/${campaignId}/final-approval`}>Final QA &amp; approval →</Link>
         </p>
       )}
       {status.workflow?.status === 'BLOCKED' && (

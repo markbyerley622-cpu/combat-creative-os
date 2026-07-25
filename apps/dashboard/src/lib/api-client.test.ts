@@ -173,3 +173,54 @@ describe('createApiClient — M10 sound design', () => {
     );
   });
 });
+
+describe('createApiClient — M11 final QA + final approval', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('GETs the final-QA status scoped to workspace + user', async () => {
+    const fetchMock = mockFetchOnce(200, { findings: [] });
+    vi.stubGlobal('fetch', fetchMock);
+    const client = createApiClient('ws-1', 'user-1', { baseUrl: 'http://api.test' });
+    await client.getFinalQa('camp-1');
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://api.test/workspaces/ws-1/campaigns/camp-1/final-qa?userId=user-1',
+      expect.anything(),
+    );
+  });
+
+  it('POSTs an APPROVED final decision to the one FINAL gate endpoint', async () => {
+    const fetchMock = mockFetchOnce(202, { approvalId: 'a-1', replayed: false });
+    vi.stubGlobal('fetch', fetchMock);
+    const client = createApiClient('ws-1', 'user-1', { baseUrl: 'http://api.test' });
+    await client.submitFinalApproval('camp-1', { decision: 'APPROVED', comments: 'ship it' });
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://api.test/workspaces/ws-1/campaigns/camp-1/approvals/final',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ userId: 'user-1', decision: 'APPROVED', comments: 'ship it' }),
+      }),
+    );
+  });
+
+  it('POSTs a changes-requested decision with the repair target', async () => {
+    const fetchMock = mockFetchOnce(202, { approvalId: 'a-2', replayed: false });
+    vi.stubGlobal('fetch', fetchMock);
+    const client = createApiClient('ws-1', 'user-1', { baseUrl: 'http://api.test' });
+    await client.submitFinalApproval('camp-1', {
+      decision: 'CHANGES_REQUESTED',
+      repairTarget: 'SOUND_DESIGN',
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://api.test/workspaces/ws-1/campaigns/camp-1/approvals/final',
+      expect.objectContaining({
+        body: JSON.stringify({
+          userId: 'user-1',
+          decision: 'CHANGES_REQUESTED',
+          repairTarget: 'SOUND_DESIGN',
+        }),
+      }),
+    );
+  });
+});

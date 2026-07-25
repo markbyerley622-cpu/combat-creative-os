@@ -295,6 +295,29 @@ export function applyRunSoundDirectorResult(
 }
 
 /**
+ * Applies the result of the Final QA Controller run for one FINAL_QA visit
+ * (M11). A passing master leaves state unchanged (the normal AUTO_FORWARD then
+ * finds `finalQAPassed` true and advances to FINAL_APPROVAL, where the FINAL
+ * human gate still applies); a failing master also leaves state unchanged so
+ * the caller can issue the AUTO_RETRY to `result.repairTarget`. Every `ok:
+ * false` outcome — including a failure with no routable repair category —
+ * escalates to BLOCKED rather than advancing or retrying blindly.
+ */
+export function applyRunFinalQaControllerResult(
+  state: CampaignProductionWorkflowState,
+  result: activities.RunFinalQaControllerOutput,
+): CampaignProductionWorkflowState {
+  if (result.ok) {
+    return state;
+  }
+  return {
+    ...state,
+    status: 'BLOCKED',
+    blockedReason: `FINAL_QA assessment failed (${result.reason}): ${result.detail}`,
+  };
+}
+
+/**
  * Applies the SHOT_SELECTION-gate re-verification at COMPOSITING entry — the
  * persisted selection set must still be valid before the CompositingWorkflow
  * starts. An invalid set escalates to BLOCKED (a human must re-approve).

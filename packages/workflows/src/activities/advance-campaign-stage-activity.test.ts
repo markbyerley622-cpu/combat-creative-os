@@ -365,3 +365,126 @@ describe('advanceCampaignStageActivity — AUTO_RETRY', () => {
     expect(store.audits).toHaveLength(1);
   });
 });
+
+/**
+ * Seeds a failed FINAL_QA asset assessment carrying `category`, which is what
+ * `finalQARepairTargetIs*`/`finalQAAudioFailure` derive the repair edge from.
+ */
+function seedFailedFinalQa(
+  store: InMemoryTransitionStore,
+  category: 'COMPOSITING_TECHNICAL' | 'EDIT_TIMING' | 'AUDIO_TECHNICAL',
+): void {
+  const assessmentId = randomUUID();
+  store.qualityAssessments.push({
+    id: assessmentId,
+    generationCandidateId: null,
+    assetId: randomUUID(),
+    subjectStage: 'FINAL_QA',
+    pass: false,
+  });
+  store.qualityFailures.push({ id: randomUUID(), qualityAssessmentId: assessmentId, category });
+}
+
+describe('advanceCampaignStageActivity — AUTO_RETRY from FINAL_QA (M11)', () => {
+  it.each([
+    ['COMPOSITING_TECHNICAL', 'COMPOSITING'],
+    ['EDIT_TIMING', 'ROUGH_CUT'],
+    ['AUDIO_TECHNICAL', 'SOUND_DESIGN'],
+  ] as const)(
+    'routes a %s Final QA failure to %s',
+    async (category, repairTarget) => {
+      const store = new InMemoryTransitionStore();
+      const campaign = store.seedCampaign({ currentStage: 'FINAL_QA' });
+      seedFailedFinalQa(store, category);
+      const activity = createAdvanceCampaignStageActivity({ campaignTransitionDb: store });
+
+      const result = await activity({
+        mode: 'AUTO_RETRY',
+        workspaceId: campaign.workspaceId,
+        campaignId: campaign.id,
+        fromStage: 'FINAL_QA',
+        repairTarget,
+        idempotencyKey: randomUUID(),
+      });
+
+      expect(result).toEqual({ ok: true, toStage: repairTarget });
+      expect(store.campaigns[0]!.currentStage).toBe(repairTarget);
+    },
+  );
+
+  it('refuses an ambiguous FINAL_QA retry with no repairTarget rather than guessing an edge', async () => {
+    const store = new InMemoryTransitionStore();
+    const campaign = store.seedCampaign({ currentStage: 'FINAL_QA' });
+    seedFailedFinalQa(store, 'AUDIO_TECHNICAL');
+    const activity = createAdvanceCampaignStageActivity({ campaignTransitionDb: store });
+
+    const result = await activity({
+      mode: 'AUTO_RETRY',
+      workspaceId: campaign.workspaceId,
+      campaignId: campaign.id,
+      fromStage: 'FINAL_QA',
+      idempotencyKey: randomUUID(),
+    });
+
+    expect(result).toMatchObject({ ok: false, reason: 'NO_MATCHING_TRANSITION' });
+    expect(store.audits).toHaveLength(0);
+    expect(store.campaigns[0]!.currentStage).toBe('FINAL_QA');
+  });
+
+  it('refuses a repairTarget with no FINAL_QA revision edge (e.g. the gated FINAL_APPROVAL path)', async () => {
+    const store = new InMemoryTransitionStore();
+    const campaign = store.seedCampaign({ currentStage: 'FINAL_QA' });
+    seedFailedFinalQa(store, 'AUDIO_TECHNICAL');
+    const activity = createAdvanceCampaignStageActivity({ campaignTransitionDb: store });
+
+    const result = await activity({
+      mode: 'AUTO_RETRY',
+      workspaceId: campaign.workspaceId,
+      campaignId: campaign.id,
+      fromStage: 'FINAL_QA',
+      repairTarget: 'FINAL_APPROVAL',
+      idempotencyKey: randomUUID(),
+    });
+
+    expect(result).toMatchObject({ ok: false, reason: 'NO_MATCHING_TRANSITION' });
+    expect(store.campaigns[0]!.currentStage).toBe('FINAL_QA');
+  });
+
+  it('still requires the matching persisted failure fact: a mismatched repairTarget is refused', async () => {
+    const store = new InMemoryTransitionStore();
+    const campaign = store.seedCampaign({ currentStage: 'FINAL_QA' });
+    seedFailedFinalQa(store, 'AUDIO_TECHNICAL');
+    const activity = createAdvanceCampaignStageActivity({ campaignTransitionDb: store });
+
+    const result = await activity({
+      mode: 'AUTO_RETRY',
+      workspaceId: campaign.workspaceId,
+      campaignId: campaign.id,
+      fromStage: 'FINAL_QA',
+      repairTarget: 'COMPOSITING',
+      idempotencyKey: randomUUID(),
+    });
+
+    expect(result).toMatchObject({ ok: false, reason: 'MISSING_PREREQUISITE' });
+    expect(store.campaigns[0]!.currentStage).toBe('FINAL_QA');
+  });
+
+  it('never lets an AUTO_RETRY repairTarget cross the FINAL human gate from FINAL_APPROVAL', async () => {
+    const store = new InMemoryTransitionStore();
+    const campaign = store.seedCampaign({ currentStage: 'FINAL_APPROVAL' });
+    const activity = createAdvanceCampaignStageActivity({ campaignTransitionDb: store });
+
+    const result = await activity({
+      mode: 'AUTO_RETRY',
+      workspaceId: campaign.workspaceId,
+      campaignId: campaign.id,
+      fromStage: 'FINAL_APPROVAL',
+      repairTarget: 'VARIANT_GENERATION',
+      idempotencyKey: randomUUID(),
+    });
+
+    expect(result).toMatchObject({ ok: false, reason: 'NO_MATCHING_TRANSITION' });
+    expect(store.audits).toHaveLength(0);
+    expect(store.campaigns[0]!.currentStage).toBe('FINAL_APPROVAL');
+  });
+});

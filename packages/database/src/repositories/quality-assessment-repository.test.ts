@@ -9,6 +9,9 @@ import {
   getQualityAssessmentForCandidate,
   listQualityAssessmentsForCandidates,
   listQualityFailuresForAssessment,
+  createQualityAssessmentForAsset,
+  getQualityAssessmentForAsset,
+  type CreateAssetQualityAssessmentInput,
   type CreateQualityAssessmentInput,
 } from './quality-assessment-repository';
 
@@ -212,5 +215,146 @@ describe('quality-assessment-repository', () => {
       StaleCandidateError,
     );
     expect(store.qualityAssessmentRecords).toHaveLength(0);
+  });
+});
+
+function buildAssetInput(
+  overrides: Partial<CreateAssetQualityAssessmentInput> = {},
+): CreateAssetQualityAssessmentInput {
+  return {
+    campaignId: overrides.campaignId ?? randomUUID(),
+    assetId: overrides.assetId ?? randomUUID(),
+    subjectStage: overrides.subjectStage ?? 'FINAL_QA',
+    pass: overrides.pass ?? true,
+    overallScore: overrides.overallScore ?? 1,
+    scores: overrides.scores ?? { 'technical-conformance': 1 },
+    assessedBy: overrides.assessedBy ?? 'AGENT',
+    createdByAgentInvocationId: overrides.createdByAgentInvocationId,
+    failures: overrides.failures ?? [],
+  };
+}
+
+describe('quality-assessment-repository — asset-based (M11)', () => {
+  it('persists a passing FINAL_QA assessment over an asset with score + provenance', async () => {
+    const store = new InMemoryCampaignStore();
+    const workspaceId = randomUUID();
+    const invocationId = randomUUID();
+    const input = buildAssetInput({ overallScore: 0.94, createdByAgentInvocationId: invocationId });
+
+    const { assessment, alreadyExisted } = await createQualityAssessmentForAsset(
+      store,
+      workspaceId,
+      input,
+    );
+
+    expect(alreadyExisted).toBe(false);
+    expect(assessment.pass).toBe(true);
+    expect(assessment.workspaceId).toBe(workspaceId);
+    expect(assessment.assetId).toBe(input.assetId);
+    expect(assessment.generationCandidateId).toBeUndefined();
+    expect(assessment.subjectStage).toBe('FINAL_QA');
+    expect(assessment.overallScore).toBe(0.94);
+    expect(assessment.createdByAgentInvocationId).toBe(invocationId);
+    expect(store.qualityAssessmentRecords).toHaveLength(1);
+  });
+
+  it('persists typed QualityFailure rows that drive FINAL_QA repair routing', async () => {
+    const store = new InMemoryCampaignStore();
+    const workspaceId = randomUUID();
+    const input = buildAssetInput({
+      pass: false,
+      overallScore: 0.3,
+      failures: [
+        {
+          category: 'AUDIO_TECHNICAL',
+          severity: 'BLOCKING',
+          description: 'Programme loudness is -9 LUFS, above the -14 LUFS ceiling',
+          suggestedAction: 'Re-mix with a limiter targeting -14 LUFS',
+        },
+        {
+          category: 'EDIT_TIMING',
+          severity: 'MEDIUM',
+          description: 'Master runs 1.4s over the 30s slot',
+        },
+      ],
+    });
+
+    const { assessment } = await createQualityAssessmentForAsset(store, workspaceId, input);
+    const failures = await listQualityFailuresForAssessment(store, assessment.id);
+
+    expect(assessment.pass).toBe(false);
+    expect(failures.map((f) => f.category).sort()).toEqual(['AUDIO_TECHNICAL', 'EDIT_TIMING']);
+    expect(failures.every((f) => f.workspaceId === workspaceId)).toBe(true);
+  });
+
+  it('is idempotent per (assetId, subjectStage): a replayed call inserts no duplicate', async () => {
+    const store = new InMemoryCampaignStore();
+    const workspaceId = randomUUID();
+    const input = buildAssetInput({
+      pass: false,
+      failures: [{ category: 'AUDIO_TECHNICAL', severity: 'BLOCKING', description: 'clipping' }],
+    });
+
+    const first = await createQualityAssessmentForAsset(store, workspaceId, input);
+    const second = await createQualityAssessmentForAsset(store, workspaceId, input);
+
+    expect(first.alreadyExisted).toBe(false);
+    expect(second.alreadyExisted).toBe(true);
+    expect(second.assessment.id).toBe(first.assessment.id);
+    expect(store.qualityAssessmentRecords).toHaveLength(1);
+    expect(store.qualityFailureRecords).toHaveLength(1);
+  });
+
+  it('scopes the same asset separately per subjectStage', async () => {
+    const store = new InMemoryCampaignStore();
+    const workspaceId = randomUUID();
+    const assetId = randomUUID();
+
+    await createQualityAssessmentForAsset(
+      store,
+      workspaceId,
+      buildAssetInput({ assetId, subjectStage: 'COMPOSITING' }),
+    );
+    const { alreadyExisted } = await createQualityAssessmentForAsset(
+      store,
+      workspaceId,
+      buildAssetInput({ assetId, subjectStage: 'FINAL_QA' }),
+    );
+
+    expect(alreadyExisted).toBe(false);
+    expect(store.qualityAssessmentRecords).toHaveLength(2);
+  });
+
+  it('never reads another workspace assessment: same asset, different workspace is a fresh row', async () => {
+    const store = new InMemoryCampaignStore();
+    const assetId = randomUUID();
+    const workspaceA = randomUUID();
+    const workspaceB = randomUUID();
+
+    await createQualityAssessmentForAsset(store, workspaceA, buildAssetInput({ assetId }));
+
+    expect(await getQualityAssessmentForAsset(store, workspaceB, assetId, 'FINAL_QA')).toBeUndefined();
+    const { alreadyExisted } = await createQualityAssessmentForAsset(
+      store,
+      workspaceB,
+      buildAssetInput({ assetId }),
+    );
+    expect(alreadyExisted).toBe(false);
+    expect(store.qualityAssessmentRecords).toHaveLength(2);
+  });
+
+  it('getQualityAssessmentForAsset returns the persisted row and undefined for an unassessed asset', async () => {
+    const store = new InMemoryCampaignStore();
+    const workspaceId = randomUUID();
+    const input = buildAssetInput();
+
+    const { assessment } = await createQualityAssessmentForAsset(store, workspaceId, input);
+
+    expect(await getQualityAssessmentForAsset(store, workspaceId, input.assetId, 'FINAL_QA')).toEqual(
+      assessment,
+    );
+    expect(
+      await getQualityAssessmentForAsset(store, workspaceId, randomUUID(), 'FINAL_QA'),
+    ).toBeUndefined();
   });
 });

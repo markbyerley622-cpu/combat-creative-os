@@ -25,6 +25,7 @@ import {
   applyGateAdvanceResult,
   applyLoadLatestShotSpecificationsResult,
   applyRunContinuityAssessmentResult,
+  applyRunFinalQaControllerResult,
   applyRunShotPromptEngineerResult,
   applyRunSoundDirectorResult,
   applyRunStrategyConceptScriptResult,
@@ -59,6 +60,7 @@ const {
   verifyShotSelectionActivity,
   loadShotSelectionRegenerationFeedbackActivity,
   runSoundDirectorActivity,
+  runFinalQaControllerActivity,
 } = proxyActivities<CampaignProductionActivities>({
   // Longer than the other two activities' effective budget: this one makes
   // three sequential reasoning-provider calls plus their persistence writes,
@@ -351,6 +353,46 @@ export async function campaignProductionWorkflow(
         });
         state = applyRunSoundDirectorResult(state, soundResult);
         if (state.status !== 'RUNNING') {
+          continue;
+        }
+      }
+
+      // M11: FINAL_QA runs the Final QA Controller over the campaign's
+      // FINAL_MASTER asset, persisting the immutable asset-based
+      // QualityAssessment that `finalQAPassed` reads. A pass falls through to
+      // the AUTO_FORWARD below, which advances to FINAL_APPROVAL — where the
+      // FINAL human gate still has to be satisfied by a real persisted
+      // HumanApproval, exactly as before. A failure issues an AUTO_RETRY to the
+      // repair target the Activity derived from the failure categories
+      // (COMPOSITING | ROUGH_CUT | SOUND_DESIGN — all non-gated edges, so this
+      // never crosses an approval gate), bounded by the persisted
+      // `finalQARepairTargetIs*` facts. An unroutable failure escalates to
+      // BLOCKED inside the reducer rather than guessing an edge.
+      if (state.currentStage === 'FINAL_QA') {
+        const finalQaResult = await runFinalQaControllerActivity({
+          workspaceId: input.workspaceId,
+          campaignId: input.campaignId,
+          workflowRunId: input.workflowRunId,
+          revisionAttempt: autoForwardAttempt,
+        });
+        state = applyRunFinalQaControllerResult(state, finalQaResult);
+        if (state.status !== 'RUNNING') {
+          continue;
+        }
+        if (finalQaResult.ok && !finalQaResult.pass) {
+          const retryResult = await advanceCampaignStageActivity({
+            mode: 'AUTO_RETRY',
+            workspaceId: input.workspaceId,
+            campaignId: input.campaignId,
+            fromStage: state.currentStage,
+            repairTarget: finalQaResult.repairTarget,
+            idempotencyKey: buildAutoRetryIdempotencyKey(
+              input.workflowRunId,
+              state.currentStage,
+              autoForwardAttempt,
+            ),
+          });
+          state = applyAutoRetryResult(state, retryResult);
           continue;
         }
       }

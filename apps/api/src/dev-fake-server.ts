@@ -143,6 +143,7 @@ async function main() {
     shotReviewDb: store,
     compositingDb: store,
     soundDesignDb: store,
+    finalQaDb: store,
     storageProvider: new MockStorageProvider(),
     reviewProvider: new MockReviewProvider(),
     workflowClient: buildFakeWorkflowClient(),

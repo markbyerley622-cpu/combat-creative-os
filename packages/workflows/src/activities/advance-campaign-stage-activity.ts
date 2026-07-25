@@ -43,12 +43,13 @@ export interface AdvanceCampaignStageGateDecisionInput {
 
 /**
  * M7: an *automated* revision routing back to SHOT_GENERATION after a
- * failed Visual/Continuity QA assessment. Deliberately narrower than a
- * GATE_DECISION — it can only ever traverse the two automated-QA revision
- * edges in `AUTO_RETRY_ELIGIBLE_STAGES`, never a human-gated one, so no
- * automated process can bypass a human approval gate. The transition itself
- * is still fully gated by the bounded `visualQARetryAllowed`/
- * `continuityQARetryAllowed` facts and (when a budget is supplied) a budget
+ * failed Visual/Continuity QA assessment; M11 extends it to FINAL_QA's
+ * repair edges. Deliberately narrower than a GATE_DECISION — it can only ever
+ * traverse the non-gated revision edges leaving a stage in
+ * `AUTO_RETRY_ELIGIBLE_STAGES`, never a human-gated one, so no automated
+ * process can bypass a human approval gate. The transition itself is still
+ * fully gated by the bounded `visualQARetryAllowed`/`continuityQARetryAllowed`
+ * / `finalQARepairTargetIs*` facts and (when a budget is supplied) a budget
  * check inside `attemptCampaignTransition`, so retries stay bounded and
  * budget-enforced.
  */
@@ -60,6 +61,14 @@ export interface AdvanceCampaignStageAutoRetryInput {
   readonly idempotencyKey: string;
   /** Reserved at WORKSPACE/CAMPAIGN before the retry re-enters SHOT_GENERATION, when provided. */
   readonly generationBudgetCents?: number;
+  /**
+   * M11: for a `fromStage` with more than one automated revision edge (FINAL_QA
+   * → COMPOSITING | ROUGH_CUT | SOUND_DESIGN), the specific repair target the
+   * failure category selected. Omitted for single-edge QA stages
+   * (VISUAL_QA/CONTINUITY_QA → SHOT_GENERATION). It may only ever select a
+   * NON-human-gated revision edge, so this never crosses an approval gate.
+   */
+  readonly repairTarget?: CampaignStage;
   readonly requestedByUserId?: string;
 }
 
@@ -69,14 +78,19 @@ export type AdvanceCampaignStageInput =
   | AdvanceCampaignStageAutoRetryInput;
 
 /**
- * The only stages an AUTO_RETRY may leave: the two automated visual/continuity
- * QA stages, each of whose sole REVISION edge routes to SHOT_GENERATION. Any
- * other `fromStage` — in particular every human-gated stage — is refused, so
- * an automated retry can never cross a human approval gate.
+ * The only stages an AUTO_RETRY may leave: the automated QA stages. VISUAL_QA
+ * and CONTINUITY_QA each have a sole REVISION edge routing to SHOT_GENERATION;
+ * FINAL_QA has three, disambiguated by `repairTarget`. Any other `fromStage` —
+ * in particular every human-gated stage — is refused, so an automated retry
+ * can never cross a human approval gate.
  */
 const AUTO_RETRY_ELIGIBLE_STAGES: ReadonlySet<CampaignStage> = new Set([
   'VISUAL_QA',
   'CONTINUITY_QA',
+  // M11: FINAL_QA has three automated (non-human-gated) revision edges —
+  // COMPOSITING | ROUGH_CUT | SOUND_DESIGN — selected by the failure category
+  // via the input's `repairTarget`.
+  'FINAL_QA',
 ]);
 
 export type AdvanceCampaignStageOutput =
@@ -193,14 +207,37 @@ export function createAdvanceCampaignStageActivity(
           detail: `AUTO_RETRY is not permitted from ${input.fromStage}`,
         };
       }
-      const edge = CAMPAIGN_TRANSITIONS.find(
+      // Only ever non-gated REVISION edges — the `!t.requiredApprovalGate`
+      // filter is the second half of the "never bypass a human gate" guard.
+      const candidates = CAMPAIGN_TRANSITIONS.filter(
         (t) => t.from === input.fromStage && t.kind === 'REVISION' && !t.requiredApprovalGate,
       );
-      if (!edge) {
+      if (candidates.length === 0) {
         return {
           ok: false,
           reason: 'NO_MATCHING_TRANSITION',
           detail: `No automated revision edge exists from ${input.fromStage}`,
+        };
+      }
+      // A multi-edge QA stage (FINAL_QA) must say which repair target the
+      // failure category selected; a single-edge stage (VISUAL_QA/
+      // CONTINUITY_QA) has nothing to disambiguate. An explicit repairTarget
+      // is always honoured, so a caller can never silently land on a different
+      // edge than the one it asked for.
+      const edge =
+        input.repairTarget !== undefined
+          ? candidates.find((t) => t.to === input.repairTarget)
+          : candidates.length === 1
+            ? candidates[0]
+            : undefined;
+      if (!edge) {
+        return {
+          ok: false,
+          reason: 'NO_MATCHING_TRANSITION',
+          detail:
+            input.repairTarget !== undefined
+              ? `No automated revision edge to ${input.repairTarget} exists from ${input.fromStage}`
+              : `${input.fromStage} has ${candidates.length} automated revision edges; a repairTarget is required`,
         };
       }
       toStage = edge.to;

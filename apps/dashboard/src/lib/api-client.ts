@@ -363,6 +363,52 @@ export interface SoundDesignView {
   budget: { workspace: BudgetStatusView | null; campaign: BudgetStatusView | null };
 }
 
+
+// --- M11 final QA + final approval ---
+
+export interface FinalQaFindingView {
+  id: string;
+  category: string;
+  severity: string;
+  description: string;
+  suggestedAction: string | null;
+}
+
+export interface FinalQaView {
+  campaign: { currentStage: string; isFinalQaStage: boolean; isFinalApprovalStage: boolean };
+  /** Advisory only — the approval endpoint re-checks the permission server-side. */
+  caller: { role: string; canApprove: boolean };
+  master: {
+    id: string;
+    checksum: string;
+    originalFilename: string;
+    /** Always false — mock masters carry no real video; render a placeholder. */
+    hasMedia: false;
+  } | null;
+  assessment: {
+    id: string;
+    pass: boolean;
+    overallScore: number;
+    scores: Record<string, number>;
+    assessedBy: string;
+  } | null;
+  findings: FinalQaFindingView[];
+  deliveryContext: {
+    platform: string;
+    aspectRatio: string;
+    resolutionWidth: number;
+    resolutionHeight: number;
+    frameRate: number;
+    durationFrames: number;
+    soundDesignPlanVersion: number | null;
+  } | null;
+  budget: { workspace: BudgetStatusView | null; campaign: BudgetStatusView | null };
+}
+
+/** The three non-gated stages a rejected final master may be sent back to. */
+export const FINAL_REPAIR_TARGET_OPTIONS = ['COMPOSITING', 'ROUGH_CUT', 'SOUND_DESIGN'] as const;
+export type FinalRepairTarget = (typeof FINAL_REPAIR_TARGET_OPTIONS)[number];
+
 export interface ApiClientOptions {
   baseUrl?: string;
 }
@@ -550,6 +596,33 @@ export function createApiClient(
       request<SoundDesignView>(
         `/workspaces/${workspaceId}/campaigns/${campaignId}/sound-design?userId=${userId}`,
         undefined,
+        baseUrl,
+      ),
+    getFinalQa: (campaignId: string) =>
+      request<FinalQaView>(
+        `/workspaces/${workspaceId}/campaigns/${campaignId}/final-qa?userId=${userId}`,
+        undefined,
+        baseUrl,
+      ),
+
+    /**
+     * The FINAL human gate. Dispatched only from apps/api's
+     * `POST .../approvals/final`, which re-checks `APPROVE_FINAL_MASTER`
+     * server-side — this method is a transport, not an authorization.
+     */
+    submitFinalApproval: (
+      campaignId: string,
+      input:
+        | { decision: 'APPROVED'; comments?: string }
+        | {
+            decision: 'REJECTED' | 'CHANGES_REQUESTED';
+            repairTarget: FinalRepairTarget;
+            comments?: string;
+          },
+    ) =>
+      request<{ approvalId: string; replayed: boolean }>(
+        `/workspaces/${workspaceId}/campaigns/${campaignId}/approvals/final`,
+        { method: 'POST', body: JSON.stringify({ userId, ...input }) },
         baseUrl,
       ),
   };

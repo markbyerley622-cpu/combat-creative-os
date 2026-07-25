@@ -27,6 +27,8 @@ import { createCompositingDatabase, type CompositingDatabase } from './compositi
 import { registerCompositingRoutes } from './compositing-routes';
 import { createSoundDesignDatabase, type SoundDesignDatabase } from './sound-design-database';
 import { registerSoundDesignRoutes } from './sound-design-routes';
+import { createFinalQaDatabase, type FinalQaDatabase } from './final-qa-database';
+import { registerFinalQaRoutes } from './final-qa-routes';
 import { createWorkflowClient, type TemporalEnv } from './temporal-client';
 
 /**
@@ -70,6 +72,8 @@ export interface BuildServerOptions {
   compositingDb?: CompositingDatabase;
   /** Overrides the M10 sound-design read route's `*DataSource` adapter — tests inject an in-memory fake here. */
   soundDesignDb?: SoundDesignDatabase;
+  /** Overrides the M11 final-QA read route's `*DataSource` adapter — tests inject an in-memory fake here. */
+  finalQaDb?: FinalQaDatabase;
   /** The Frame.io-compatible review provider; defaults to the deterministic mock (no real Frame.io adapter exists — M8/§7.1). */
   reviewProvider?: ReviewProvider;
   workflowClient?: WorkflowClient;
@@ -100,6 +104,7 @@ export function buildServer({
   shotReviewDb = createShotReviewDatabase(prisma),
   compositingDb = createCompositingDatabase(prisma),
   soundDesignDb = createSoundDesignDatabase(prisma),
+  finalQaDb = createFinalQaDatabase(prisma),
   reviewProvider = new MockReviewProvider(),
   temporalEnv = { TEMPORAL_ADDRESS: 'localhost:7233', TEMPORAL_NAMESPACE: 'default' },
   workflowClient = createWorkflowClient(temporalEnv),
@@ -153,6 +158,7 @@ export function buildServer({
   });
   registerCompositingRoutes(app, { db: compositingDb, storageProvider, workflowClient });
   registerSoundDesignRoutes(app, { db: soundDesignDb });
+  registerFinalQaRoutes(app, { db: finalQaDb });
 
   return app;
 }

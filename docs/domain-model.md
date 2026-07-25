@@ -412,8 +412,29 @@ Director over the latest `RoughEditSpecification` and persists an assembled
 `Timeline` + versioned `SoundDesignPlan` + `SoundCue`s (each with a mock
 `SOUND_STEM` asset) — the existence of those cues on the campaign's Timeline is
 exactly what `soundDesignComplete` joins through to find, so a completed sound
-design lets the campaign auto-forward SOUND_DESIGN → FINAL_QA, where M10 stops
-(BLOCKED, no Final QA Controller until M11).
+design lets the campaign auto-forward SOUND_DESIGN → FINAL_QA.
+
+M11 populates `finalQAPassed`, `finalQARepairTargetIsCompositing`,
+`finalQARepairTargetIsRoughCut` and `finalQAAudioFailure`.
+`runFinalQaControllerActivity` registers the campaign's `FINAL_MASTER` asset and
+runs the Final QA Controller over it, persisting the verdict as the system's
+**first asset-based `QualityAssessment`** — `subjectStage: 'FINAL_QA'`, unique
+per `(assetId, subjectStage)`, with one typed `QualityFailure` per finding
+(`createQualityAssessmentForAsset` in `packages/database`). That is exactly the
+row shape `assetAssessmentExists` already looked for, so the four FINAL_QA facts
+become live without any change to their derivations.
+
+On a pass the campaign auto-forwards FINAL_QA → FINAL_APPROVAL, where the FINAL
+human gate applies unchanged. On a failure the Activity maps the findings'
+categories through `QUALITY_FAILURE_ROUTING` (below), picks the **most upstream**
+of FINAL_QA's three revision edges, and the workflow issues an `AUTO_RETRY`
+carrying that `repairTarget`. The retry is still gated by the persisted
+`finalQARepairTargetIs*` fact for the edge it names, and `AUTO_RETRY` only ever
+traverses **non-gated** revision edges — a failing master can never cross the
+FINAL gate, and a multi-edge stage that supplies no `repairTarget` is refused
+rather than defaulted. A failure whose findings carry no routable category
+escalates to BLOCKED. M11 stops at VARIANT_GENERATION (BLOCKED, no Variant
+Generator until M12).
 
 These will be tightened once the workflows/activities milestones (M6–M12,
 architecture.md §8) that actually populate these tables in fine grain are

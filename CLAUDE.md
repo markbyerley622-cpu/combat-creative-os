@@ -4,32 +4,45 @@ This file is the operating contract for anyone (human or agent) working in
 this repository. It is deliberately short — for the full design rationale
 see `docs/architecture.md` and `docs/adr/`.
 
-Current milestone: **M10, sound design, done** — the existing
-`sound-director` agent is wired into `CampaignProductionWorkflow` at
-SOUND_DESIGN through `runSoundDirectorActivity` (`packages/workflows`), which
-loads the campaign's latest `RoughEditSpecification` + brand audio guidelines,
-runs the agent through the same `executeSpecialistAgentActivity` boundary every
-other agent uses (agents never touch repositories/providers/other agents), and
-persists — keyed on the rough-edit version so it is idempotent under retry — the
-assembled `Timeline` (built from the rough-edit clips), the canonical immutable
-`SoundDesignPlan` (`packages/domain` schema + Prisma; music brief + mix notes +
-brand guidelines + prompt/agent provenance), and one `SoundCue` per cue, each
-carrying a registered mock `SOUND_STEM` asset (deterministic checksum, no
-bytes). The existence of SoundCues on the campaign's Timeline is what
-`soundDesignComplete` reads, so on success the workflow auto-forwards
-SOUND_DESIGN → **FINAL_QA, where it reaches BLOCKED** (no Final QA Controller
-until M11) — the exact M10 stopping point; a Sound Director failure escalates to
-BLOCKED without advancing. `apps/api` gained one read-only `GET .../sound-design`
-route (plan + timeline + cues + budget); `apps/dashboard` gained a matching
-read-only screen rendering each stem as a placeholder. All human gates
-untouched. See `docs/architecture.md` §8's M10 entry for the full accounting and
-interim decisions (stems are mock SOUND_STEM assets with no audio bytes — no
-audio-generation provider yet; a fresh Timeline is assembled from the rough
-edit; no new env config). Still no real caller
-authentication, no real Veo/Runway/ComfyUI adapter (only the deterministic
-mock — do not connect one or spend money without an explicit, separate
-decision), and no live-Postgres/Temporal/MinIO/ffmpeg environment in this
-session — `apps/api/src/dev-fake-server.ts` (in-memory-backed) is what both
+Current milestone: **M11, Final QA & Final Approval gate, done** — the
+existing `final-qa-controller` agent is wired into `CampaignProductionWorkflow`
+at FINAL_QA through `runFinalQaControllerActivity` (`packages/workflows`), which
+registers the campaign's `FINAL_MASTER` asset (deterministic checksum, no bytes,
+real provenance chain `FINAL_MASTER -> ROUGH_CUT + SOUND_STEM[]`), derives the
+master's technical probe and delivery specification from persisted production
+facts, runs the agent through the same `executeSpecialistAgentActivity` boundary
+every other agent uses (agents never touch repositories/providers/other agents),
+and persists the verdict as the system's first **asset-based**
+`QualityAssessment` (`subjectStage: 'FINAL_QA'`, immutable + idempotent per
+`(assetId, subjectStage)` via `createQualityAssessmentForAsset`) plus one typed
+`QualityFailure` per finding — exactly the rows `finalQAPassed` /
+`finalQARepairTargetIs*` / `finalQAAudioFailure` already read. On a pass the
+workflow auto-forwards FINAL_QA → FINAL_APPROVAL, where the **FINAL human gate
+still applies unchanged** (only `apps/api`'s `POST .../approvals/final` records
+the approval and signals; the workflow re-verifies it). On a failure it issues a
+**repair-targeted `AUTO_RETRY`** to the most upstream of COMPOSITING |
+ROUGH_CUT | SOUND_DESIGN, selected from the findings' categories via
+`QUALITY_FAILURE_ROUTING`; `advanceCampaignStageActivity`'s AUTO_RETRY mode
+gained a `repairTarget` for this and still filters to **non-gated** edges only,
+refusing an ambiguous multi-edge retry — no automated retry can cross a human
+gate. An unroutable failure escalates to BLOCKED. `apps/api` gained one
+read-only `GET .../final-qa` route (verdict + findings + master + delivery
+context + budget + whether the caller holds `APPROVE_FINAL_MASTER`);
+`apps/dashboard` gained a Final Approval screen calling the existing approval
+endpoint. An approved master advances to **VARIANT_GENERATION, where it reaches
+BLOCKED** (no Variant Generator until M12) — the exact M11 stopping point. All
+three human gates remain unbypassable. See `docs/architecture.md` §8's M11 entry
+for the full accounting and interim decisions (the technical probe is **derived,
+not ffprobe'd** — duration/resolution/captions come from the persisted
+Timeline + rough edit and are genuine checks, but **loudness is nominal, not
+measured**, since no master bytes exist; no `DeliverySpecification` row is
+created — per-platform rules are §7.2 open question 5, blocking M12; the
+`FINAL_MASTER` is a mock asset with no bytes; **Final QA performs no licensing
+check** — §7.2 open question 1). Still no variants/export/distribution, no real
+caller authentication, no real Veo/Runway/ComfyUI adapter (only the
+deterministic mock — do not connect one or spend money without an explicit,
+separate decision), and no live-Postgres/Temporal/MinIO/ffmpeg environment in
+this session — `apps/api/src/dev-fake-server.ts` (in-memory-backed) is what both
 `apps/api`'s own tests and `apps/dashboard`'s Playwright suite run against
 instead. Anthropic is reachable via `@combat/providers`'s
 `ClaudeReasoningProvider`, but only when explicitly configured

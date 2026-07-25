@@ -11,13 +11,16 @@ export type QualityFailureRecord = QualityFailure;
 /**
  * M7: persistence for the Visual Quality Controller / Continuity Controller
  * agents' output — one immutable `QualityAssessment` per (GenerationCandidate,
- * subjectStage), with zero or more `QualityFailure` children. Only the
- * candidate-assessment shape (`generationCandidateId` set, `assetId` unset)
- * is exercised by this milestone; asset-based assessments (COMPOSITING/
- * ROUGH_CUT/SOUND_DESIGN/FINAL_QA) remain a future milestone's concern, even
- * though `TransitionFactsDataSource`'s `qualityAssessment`/`qualityFailure`
- * fields (packages/database/src/repositories/transition-facts.ts) already
- * read both shapes.
+ * subjectStage), with zero or more `QualityFailure` children.
+ *
+ * M11 adds the second, asset-based shape (`assetId` set,
+ * `generationCandidateId` unset) for a stage-output asset — see
+ * `createQualityAssessmentForAsset` below, first used for FINAL_QA over a
+ * `FINAL_MASTER`. Exactly one of the two ids is ever set (the domain schema's
+ * XOR refinement), and `TransitionFactsDataSource`'s `qualityAssessment`/
+ * `qualityFailure` fields (transition-facts.ts) have always read both.
+ * COMPOSITING/ROUGH_CUT/SOUND_DESIGN assessments remain unwritten — their
+ * revision facts are derived but nothing populates them yet.
  */
 export interface QualityAssessmentDataSource {
   qualityAssessment: {
@@ -25,7 +28,9 @@ export interface QualityAssessmentDataSource {
       data: Omit<QualityAssessmentRecord, 'id' | 'createdAt'>;
     }): Promise<QualityAssessmentRecord>;
     findFirst(args: {
-      where: { generationCandidateId: string; subjectStage: CampaignStage; workspaceId: string };
+      where:
+        | { generationCandidateId: string; subjectStage: CampaignStage; workspaceId: string }
+        | { assetId: string; subjectStage: CampaignStage; workspaceId: string };
     }): Promise<QualityAssessmentRecord | null>;
     findMany(args: {
       where: { generationCandidateId: { in: string[] }; workspaceId: string };
@@ -214,4 +219,68 @@ export async function listQualityFailuresForAssessment(
   qualityAssessmentId: string,
 ): Promise<QualityFailureRecord[]> {
   return db.qualityFailure.findMany({ where: { qualityAssessmentId } });
+}
+
+export interface CreateAssetQualityAssessmentInput {
+  readonly campaignId: string;
+  readonly assetId: string;
+  readonly subjectStage: CampaignStage;
+  readonly pass: boolean;
+  readonly overallScore: number;
+  readonly scores: Record<string, number>;
+  readonly assessedBy: QualityAssessmentRecord['assessedBy'];
+  readonly createdByAgentInvocationId?: string;
+  readonly failures: readonly QualityFindingInput[];
+}
+
+/**
+ * M11: immutable + idempotent asset-based QualityAssessment — one per
+ * `(assetId, subjectStage)` (e.g. a FINAL_QA assessment over a FINAL_MASTER
+ * asset). Unlike the candidate path there are no eligibility guards: the
+ * subject is a stage-output asset the workflow itself produced, not a
+ * human-selectable candidate. A replayed Activity call returns the existing
+ * row (with its failures already persisted) rather than inserting a duplicate.
+ */
+export async function createQualityAssessmentForAsset(
+  db: QualityAssessmentDataSource,
+  workspaceId: string,
+  input: CreateAssetQualityAssessmentInput,
+): Promise<{ assessment: QualityAssessmentRecord; alreadyExisted: boolean }> {
+  const existing = await db.qualityAssessment.findFirst({
+    where: { assetId: input.assetId, subjectStage: input.subjectStage, workspaceId },
+  });
+  if (existing) return { assessment: existing, alreadyExisted: true };
+
+  const assessment = await db.qualityAssessment.create({
+    data: {
+      workspaceId,
+      campaignId: input.campaignId,
+      assetId: input.assetId,
+      subjectStage: input.subjectStage,
+      pass: input.pass,
+      scores: input.scores,
+      overallScore: input.overallScore,
+      assessedBy: input.assessedBy,
+      createdByAgentInvocationId: input.createdByAgentInvocationId,
+    },
+  });
+  for (const failure of input.failures) {
+    // eslint-disable-next-line no-await-in-loop -- small, per-assessment set; sequential + only runs once per fresh assessment (idempotency skip above)
+    await db.qualityFailure.create({
+      data: { workspaceId, qualityAssessmentId: assessment.id, ...failure },
+    });
+  }
+  return { assessment, alreadyExisted: false };
+}
+
+export async function getQualityAssessmentForAsset(
+  db: QualityAssessmentDataSource,
+  workspaceId: string,
+  assetId: string,
+  subjectStage: CampaignStage,
+): Promise<QualityAssessmentRecord | undefined> {
+  return (
+    (await db.qualityAssessment.findFirst({ where: { assetId, subjectStage, workspaceId } })) ??
+    undefined
+  );
 }

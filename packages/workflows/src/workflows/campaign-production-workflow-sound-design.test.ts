@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as activities from '../activities';
 import {
   resetFakeWorkflowRuntime,
+  runQuery,
   setFakeActivityImpls,
 } from '../test-helpers/fake-temporal-workflow';
 
@@ -44,14 +45,16 @@ describe('campaignProductionWorkflow — SOUND_DESIGN wiring (M10)', () => {
   beforeEach(() => resetFakeWorkflowRuntime());
   afterEach(() => vi.restoreAllMocks());
 
-  it('runs the Sound Director, advances SOUND_DESIGN -> FINAL_QA, and BLOCKS there (M10 stopping point)', async () => {
+  it('runs the Sound Director and hands SOUND_DESIGN -> FINAL_QA to the Final QA Controller (M11)', async () => {
     const advance = vi
       .fn<AdvanceFn>()
       .mockResolvedValueOnce({ ok: true, toStage: 'FINAL_QA' }) // SOUND_DESIGN -> FINAL_QA (soundDesignComplete)
+      .mockResolvedValueOnce({ ok: true, toStage: 'FINAL_APPROVAL' }) // FINAL_QA -> FINAL_APPROVAL (finalQAPassed, M11)
       .mockResolvedValueOnce({
         ok: false,
-        reason: 'MISSING_PREREQUISITE',
-        detail: 'finalQAPassed is false',
+        reason: 'GATE_REQUIRED',
+        gate: 'FINAL',
+        targetStage: 'VARIANT_GENERATION',
       });
     const sound = vi.fn<SoundFn>().mockResolvedValue({
       ok: true,
@@ -60,17 +63,27 @@ describe('campaignProductionWorkflow — SOUND_DESIGN wiring (M10)', () => {
       version: 1,
       cueCount: 2,
     });
+    const finalQa = vi.fn().mockResolvedValue({
+      ok: true,
+      pass: true,
+      assessmentId: 'qa-1',
+      finalMasterAssetId: 'master-1',
+      overallScore: 1,
+      blockingFindingCount: 0,
+    });
 
     setFakeActivityImpls({
       advanceCampaignStageActivity: advance as never,
       runSoundDirectorActivity: sound as never,
+      runFinalQaControllerActivity: finalQa as never,
     });
 
-    const result = await run('run-sound-1');
+    const resultPromise = run('run-sound-1');
+    await vi.waitFor(() => expect(runQuery<string | null>('getPendingGate')).toBe('FINAL'));
     expect(sound).toHaveBeenCalledTimes(1);
-    expect(result.status).toBe('BLOCKED');
-    expect(result.finalStage).toBe('FINAL_QA');
-    expect(result.blockedReason).toContain('finalQAPassed');
+    expect(finalQa).toHaveBeenCalledTimes(1);
+    expect(runQuery('getCurrentStage')).toBe('FINAL_APPROVAL');
+    void resultPromise;
   });
 
   it('escalates to BLOCKED at SOUND_DESIGN (no advance) when the Sound Director fails', async () => {
