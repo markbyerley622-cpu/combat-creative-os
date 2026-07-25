@@ -53,6 +53,7 @@ function ProductionProgress({ campaignId }: { campaignId: string }) {
   const showsShotGeneration = SHOT_GENERATION_STAGES.includes(status.currentStage);
   const showsShotSelection = status.currentStage === 'HUMAN_SHOT_SELECTION';
   const showsCompositing = status.currentStage === 'COMPOSITING';
+  const showsSoundDesign = status.currentStage === 'SOUND_DESIGN';
 
   return (
     <div>
@@ -85,6 +86,11 @@ function ProductionProgress({ campaignId }: { campaignId: string }) {
       {showsCompositing && (
         <p>
           <Link href={`/campaigns/${campaignId}/compositing`}>View rough edit →</Link>
+        </p>
+      )}
+      {showsSoundDesign && (
+        <p>
+          <Link href={`/campaigns/${campaignId}/sound-design`}>View sound design →</Link>
         </p>
       )}
       {status.workflow?.status === 'BLOCKED' && (

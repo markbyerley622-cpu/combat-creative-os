@@ -13,6 +13,7 @@ export * from './run-edit-director-activity';
 export * from './dispatch-composition-render-activity';
 export * from './poll-composition-render-activity';
 export * from './cancel-composition-render-activity';
+export * from './run-sound-director-activity';
 export * from './dispatch-shot-generation-activity';
 export * from './poll-shot-generation-activity';
 export * from './cancel-shot-generation-activity';

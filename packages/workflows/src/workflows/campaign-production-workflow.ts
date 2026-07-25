@@ -26,6 +26,7 @@ import {
   applyLoadLatestShotSpecificationsResult,
   applyRunContinuityAssessmentResult,
   applyRunShotPromptEngineerResult,
+  applyRunSoundDirectorResult,
   applyRunStrategyConceptScriptResult,
   applyRunVisualQualityAssessmentsResult,
   applyShotGenerationWorkflowResult,
@@ -57,6 +58,7 @@ const {
   runContinuityAssessmentActivity,
   verifyShotSelectionActivity,
   loadShotSelectionRegenerationFeedbackActivity,
+  runSoundDirectorActivity,
 } = proxyActivities<CampaignProductionActivities>({
   // Longer than the other two activities' effective budget: this one makes
   // three sequential reasoning-provider calls plus their persistence writes,
@@ -330,6 +332,26 @@ export async function campaignProductionWorkflow(
           if (state.status !== 'RUNNING') {
             continue;
           }
+        }
+      }
+
+      // M10: SOUND_DESIGN runs the Sound Director over the rough edit, persisting
+      // the assembled Timeline + versioned SoundDesignPlan + SoundCues (with mock
+      // SOUND_STEM assets) — same "run before the AUTO_FORWARD attempt" placement
+      // as the STRATEGY_REVIEW/PROMPTING hooks. On success the normal AUTO_FORWARD
+      // below finds `soundDesignComplete` true and advances to FINAL_QA (which
+      // then legitimately BLOCKS — no Final QA Controller until M11). A failure
+      // escalates straight to BLOCKED.
+      if (state.currentStage === 'SOUND_DESIGN') {
+        const soundResult = await runSoundDirectorActivity({
+          workspaceId: input.workspaceId,
+          campaignId: input.campaignId,
+          workflowRunId: input.workflowRunId,
+          revisionAttempt: autoForwardAttempt,
+        });
+        state = applyRunSoundDirectorResult(state, soundResult);
+        if (state.status !== 'RUNNING') {
+          continue;
         }
       }
 

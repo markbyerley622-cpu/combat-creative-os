@@ -61,7 +61,8 @@ shape.
 | AssetProvenance          | `schemas/asset.ts`                    | lineage edge list (`derivedFromAssetIds`)                                                                                                                                                                                                                                |
 | LicenseRecord            | `schemas/license-record.ts`           | 0..1 on Asset                                                                                                                                                                                                                                                            |
 | RenderJob                | `schemas/render-job.ts`               | COMPOSITING or EXPORT                                                                                                                                                                                                                                                    |
-| SoundCue                 | `schemas/sound-cue.ts`                | belongs to a Timeline                                                                                                                                                                                                                                                    |
+| SoundCue                 | `schemas/sound-cue.ts`                | belongs to a Timeline; M10 attaches a mock `SOUND_STEM` asset; its existence on the campaign's Timeline is the `soundDesignComplete` fact                                                                                                                                |
+| SoundDesignPlan          | `schemas/sound-design-plan.ts`        | M10 — the Sound Director's **immutable**, versioned plan (music brief + mix notes + brand guidelines + prompt/agent provenance); references its Timeline + rough edit                                                                                                    |
 | EditDecisionList         | `schemas/edit-decision-list.ts`       | versioned; `entries` reference Asset; its existence is the `roughCutAssembled` fact                                                                                                                                                                                      |
 | RoughEditSpecification   | `schemas/rough-edit-specification.ts` | M9 — the Edit Director's canonical, **immutable**, versioned rough-edit brief (timeline tracks/clips/transitions + overlays as validated nested structures); pins the approved ShotSelectionSet + concept/script versions + prompt/agent provenance                      |
 | CompositionJob           | `schemas/composition-job.ts`          | M9 — mutable status row grouping the bounded-retry render attempts for one RoughEditSpecification (same split as ShotGenerationJob)                                                                                                                                      |
@@ -405,6 +406,14 @@ where M9 stops (BLOCKED, no Sound Director until M10). The
 approved selection and re-checks every selected source's eligibility +
 licensing (via `gatherCandidateEligibility`) inside `runEditDirectorActivity`,
 so a stale/ineligible/unlicensed source can never produce a rough edit.
+
+M10 populates `soundDesignComplete`. `runSoundDirectorActivity` runs the Sound
+Director over the latest `RoughEditSpecification` and persists an assembled
+`Timeline` + versioned `SoundDesignPlan` + `SoundCue`s (each with a mock
+`SOUND_STEM` asset) — the existence of those cues on the campaign's Timeline is
+exactly what `soundDesignComplete` joins through to find, so a completed sound
+design lets the campaign auto-forward SOUND_DESIGN → FINAL_QA, where M10 stops
+(BLOCKED, no Final QA Controller until M11).
 
 These will be tightened once the workflows/activities milestones (M6–M12,
 architecture.md §8) that actually populate these tables in fine grain are

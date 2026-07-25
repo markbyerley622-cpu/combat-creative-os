@@ -328,6 +328,41 @@ export interface CompositingView {
   budget: { workspace: BudgetStatusView | null; campaign: BudgetStatusView | null };
 }
 
+// --- M10 sound design ---
+
+export interface SoundCueView {
+  id: string;
+  type: string;
+  startFrame: number;
+  durationFrames: number;
+  notes: string | null;
+  /** Always false — mock stems carry no real audio; render a placeholder. */
+  hasMedia: false;
+  assetId: string | null;
+}
+
+export interface SoundDesignView {
+  campaign: { currentStage: string; isSoundDesignStage: boolean };
+  plan: {
+    id: string;
+    version: number;
+    musicBrief: string;
+    mixNotes: string;
+    brandAudioGuidelines: string[];
+    qualityRubric: string[];
+    roughEditSpecificationId: string;
+  } | null;
+  timeline: {
+    id: string;
+    version: number;
+    frameRate: number;
+    durationFrames: number;
+    entries: { order: number; shotId: string; startFrame: number; durationFrames: number }[];
+  } | null;
+  cues: SoundCueView[];
+  budget: { workspace: BudgetStatusView | null; campaign: BudgetStatusView | null };
+}
+
 export interface ApiClientOptions {
   baseUrl?: string;
 }
@@ -508,6 +543,13 @@ export function createApiClient(
       request<{ cancelRequested: boolean }>(
         `/workspaces/${workspaceId}/campaigns/${campaignId}/compositing/cancel`,
         { method: 'POST', body: JSON.stringify({ userId }) },
+        baseUrl,
+      ),
+
+    getSoundDesign: (campaignId: string) =>
+      request<SoundDesignView>(
+        `/workspaces/${workspaceId}/campaigns/${campaignId}/sound-design?userId=${userId}`,
+        undefined,
         baseUrl,
       ),
   };

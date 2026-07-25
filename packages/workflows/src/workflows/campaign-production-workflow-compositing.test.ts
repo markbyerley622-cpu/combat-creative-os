@@ -48,15 +48,16 @@ describe('campaignProductionWorkflow — COMPOSITING wiring (M9)', () => {
   beforeEach(() => resetFakeWorkflowRuntime());
   afterEach(() => vi.restoreAllMocks());
 
-  it('runs the CompositingWorkflow child, advances COMPOSITING -> ROUGH_CUT -> SOUND_DESIGN, and BLOCKS there (M9 stopping point)', async () => {
+  it('runs the CompositingWorkflow child, advances COMPOSITING -> ROUGH_CUT -> SOUND_DESIGN -> FINAL_QA (M10 stopping point)', async () => {
     const advance = vi
       .fn<AdvanceFn>()
       .mockResolvedValueOnce({ ok: true, toStage: 'ROUGH_CUT' }) // COMPOSITING -> ROUGH_CUT (compositingComplete)
       .mockResolvedValueOnce({ ok: true, toStage: 'SOUND_DESIGN' }) // ROUGH_CUT -> SOUND_DESIGN (roughCutAssembled)
+      .mockResolvedValueOnce({ ok: true, toStage: 'FINAL_QA' }) // SOUND_DESIGN -> FINAL_QA (soundDesignComplete, M10)
       .mockResolvedValueOnce({
         ok: false,
         reason: 'MISSING_PREREQUISITE',
-        detail: 'soundDesignComplete is false',
+        detail: 'finalQAPassed is false',
       });
     const verify = vi
       .fn<VerifySelectionFn>()
@@ -70,6 +71,14 @@ describe('campaignProductionWorkflow — COMPOSITING wiring (M9)', () => {
     setFakeActivityImpls({
       advanceCampaignStageActivity: advance as never,
       verifyShotSelectionActivity: verify as never,
+      // M10: SOUND_DESIGN runs the Sound Director before its AUTO_FORWARD.
+      runSoundDirectorActivity: (async () => ({
+        ok: true,
+        soundDesignPlanId: 'sdp-1',
+        timelineId: 't-1',
+        version: 1,
+        cueCount: 2,
+      })) as never,
     });
     setFakeChildWorkflowImpls({ compositingWorkflow: child as never });
 
@@ -77,8 +86,8 @@ describe('campaignProductionWorkflow — COMPOSITING wiring (M9)', () => {
     expect(child).toHaveBeenCalledTimes(1);
     expect(verify).toHaveBeenCalledTimes(1);
     expect(result.status).toBe('BLOCKED');
-    expect(result.finalStage).toBe('SOUND_DESIGN');
-    expect(result.blockedReason).toContain('soundDesignComplete');
+    expect(result.finalStage).toBe('FINAL_QA');
+    expect(result.blockedReason).toContain('finalQAPassed');
   });
 
   it('escalates to BLOCKED (no advance) when the CompositingWorkflow child ends BLOCKED', async () => {

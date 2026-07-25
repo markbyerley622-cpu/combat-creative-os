@@ -72,6 +72,16 @@ import type {
   EditDecisionListRecord,
 } from '../edit-decision-list-repository';
 import type {
+  TimelineDataSource,
+  TimelineEntryRecord,
+  TimelineRecord,
+} from '../timeline-repository';
+import type {
+  SoundCueRecord,
+  SoundDesignDataSource,
+  SoundDesignPlanRecord,
+} from '../sound-design-repository';
+import type {
   CampaignBriefFactRow,
   CreativeConceptFactRow,
   CreativeVariantFactRow,
@@ -133,7 +143,9 @@ export class InMemoryCampaignStore
     RoughEditSpecificationDataSource,
     CompositionDataSource,
     RenderJobDataSource,
-    EditDecisionListDataSource
+    EditDecisionListDataSource,
+    TimelineDataSource,
+    SoundDesignDataSource
 {
   campaigns: CampaignRecord[] = [];
   audits: CampaignTransitionAuditRecord[] = [];
@@ -174,6 +186,11 @@ export class InMemoryCampaignStore
   renderJobRecords: RenderJobRecord[] = [];
   editDecisionListRecords: EditDecisionListRecord[] = [];
   editDecisionEntryRecords: EditDecisionEntryRecord[] = [];
+  /** M10 sound-design rows. */
+  timelineRecords: TimelineRecord[] = [];
+  timelineEntryRecords: TimelineEntryRecord[] = [];
+  soundDesignPlanRecords: SoundDesignPlanRecord[] = [];
+  soundCueRecords: SoundCueRecord[] = [];
   renderJobs: RenderJobFactRow[] = [];
   editDecisionLists: EditDecisionListFactRow[] = [];
   deliverySpecifications: DeliverySpecificationFactRow[] = [];
@@ -933,12 +950,114 @@ export class InMemoryCampaignStore
   creativeVariant: TransitionFactsDataSource['creativeVariant'] = {
     findMany: async () => this.creativeVariants,
   };
-  timeline: TransitionFactsDataSource['timeline'] = {
-    findMany: async ({ where }) => this.timelines.filter((t) => t.campaignId === where.campaignId),
-  };
-  soundCue: TransitionFactsDataSource['soundCue'] = {
+  // Merges the legacy fact-row fixtures with M10 full records (same rationale
+  // as renderJob/editDecisionList above), satisfying both the transition-facts
+  // read shape and the M10 TimelineDataSource.
+  timeline = {
+    findMany: async (args: { where: { campaignId: string; workspaceId?: string } }) => {
+      const { campaignId, workspaceId } = args.where;
+      return [
+        ...this.timelines.filter((t) => t.campaignId === campaignId),
+        ...this.timelineRecords.filter(
+          (t) =>
+            t.campaignId === campaignId &&
+            (workspaceId === undefined || t.workspaceId === workspaceId),
+        ),
+      ];
+    },
+    findFirst: async (args: {
+      where:
+        | { id: string; workspaceId: string }
+        | { campaignId: string; version: number; workspaceId: string };
+    }) => {
+      const { where } = args;
+      if ('id' in where) {
+        return (
+          this.timelineRecords.find(
+            (t) => t.id === where.id && t.workspaceId === where.workspaceId,
+          ) ?? null
+        );
+      }
+      return (
+        this.timelineRecords.find(
+          (t) =>
+            t.campaignId === where.campaignId &&
+            t.version === where.version &&
+            t.workspaceId === where.workspaceId,
+        ) ?? null
+      );
+    },
+    create: async ({ data }: { data: Omit<TimelineRecord, 'id' | 'createdAt'> }) => {
+      const record: TimelineRecord = { id: randomUUID(), createdAt: new Date(), ...data };
+      this.timelineRecords.push(record);
+      return record;
+    },
+  } as unknown as TransitionFactsDataSource['timeline'] & TimelineDataSource['timeline'];
+
+  timelineEntry: TimelineDataSource['timelineEntry'] = {
+    create: async ({ data }) => {
+      const record: TimelineEntryRecord = { id: randomUUID(), ...data };
+      this.timelineEntryRecords.push(record);
+      return record;
+    },
     findMany: async ({ where }) =>
-      this.soundCues.filter((s) => where.timelineId.in.includes(s.timelineId)),
+      this.timelineEntryRecords.filter((e) => e.timelineId === where.timelineId),
+  };
+
+  soundCue = {
+    findMany: async (args: {
+      where: { timelineId: string } | { timelineId: { in: string[] } };
+    }) => {
+      const { where } = args;
+      if (typeof where.timelineId === 'string') {
+        const id = where.timelineId;
+        return [
+          ...this.soundCues.filter((s) => s.timelineId === id),
+          ...this.soundCueRecords.filter((s) => s.timelineId === id),
+        ];
+      }
+      const ids = where.timelineId.in;
+      return [
+        ...this.soundCues.filter((s) => ids.includes(s.timelineId)),
+        ...this.soundCueRecords.filter((s) => ids.includes(s.timelineId)),
+      ];
+    },
+    create: async ({ data }: { data: Omit<SoundCueRecord, 'id' | 'createdAt'> }) => {
+      const record: SoundCueRecord = { id: randomUUID(), createdAt: new Date(), ...data };
+      this.soundCueRecords.push(record);
+      return record;
+    },
+  } as unknown as TransitionFactsDataSource['soundCue'] & SoundDesignDataSource['soundCue'];
+
+  soundDesignPlan: SoundDesignDataSource['soundDesignPlan'] = {
+    create: async ({ data }) => {
+      const record: SoundDesignPlanRecord = { id: randomUUID(), createdAt: new Date(), ...data };
+      this.soundDesignPlanRecords.push(record);
+      return record;
+    },
+    findFirst: async ({ where }) => {
+      if ('id' in where) {
+        return (
+          this.soundDesignPlanRecords.find(
+            (p) => p.id === where.id && p.workspaceId === where.workspaceId,
+          ) ?? null
+        );
+      }
+      return (
+        this.soundDesignPlanRecords.find(
+          (p) =>
+            p.campaignId === where.campaignId &&
+            p.version === where.version &&
+            p.workspaceId === where.workspaceId,
+        ) ?? null
+      );
+    },
+    findMany: async ({ where }) =>
+      this.soundDesignPlanRecords.filter(
+        (p) =>
+          p.campaignId === where.campaignId &&
+          (where.workspaceId === undefined || p.workspaceId === where.workspaceId),
+      ),
   };
 
   budgetPolicy: BudgetDataSource['budgetPolicy'] = {

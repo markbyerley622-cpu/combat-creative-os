@@ -1384,8 +1384,47 @@ subjectStage])` idempotency constraint. `createQualityAssessmentForCandidate`
     SOUND_DESIGN BLOCKED, child-BLOCKED escalation, selection-invalid
     non-bypass); 6 `apps/api` route tests + dashboard api-client tests. No paid
     API calls, no real media.
-- **M10 — Sound design.** Sound Director + audio asset handling.
-  _Test:_ plan generation + asset attachment, fixture-based.
+- **M10 — Sound design. Done (2026-07-25), with the interim decisions this
+  item records.** The existing `sound-director` agent is wired into
+  `CampaignProductionWorkflow` at SOUND_DESIGN through
+  `runSoundDirectorActivity` (`packages/workflows/src/activities`): it loads
+  the campaign's latest `RoughEditSpecification` + brand audio guidelines
+  (workspace-scoped), runs the agent through the same
+  `executeSpecialistAgentActivity` boundary every other agent uses (the agent
+  never touches a repository/provider/other agent), and persists — as a
+  versioned unit keyed on the rough-edit version — the assembled `Timeline`
+  (built from the rough-edit clips), the canonical immutable `SoundDesignPlan`
+  (music brief + mix notes + brand guidelines + prompt/agent provenance,
+  `packages/domain` schema + Prisma model), and one `SoundCue` per cue, each
+  carrying a registered mock `SOUND_STEM` asset (deterministic checksum,
+  deduped, no bytes — "audio asset handling"). Persistence is idempotent under
+  Activity retry (Timeline/plan idempotent per `(campaign, version)`; cue+stem
+  creation skipped once cues exist). The existence of SoundCues on the
+  campaign's Timeline is what the `soundDesignComplete` fact reads, so on
+  success the workflow auto-forwards SOUND_DESIGN → **FINAL_QA, where it
+  legitimately reaches BLOCKED** (no Final QA Controller until M11) — the exact
+  M10 stopping point; a Sound Director failure escalates to BLOCKED without
+  advancing. `apps/api` gained one read-only `GET .../sound-design` route
+  (plan + timeline + cues + budget + workflow stage, member-readable, no
+  preview since stems carry no bytes); `apps/dashboard` gained a matching
+  read-only screen rendering each cue's stem as an explicit placeholder.
+  **Interim decisions**: (1) sound stems are mock `SOUND_STEM` assets with no
+  audio bytes — no audio-generation provider exists (a real one is a later,
+  separately-approved step), and the plan/cues are the reviewable artifact; (2)
+  a fresh `Timeline` is assembled here from the rough edit (there was no earlier
+  Timeline row in the pipeline) so the `SoundCue -> Timeline` FK and the
+  `soundDesignComplete` join are satisfied; (3) no new env config — the Sound
+  Director uses the existing mock reasoning provider, so `.env.example` is
+  unchanged. No real audio generation, no ffmpeg, no export/distribution; no
+  live Postgres/Temporal/MinIO (the `SoundDesignPlan` model is unmigrated in
+  this environment — see docs/domain-model.md §8). _Test:_
+  `runSoundDirectorActivity` coverage (plan/timeline/cue/stem persistence +
+  provenance, idempotent retry, no-rough-edit + agent-failure rejection,
+  workspace isolation); timeline + sound-design repository tests (versioning,
+  fact visibility, workspace scoping); a 2-test SOUND_DESIGN parent-wiring
+  suite (SOUND_DESIGN → FINAL_QA BLOCKED stopping point, Sound-Director-failure
+  escalation); 4 `apps/api` route tests + a dashboard api-client test. No paid
+  API calls, no real media.
 - **M11 — Final QA & Final Approval gate.** Final QA Controller (ffmpeg technical
   checks + multimodal review), `apps/dashboard` Final Approval UI calling
   `apps/api`. _Test:_ fixture masters with known technical defects assert correct

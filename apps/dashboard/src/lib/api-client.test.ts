@@ -156,3 +156,20 @@ describe('createApiClient — M9 compositing', () => {
     await expect(client.cancelCompositing('camp-1')).rejects.toMatchObject({ status: 403 });
   });
 });
+
+describe('createApiClient — M10 sound design', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('GETs the sound-design status scoped to workspace + user', async () => {
+    const fetchMock = mockFetchOnce(200, { cues: [] });
+    vi.stubGlobal('fetch', fetchMock);
+    const client = createApiClient('ws-1', 'user-1', { baseUrl: 'http://api.test' });
+    await client.getSoundDesign('camp-1');
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://api.test/workspaces/ws-1/campaigns/camp-1/sound-design?userId=user-1',
+      expect.anything(),
+    );
+  });
+});

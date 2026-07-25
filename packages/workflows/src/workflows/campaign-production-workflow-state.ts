@@ -274,6 +274,27 @@ export function applyCompositingWorkflowResult(
 }
 
 /**
+ * Applies the result of the SOUND_DESIGN artifact-generation Activity
+ * (`runSoundDirectorActivity`), run before every AUTO_FORWARD attempt out of
+ * SOUND_DESIGN. Success leaves state unchanged — the caller's normal
+ * AUTO_FORWARD then finds `soundDesignComplete` true and advances to FINAL_QA.
+ * Any Activity-level failure escalates straight to BLOCKED.
+ */
+export function applyRunSoundDirectorResult(
+  state: CampaignProductionWorkflowState,
+  result: activities.RunSoundDirectorOutput,
+): CampaignProductionWorkflowState {
+  if (result.ok) {
+    return state;
+  }
+  return {
+    ...state,
+    status: 'BLOCKED',
+    blockedReason: `SOUND_DESIGN plan generation failed (${result.reason}): ${result.detail}`,
+  };
+}
+
+/**
  * Applies the SHOT_SELECTION-gate re-verification at COMPOSITING entry — the
  * persisted selection set must still be valid before the CompositingWorkflow
  * starts. An invalid set escalates to BLOCKED (a human must re-approve).

@@ -4,40 +4,28 @@ This file is the operating contract for anyone (human or agent) working in
 this repository. It is deliberately short — for the full design rationale
 see `docs/architecture.md` and `docs/adr/`.
 
-Current milestone: **M9, compositing & rough edit, done** — turns a
-human-approved `ShotSelectionSet` into a versioned rough-edit specification and
-a deterministic mock rough-edit asset. The `MotionGraphicsProvider`
-(`packages/providers`) is now the M6-style external-Windows-worker contract
-(`getCapabilities`, idempotent `createProject`/`submitRender` with
-capability rejection, `getStatus`/`getFailure`/`fetchRenderOutput`/`getUsage`/
-`cancel`, typed errors) with a deterministic `MockMotionGraphicsProvider` (no
-wall-clock, no bytes); `DesignProvider` gained capabilities + typed errors. The
-Edit Director output was extended (prompt v2) to the full rough-edit brief;
-`runEditDirectorActivity` runs it through `executeSpecialistAgentActivity`,
-revalidates the approved selection (still APPROVED/complete/current + every
-source still eligible + licensed), and persists the canonical, versioned
-`RoughEditSpecification` (`packages/domain` schema + Prisma; timeline
-tracks/clips/transitions + overlays as validated nested structures). The
-deterministic `CompositingWorkflow` child (`packages/workflows`) runs the Edit
-Director then a bounded-retry render dispatch/poll loop — budget reserved at
-WORKSPACE/CAMPAIGN/PROVIDER, `CompositionJob` + append-only `CompositionAttempt`
-history, and on success the registered `AssetKind.ROUGH_CUT` asset + a SUCCEEDED
-COMPOSITING `RenderJob` (`compositingComplete`) + derived `EditDecisionList`
-(`roughCutAssembled`), actual usage charged and remainder released, all
-idempotent under retry/replay, with a progress query + cancel signal.
-`CampaignProductionWorkflow` starts the child at COMPOSITING (only from a
-`verifyShotSelectionActivity`-valid selection) and auto-forwards COMPOSITING →
-ROUGH_CUT → **SOUND_DESIGN, where it reaches BLOCKED** (no Sound Director until
-M10) — the exact M9 stopping point. `apps/api` gained read-only compositing
-routes (status/spec/attempts/budget, signed preview that never exposes the
-s3Key) and an RBAC-gated (`TRIGGER_GENERATION`) cancel that signals the
-campaign-derived compositing child id; `apps/dashboard` gained a matching
-read/cancel screen with a deterministic rough-edit placeholder. All human gates
-untouched. See `docs/architecture.md` §8's M9 entry for the full accounting
-and interim decisions (timeline modeled as validated nested structures not
-tables; design overlays are metadata refs only; one CompositingWorkflow per
-campaign, not per shot; resolution derived from aspect ratio; no new env
-config). Still no real caller Still no real caller
+Current milestone: **M10, sound design, done** — the existing
+`sound-director` agent is wired into `CampaignProductionWorkflow` at
+SOUND_DESIGN through `runSoundDirectorActivity` (`packages/workflows`), which
+loads the campaign's latest `RoughEditSpecification` + brand audio guidelines,
+runs the agent through the same `executeSpecialistAgentActivity` boundary every
+other agent uses (agents never touch repositories/providers/other agents), and
+persists — keyed on the rough-edit version so it is idempotent under retry — the
+assembled `Timeline` (built from the rough-edit clips), the canonical immutable
+`SoundDesignPlan` (`packages/domain` schema + Prisma; music brief + mix notes +
+brand guidelines + prompt/agent provenance), and one `SoundCue` per cue, each
+carrying a registered mock `SOUND_STEM` asset (deterministic checksum, no
+bytes). The existence of SoundCues on the campaign's Timeline is what
+`soundDesignComplete` reads, so on success the workflow auto-forwards
+SOUND_DESIGN → **FINAL_QA, where it reaches BLOCKED** (no Final QA Controller
+until M11) — the exact M10 stopping point; a Sound Director failure escalates to
+BLOCKED without advancing. `apps/api` gained one read-only `GET .../sound-design`
+route (plan + timeline + cues + budget); `apps/dashboard` gained a matching
+read-only screen rendering each stem as a placeholder. All human gates
+untouched. See `docs/architecture.md` §8's M10 entry for the full accounting and
+interim decisions (stems are mock SOUND_STEM assets with no audio bytes — no
+audio-generation provider yet; a fresh Timeline is assembled from the rough
+edit; no new env config). Still no real caller
 authentication, no real Veo/Runway/ComfyUI adapter (only the deterministic
 mock — do not connect one or spend money without an explicit, separate
 decision), and no live-Postgres/Temporal/MinIO/ffmpeg environment in this

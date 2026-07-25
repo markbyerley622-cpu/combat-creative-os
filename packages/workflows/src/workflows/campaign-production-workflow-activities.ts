@@ -84,4 +84,12 @@ export interface CampaignProductionActivities {
   loadShotSelectionRegenerationFeedbackActivity(
     input: activities.LoadShotSelectionRegenerationFeedbackInput,
   ): Promise<activities.LoadShotSelectionRegenerationFeedbackOutput>;
+  /**
+   * M10: runs the Sound Director at SOUND_DESIGN, persisting the Timeline +
+   * versioned SoundDesignPlan + SoundCues (with mock SOUND_STEM assets). See
+   * run-sound-director-activity.ts's doc comment.
+   */
+  runSoundDirectorActivity(
+    input: activities.RunSoundDirectorInput,
+  ): Promise<activities.RunSoundDirectorOutput>;
 }

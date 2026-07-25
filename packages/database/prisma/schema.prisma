@@ -1182,6 +1182,31 @@ model SoundCue {
   @@map("sound_cues")
 }
 
+/// M10 — the Sound Director's canonical, versioned sound-design plan (music
+/// brief + mix notes + provenance); its concrete cues are SoundCue rows on the
+/// referenced Timeline. FKs to campaign/timeline/rough-edit are plain columns
+/// (no relation back-reference), matching RoughEditSpecification/QualityAssessment.
+model SoundDesignPlan {
+  id                         String   @id @default(uuid())
+  workspaceId                String
+  campaignId                 String
+  timelineId                 String
+  roughEditSpecificationId   String
+  version                    Int
+  musicBrief                 String
+  mixNotes                   String
+  brandAudioGuidelines       String[]
+  qualityRubric              String[]
+  promptVersionId            String
+  createdByAgentInvocationId String
+  createdAt                  DateTime @default(now())
+
+  @@unique([campaignId, version])
+  @@index([workspaceId])
+  @@index([campaignId])
+  @@map("sound_design_plans")
+}
+
 model EditDecisionList {
   id          String   @id @default(uuid())
   workspaceId String
