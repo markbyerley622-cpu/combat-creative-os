@@ -12,6 +12,7 @@
     "@combat/agent-runtime": "workspace:*",
     "@combat/agents": "workspace:*",
     "@combat/config": "workspace:*",
+    "@combat/database": "workspace:*",
     "@combat/domain": "workspace:*",
     "@combat/media": "workspace:*",
     "@combat/providers": "workspace:*",

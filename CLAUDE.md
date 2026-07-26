@@ -42,10 +42,54 @@ below, `docs/runbooks/comfyui-video-generation.md` and `docs/architecture.md`
 natural-language brief plus a library of owned assets now produces a
 prompt-specific vertical advertisement with no GPU and no generated footage.
 See the "Prompt-driven source generation" section below and
-`docs/runbooks/prompt-driven-advertisement-generation.md`. **The next milestone
-is Creative Memory benchmark ingestion.** AAMP-1 step 3 (the `SERIALIZABLE`
-budget transaction, `docs/aamp-architecture.md` §6 task 5) remains outstanding
-and unstarted.
+`docs/runbooks/prompt-driven-advertisement-generation.md`.
+
+**Creative Memory lawful benchmark ingestion is done** — reference
+advertisements can be catalogued link-only or analysed locally, segmented into
+scenes with real detection, measured, annotated and projected to FiftyOne, all
+permanently separated from production. See the "Creative Memory" rules below
+and `docs/runbooks/creative-memory-ingestion.md`. **The next milestone is
+multimodal embedding, Qdrant retrieval and reranking.** AAMP-1 step 3 (the
+`SERIALIZABLE` budget transaction, `docs/aamp-architecture.md` §6 task 5)
+remains outstanding and unstarted.
+
+## Creative Memory — permanent rules (lawful benchmark ingestion)
+
+- **Ingestion grants no output rights, ever.** No reference rights
+  classification, processing state or human approval can make reference
+  material usable in a produced advertisement. `READY_FOR_RETRIEVAL` means
+  "analysed and reviewed", nothing more. Output material is ingested separately
+  through the production-asset system.
+- **The two rights vocabularies must never overlap.**
+  `LICENSED_FOR_OUTPUT` and `PRODUCTION_ASSET` are absent from the reference
+  enum and the Prisma enum by design, so a reference cannot be spelled in a way
+  the renderer accepts. `referenceGrantsNoOutputRights()` is total over the
+  enum; keep it total. Never add an output-permitting reference class.
+- **Reference and production stay separate types, tables, repositories and
+  storage namespaces.** `reference_*` tables, `reference-repository.ts`,
+  `.aamp-reference-analysis/`. No relation crosses into `Asset`,
+  `LicenseRecord` or `RenderJob`.
+- **Public availability is not permission, and nothing is acquired
+  automatically.** No scraping, no downloading, no browser automation. A
+  link-only record acquires no bytes, permits no scene extraction, and must
+  never be given a fabricated path, duration or measurement.
+- **Originals are never modified.** Validation reads and hashes; every derived
+  artefact is written elsewhere and records the source checksum, exact argv and
+  tool version. A derived file whose origin cannot be named is
+  indistinguishable from material of unknown rights.
+- **Measurements and judgements are different records.** `ReferenceCraftMetrics`
+  holds only computed facts. Subjective readings — "powerful", "premium",
+  "engaging" — belong solely in an attributed, versioned `ReferenceAnnotation`,
+  paired with the `prohibitedDirectSimilarity` that bounds them.
+- **Never fabricate an unavailable analysis.** No transcriber means
+  `TRANSCRIPTION_UNAVAILABLE`, not an empty or invented transcript.
+- **FiftyOne is a disposable projection.** PostgreSQL is canonical for rights,
+  provenance, annotations and state. Projection is idempotent; FiftyOne is
+  never imported inside a Temporal workflow, and its absence is a typed error.
+- **External detectors run at CLI/provider boundaries only**, with argument
+  arrays and no shell, bounded time, cancellation and typed failures — and they
+  never parse human-formatted terminal output when a machine-readable format
+  exists.
 
 ## Prompt-driven source generation — permanent rules
 

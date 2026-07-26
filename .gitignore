@@ -51,3 +51,10 @@ infrastructure/.data/
 # Synthetic render fixtures, rebuilt with `pnpm aamp:fixtures`. The manifest
 # that references them is committed; the media it generates is not.
 packages/media/fixtures/generated/
+
+# Creative Memory analysis output — proxies, extracted frames, scene clips,
+# transcripts and FiftyOne projections derived from reference advertisements.
+# Reference material is analysis-only and third-party; none of it is ever
+# committed. The manifests that describe it are committed; the media is not.
+.aamp-reference-analysis/
+packages/media/fixtures/reference-generated/

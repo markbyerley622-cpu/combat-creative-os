@@ -1,0 +1,114 @@
+{
+  "manifestVersion": 1,
+  "library": "Combat Reviews benchmark study library (synthetic acceptance fixtures)",
+  "workspaceId": "6f1d5f6c-6d3a-4a2e-9c5f-0f2a1b3c4d5e",
+  "references": [
+    {
+      "referenceId": "synthetic-fast-cut-vertical",
+      "title": "Synthetic fast-cut vertical reference",
+      "brand": "Combat Creative OS (synthetic)",
+      "campaign": "Creative Memory acceptance fixture",
+      "platform": "TIKTOK",
+      "publicationYear": 2026,
+      "localAnalysisPath": "../../../packages/media/fixtures/reference-generated/ref-fast-cut-vertical.mp4",
+      "accessBasis": "OWN_PAST_WORK",
+      "rightsClassification": "OWNED_REFERENCE",
+      "rightsHolder": "Combat Reviews",
+      "permittedUses": ["private structural analysis", "internal craft study"],
+      "prohibitedUses": [
+        "no use in any produced advertisement or other output",
+        "no redistribution"
+      ],
+      "businessRoles": ["MOTION_AND_TRANSITIONS", "PLATFORM_OPTIMISATION", "SCRIPT_AND_TIMING"],
+      "operatorNotes": "Synthetic six-scene one-second-per-cut fixture. Exists to exercise pacing measurement, not to demonstrate craft.",
+      "annotation": {
+        "authorId": "acceptance-fixture",
+        "hookMechanism": "Immediate colour change on the first frame with no build-up.",
+        "narrativeStructure": "Six equal beats with no escalation.",
+        "ctaSeconds": 5,
+        "transitionCategory": "hard cut",
+        "transferablePrinciple": "A uniform one-second cut rhythm sustains attention in a vertical feed but flattens emphasis: nothing stands out because every beat is the same length.",
+        "prohibitedDirectSimilarity": "Do not reproduce any specific colour sequence or cut pattern from a third-party advertisement; take the pacing principle only.",
+        "reviewerConfidence": "HIGH"
+      }
+    },
+    {
+      "referenceId": "synthetic-slow-cut-vertical",
+      "title": "Synthetic slow-cut vertical reference",
+      "brand": "Combat Creative OS (synthetic)",
+      "campaign": "Creative Memory acceptance fixture",
+      "platform": "INSTAGRAM_REELS",
+      "publicationYear": 2026,
+      "localAnalysisPath": "../../../packages/media/fixtures/reference-generated/ref-slow-cut-vertical.mp4",
+      "accessBasis": "OWN_PAST_WORK",
+      "rightsClassification": "OWNED_REFERENCE",
+      "rightsHolder": "Combat Reviews",
+      "permittedUses": ["private structural analysis"],
+      "prohibitedUses": ["no use in any produced advertisement or other output"],
+      "businessRoles": ["CREATIVE_DIRECTION", "CONTINUITY_AND_EDITORIAL"],
+      "operatorNotes": "Synthetic three-scene fixture with a longer hold, for contrast against the fast-cut reference.",
+      "annotation": {
+        "authorId": "acceptance-fixture",
+        "hookMechanism": "A long opening hold that asks the viewer to wait.",
+        "narrativeStructure": "Three beats, decreasing in length toward the close.",
+        "ctaSeconds": 6,
+        "transferablePrinciple": "Holding an opening shot for three seconds buys comprehension at the cost of scroll-stopping power; it suits a considered proposition, not a volume claim.",
+        "prohibitedDirectSimilarity": "Do not copy any third-party opening composition; the principle is the hold duration, not the image.",
+        "reviewerConfidence": "MEDIUM"
+      }
+    },
+    {
+      "referenceId": "synthetic-landscape-two-shot",
+      "title": "Synthetic landscape two-shot reference",
+      "brand": "Combat Creative OS (synthetic)",
+      "campaign": "Creative Memory acceptance fixture",
+      "platform": "YOUTUBE_SHORTS",
+      "publicationYear": 2026,
+      "localAnalysisPath": "../../../packages/media/fixtures/reference-generated/ref-landscape-two-shot.mp4",
+      "accessBasis": "OWN_PAST_WORK",
+      "rightsClassification": "ANALYSIS_ONLY",
+      "rightsHolder": "Combat Reviews",
+      "permittedUses": ["private structural analysis"],
+      "prohibitedUses": [
+        "no use in any produced advertisement or other output",
+        "no reframing for vertical delivery"
+      ],
+      "businessRoles": ["VIDEO_PRODUCTION", "VISUAL_QUALITY_CONTROL"],
+      "operatorNotes": "Landscape fixture, to prove aspect ratio is measured rather than assumed vertical.",
+      "annotation": {
+        "authorId": "acceptance-fixture",
+        "transferablePrinciple": "A landscape reference cannot be judged on vertical safe areas; aspect ratio must be measured before any framing lesson is drawn from it.",
+        "prohibitedDirectSimilarity": "Do not crop or reframe third-party landscape footage for vertical output under any circumstances.",
+        "reviewerConfidence": "HIGH"
+      }
+    },
+    {
+      "referenceId": "link-only-professional-reference",
+      "title": "Professional reference registered by link only",
+      "brand": "Third-party brand",
+      "agency": "Third-party agency",
+      "campaign": "Registered for research without acquiring media",
+      "platform": "YOUTUBE",
+      "publicationYear": 2025,
+      "officialUrl": "https://www.example.com/official-campaign-page",
+      "accessBasis": "PUBLICLY_PUBLISHED_URL",
+      "rightsClassification": "LINK_ONLY",
+      "rightsHolder": "Third-party rights holder",
+      "permittedUses": ["manual research via the official public URL"],
+      "prohibitedUses": [
+        "no use in any produced advertisement or other output",
+        "no downloading or local copying",
+        "no redistribution"
+      ],
+      "jurisdictionNotes": "Public availability is not permission. No media bytes are acquired for this record; it exists so a researcher can find the official page again.",
+      "businessRoles": ["REFERENCE_INTELLIGENCE", "CAMPAIGN_STRATEGY"],
+      "operatorNotes": "Link-only: no technical or craft measurement will ever be produced for this record, because no media was acquired.",
+      "annotation": {
+        "authorId": "acceptance-fixture",
+        "transferablePrinciple": "A reference can be catalogued and reasoned about from its public page alone; acquiring a copy is a separate decision requiring a separate legal basis.",
+        "prohibitedDirectSimilarity": "Do not reconstruct this advertisement's execution from memory or description.",
+        "reviewerConfidence": "MEDIUM"
+      }
+    }
+  ]
+}

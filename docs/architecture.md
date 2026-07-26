@@ -2396,6 +2396,83 @@ normalised but not measured back out.
 
 ---
 
+### AAMP — Creative Memory lawful benchmark ingestion (2026-07-27)
+
+The first Creative Memory layer: reference advertisements can be catalogued and
+structurally analysed, with a legal and architectural separation from
+production that is enforced by construction rather than by convention. Analysis
+and ingestion only — no semantic retrieval, no embeddings, no Qdrant, no agent
+access, no reference-conditioned generation. Full detail:
+`docs/runbooks/creative-memory-ingestion.md`.
+
+**What changed.**
+
+- **A reference-side domain and persistence model.**
+  `@combat/domain`'s `creative-memory.ts` defines the rights classifications,
+  the thirteen AAMP business roles, the nine processing states and ten entity
+  contracts; `packages/database` adds eleven `reference_*` tables in a separate
+  namespace with no relation into `Asset`, `LicenseRecord` or `RenderJob`.
+  Migration `20260727010351_add_creative_memory_reference_tables` was generated
+  by Prisma against live PostgreSQL and applied; the drift check reports
+  `No difference detected.`
+
+- **Separation that cannot be spelled around.** The reference and production
+  rights vocabularies share no output-permitting value:
+  `LICENSED_FOR_OUTPUT` and `PRODUCTION_ASSET` are absent from both the Zod enum
+  and the Prisma enum, so a benchmark cannot be described in a way the renderer
+  would accept. `referenceGrantsNoOutputRights()` is total over the enum, the
+  manifest refuses an entry claiming output-like permitted use or omitting an
+  output prohibition, and the repository refuses a forbidden classification at
+  the boundary. Sixteen tests assert the boundary, including that no reference
+  classification is accepted by the production asset manifest.
+
+- **Link-only ingestion.** A professional reference can be registered from
+  metadata and an official URL with **no bytes acquired**. Scene extraction is
+  impossible for such a record and no technical or craft measurement is ever
+  produced — the manifest refuses a link-only entry that supplies a local path
+  or a checksum. Nothing in this repository scrapes, downloads or automates
+  access to any advertisement.
+
+- **Real scene detection with no new dependency.** PySceneDetect (pinned 0.6.4,
+  `detect-adaptive`) is used when the operator installed it;
+  `FfmpegSceneDetectionProvider` — FFmpeg's `select=gt(scene,T)` filter read as
+  machine-readable JSON through `ffprobe` — is the fallback and is what runs
+  here. That fallback is why Creative Memory can segment references on a machine
+  where PySceneDetect was never installed, which was the alternative to shipping
+  an unexercised boundary.
+
+- **Deterministic craft measurement, kept apart from judgement.** Duration,
+  scene count, first cut, average/median/min/max scene duration, cuts per
+  second, histogram, aspect ratio, geometry, codecs, bitrate, and silence and
+  black-frame runs read as ffprobe frame _metadata_. `ReferenceCraftMetrics`
+  contains no subjective field; "powerful", "premium" and "engaging" live only
+  in an attributed, versioned `ReferenceAnnotation`, always paired with the
+  `prohibitedDirectSimilarity` that bounds the lesson.
+
+- **Provenance on every derived byte**, and originals never modified.
+  `pnpm aamp:reference` provides register / ingest / list / inspect / approve /
+  project with ten distinct exit codes. FiftyOne projection is idempotent and
+  disposable — PostgreSQL stays canonical, and FiftyOne's absence is a typed,
+  actionable error rather than an ingestion failure.
+
+**Proven.** The acceptance fixture builds three deliberately different synthetic
+advertisements from FFmpeg `lavfi` sources — nothing third-party is required to
+test a system for studying third-party work — and ingests them with real
+detection and real frame extraction: 6/3/2 scenes found at the correct
+timestamps, 18/9/6 frames written, pacing and aspect ratio measured correctly
+(`9:16` versus `16:9`), provenance complete, duplicate re-ingestion detected,
+originals byte-identical afterwards, and no reference reaching
+`READY_FOR_RETRIEVAL` without human approval.
+
+**Not proven.** PySceneDetect, Whisper and FiftyOne are not installed here, so
+the adaptive detector, transcription and the browser UI are unexercised on this
+machine. Scene detection finds hard cuts only. Semantic retrieval does not
+exist.
+
+**Next milestone: multimodal embedding, Qdrant retrieval and reranking.**
+
+---
+
 ## 9. What this document deliberately does not do
 
 Per instructions, no application code, no package.json, no Prisma schema file, and

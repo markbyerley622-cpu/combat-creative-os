@@ -13,3 +13,4 @@ export * from './render/filter-graph';
 export * from './render/renderer';
 export * from './qa/frame-sampling';
 export * from './qa/actual-media-qa';
+export * from './analysis/craft-metrics';

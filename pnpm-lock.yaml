@@ -41,6 +41,9 @@ importers:
       '@combat/config':
         specifier: workspace:*
         version: link:../../packages/config
+      '@combat/database':
+        specifier: workspace:*
+        version: link:../../packages/database
       '@combat/domain':
         specifier: workspace:*
         version: link:../../packages/domain

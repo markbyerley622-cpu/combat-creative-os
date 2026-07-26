@@ -53,6 +53,12 @@ model Workspace {
   performanceObservations  PerformanceObservation[]
   learningRecords          LearningRecord[]
 
+  // Creative Memory. Aggregate roots only, per the tenancy-scoping convention
+  // above; the reference child tables reach Workspace through this FK chain
+  // and carry `workspaceId` as a denormalized scoping column.
+  referenceSources         ReferenceSource[]
+  referenceAdvertisements  ReferenceAdvertisement[]
+
   @@map("workspaces")
 }
 
@@ -1784,3 +1790,365 @@ model AgentInvocation {
   @@index([workflowRunId])
   @@map("agent_invocations")
 }
+
+// ============================================================================
+// Creative Memory â€” reference (inspiration) side.
+//
+// Deliberately a separate namespace from the production asset tables above.
+// Every table is prefixed `reference_` and no relation crosses into Asset,
+// LicenseRecord or RenderJob: a benchmark advertisement must not be reachable
+// from anything the renderer consults. The rights vocabulary is separate too
+// (ReferenceRightsClassification has no output-permitting member), so a
+// reference cannot even be spelled in a way production would accept.
+//
+// See packages/domain's creative-memory.ts and
+// docs/runbooks/creative-memory-ingestion.md.
+// ============================================================================
+
+enum ReferenceRightsClassification {
+  LINK_ONLY
+  ANALYSIS_ONLY
+  LICENSED_FOR_ANALYSIS
+  OWNED_REFERENCE
+}
+
+enum SourceAccessBasis {
+  PUBLICLY_PUBLISHED_URL
+  OPERATOR_LAWFUL_COPY
+  DIRECT_LICENCE
+  OWN_PAST_WORK
+  SUPPLIED_BY_RIGHTS_HOLDER
+}
+
+enum ReferenceBusinessRole {
+  CAMPAIGN_STRATEGY
+  CREATIVE_DIRECTION
+  SCRIPT_AND_TIMING
+  REFERENCE_INTELLIGENCE
+  PREVISUALISATION
+  VIDEO_PRODUCTION
+  MOTION_AND_TRANSITIONS
+  SOUND_AND_MUSIC
+  VISUAL_QUALITY_CONTROL
+  CONTINUITY_AND_EDITORIAL
+  COPY_AND_BRAND_CONTROL
+  PLATFORM_OPTIMISATION
+  PERFORMANCE_ANALYSIS
+}
+
+/// READY_FOR_RETRIEVAL means the analysis pipeline finished and a human
+/// approved the annotations. It does NOT mean output-eligible â€” no reference
+/// state ever does.
+enum ReferenceProcessingState {
+  REGISTERED
+  VALIDATED
+  INSPECTED
+  SEGMENTED
+  TRANSCRIBED
+  PROJECTED
+  REVIEW_REQUIRED
+  READY_FOR_RETRIEVAL
+  FAILED
+}
+
+enum ReferenceFailureReason {
+  INVALID_MANIFEST
+  INVALID_RIGHTS
+  UNSAFE_PATH
+  MISSING_MEDIA
+  INSPECTION_FAILED
+  SCENE_DETECTION_FAILED
+  DERIVATION_FAILED
+  TRANSCRIPTION_UNAVAILABLE
+  DUPLICATE_REFERENCE
+  PERSISTENCE_FAILED
+}
+
+enum ReferenceFrameKind {
+  START
+  MIDPOINT
+  END
+}
+
+enum ReferenceDerivedArtifactKind {
+  PROXY
+  FRAME
+  SCENE_CLIP
+  TRANSCRIPT
+}
+
+enum ReviewerConfidence {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+model ReferenceSource {
+  id                   String                        @id @default(uuid())
+  workspaceId          String
+  officialUrl          String?
+  accessBasis          SourceAccessBasis
+  rightsClassification ReferenceRightsClassification
+  rightsHolder         String
+  permittedUses        String[]
+  prohibitedUses       String[]
+  attribution          String?
+  jurisdictionNotes    String?
+  /// Always true. Persisted rather than derived so a database dump is
+  /// self-describing about what these rows may not be used for.
+  outputUseProhibited  Boolean                       @default(true)
+  createdAt            DateTime                      @default(now())
+
+  workspace      Workspace                @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  advertisements ReferenceAdvertisement[]
+
+  @@index([workspaceId])
+  @@map("reference_sources")
+}
+
+model ReferenceAdvertisement {
+  id                      String                   @id @default(uuid())
+  workspaceId             String
+  referenceSourceId       String
+  referenceKey            String
+  title                   String
+  brand                   String
+  campaign                String?
+  agency                  String?
+  productionCompany       String?
+  director                String?
+  platform                String?
+  publicationYear         Int?
+  declaredDurationSeconds Float?
+  businessRoles           ReferenceBusinessRole[]
+  operatorNotes           String?
+  processingState         ReferenceProcessingState @default(REGISTERED)
+  failureReason           ReferenceFailureReason?
+  failureDetail           String?
+  /// False for LINK_ONLY: metadata was registered but no bytes were acquired.
+  mediaAcquired           Boolean                  @default(false)
+  createdAt               DateTime                 @default(now())
+  updatedAt               DateTime                 @updatedAt
+
+  workspace       Workspace                  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  referenceSource ReferenceSource            @relation(fields: [referenceSourceId], references: [id], onDelete: Cascade)
+  media           ReferenceMedia?
+  scenes          ReferenceScene[]
+  frames          ReferenceFrame[]
+  transcripts     ReferenceTranscript[]
+  annotations     ReferenceAnnotation[]
+  craftMetrics    ReferenceCraftMetrics?
+  derived         ReferenceDerivedArtifact[]
+
+  @@unique([workspaceId, referenceKey])
+  @@index([workspaceId])
+  @@index([workspaceId, processingState])
+  @@map("reference_advertisements")
+}
+
+model ReferenceMedia {
+  id                       String   @id @default(uuid())
+  workspaceId              String
+  referenceAdvertisementId String   @unique
+  /// Absolute path inside a configured reference root. Never a production path.
+  localPath                String
+  checksumSha256           String
+  sizeBytes                BigInt
+  durationSeconds          Float
+  widthPx                  Int
+  heightPx                 Int
+  frameRate                Float
+  videoCodec               String
+  hasAudio                 Boolean
+  audioCodec               String?
+  aspectRatio              String
+  createdAt                DateTime @default(now())
+
+  advertisement ReferenceAdvertisement @relation(fields: [referenceAdvertisementId], references: [id], onDelete: Cascade)
+
+  /// Checksum uniqueness per workspace is what makes duplicate ingestion a
+  /// detected condition rather than a silently-doubled library.
+  @@unique([workspaceId, checksumSha256])
+  @@index([workspaceId])
+  @@map("reference_media")
+}
+
+model ReferenceScene {
+  id                       String   @id @default(uuid())
+  workspaceId              String
+  referenceAdvertisementId String
+  sceneIndex               Int
+  startSeconds             Float
+  endSeconds               Float
+  durationSeconds          Float
+  detectionMethod          String
+  detectorConfig           Json     @default("{}")
+  confidence               Float?
+  createdAt                DateTime @default(now())
+
+  advertisement ReferenceAdvertisement    @relation(fields: [referenceAdvertisementId], references: [id], onDelete: Cascade)
+  frames        ReferenceFrame[]
+  derived       ReferenceDerivedArtifact[]
+
+  @@unique([referenceAdvertisementId, sceneIndex])
+  @@index([workspaceId])
+  @@map("reference_scenes")
+}
+
+model ReferenceFrame {
+  id                       String             @id @default(uuid())
+  workspaceId              String
+  referenceAdvertisementId String
+  referenceSceneId         String?
+  kind                     ReferenceFrameKind
+  timestampSeconds         Float
+  localPath                String
+  checksumSha256           String
+  widthPx                  Int
+  heightPx                 Int
+  createdAt                DateTime           @default(now())
+
+  advertisement ReferenceAdvertisement @relation(fields: [referenceAdvertisementId], references: [id], onDelete: Cascade)
+  scene         ReferenceScene?        @relation(fields: [referenceSceneId], references: [id], onDelete: Cascade)
+
+  @@unique([referenceAdvertisementId, referenceSceneId, kind])
+  @@index([workspaceId])
+  @@map("reference_frames")
+}
+
+model ReferenceTranscript {
+  id                       String   @id @default(uuid())
+  workspaceId              String
+  referenceAdvertisementId String
+  provider                 String
+  model                    String
+  language                 String?
+  /// Timestamped segments. Written only when a transcript was genuinely
+  /// produced â€” never fabricated when the provider is unavailable.
+  segments                 Json
+  createdAt                DateTime @default(now())
+
+  advertisement ReferenceAdvertisement @relation(fields: [referenceAdvertisementId], references: [id], onDelete: Cascade)
+
+  @@unique([referenceAdvertisementId, provider, model])
+  @@index([workspaceId])
+  @@map("reference_transcripts")
+}
+
+/// Deterministic measurements only. Subjective judgements belong in
+/// ReferenceAnnotation, attributed to a named human.
+model ReferenceCraftMetrics {
+  id                       String   @id @default(uuid())
+  workspaceId              String
+  referenceAdvertisementId String   @unique
+  durationSeconds          Float
+  sceneCount               Int
+  firstCutSeconds          Float?
+  averageSceneSeconds      Float?
+  medianSceneSeconds       Float?
+  minSceneSeconds          Float?
+  maxSceneSeconds          Float?
+  cutsPerSecond            Float
+  sceneDurationHistogram   Json     @default("{}")
+  aspectRatio              String
+  widthPx                  Int
+  heightPx                 Int
+  frameRate                Float
+  videoCodec               String
+  hasAudio                 Boolean
+  audioCodec               String?
+  averageBitrateBps        Int?
+  peakBitrateBps           Int?
+  silenceIntervals         Json     @default("[]")
+  blackFrameIntervals      Json     @default("[]")
+  createdAt                DateTime @default(now())
+
+  advertisement ReferenceAdvertisement @relation(fields: [referenceAdvertisementId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@map("reference_craft_metrics")
+}
+
+model ReferenceAnnotation {
+  id                            String             @id @default(uuid())
+  workspaceId                   String
+  referenceAdvertisementId      String
+  version                       Int
+  authorId                      String
+  hookMechanism                 String?
+  audienceTension               String?
+  campaignProposition           String?
+  narrativeStructure            String?
+  productRevealSeconds          Float?
+  ctaSeconds                    Float?
+  shotType                      String?
+  cameraMovement                String?
+  transitionCategory            String?
+  typographyBehaviour           String?
+  soundProgression              String?
+  emotionalMechanism            String?
+  platformNativeCharacteristics String?
+  /// What may be learned and reapplied â€” a principle, never a reusable asset.
+  transferablePrinciple         String
+  /// What must not be copied. Stored beside the principle so the lesson and
+  /// its boundary always travel together.
+  prohibitedDirectSimilarity    String
+  reviewerConfidence            ReviewerConfidence
+  reviewerNotes                 String?
+  approved                      Boolean            @default(false)
+  createdAt                     DateTime           @default(now())
+
+  advertisement ReferenceAdvertisement @relation(fields: [referenceAdvertisementId], references: [id], onDelete: Cascade)
+
+  @@unique([referenceAdvertisementId, version])
+  @@index([workspaceId])
+  @@map("reference_annotations")
+}
+
+model ReferenceIngestionRun {
+  id             String    @id @default(uuid())
+  workspaceId    String
+  idempotencyKey String
+  startedAt      DateTime  @default(now())
+  completedAt    DateTime?
+  succeededCount Int       @default(0)
+  failedCount    Int       @default(0)
+  skippedCount   Int       @default(0)
+  toolVersions   Json      @default("{}")
+
+  derived ReferenceDerivedArtifact[]
+
+  @@unique([workspaceId, idempotencyKey])
+  @@index([workspaceId])
+  @@map("reference_ingestion_runs")
+}
+
+/// Provenance for every byte derived from a reference. sourceChecksumSha256
+/// and extractionCommand are required: a derived file whose origin cannot be
+/// named is indistinguishable from an asset of unknown rights.
+model ReferenceDerivedArtifact {
+  id                       String                       @id @default(uuid())
+  workspaceId              String
+  referenceAdvertisementId String
+  referenceSceneId         String?
+  ingestionRunId           String
+  kind                     ReferenceDerivedArtifactKind
+  localPath                String
+  checksumSha256           String
+  sizeBytes                BigInt
+  sourceChecksumSha256     String
+  extractionCommand        String
+  toolVersion              String
+  /// Always true. Derived analysis media is analysis media.
+  analysisOnly             Boolean                      @default(true)
+  createdAt                DateTime                     @default(now())
+
+  advertisement ReferenceAdvertisement @relation(fields: [referenceAdvertisementId], references: [id], onDelete: Cascade)
+  scene         ReferenceScene?        @relation(fields: [referenceSceneId], references: [id], onDelete: Cascade)
+  ingestionRun  ReferenceIngestionRun  @relation(fields: [ingestionRunId], references: [id], onDelete: Cascade)
+
+  @@unique([referenceAdvertisementId, kind, localPath])
+  @@index([workspaceId])
+  @@map("reference_derived_artifacts")
+}
+

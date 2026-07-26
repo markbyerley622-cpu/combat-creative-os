@@ -36,3 +36,5 @@ export * from './repositories/agent-invocation-repository';
 // it to exercise cross-repository flows without a live Postgres. See its own
 // doc comment in in-memory-campaign-store.ts.
 export * from './repositories/test-helpers/in-memory-campaign-store';
+export * from './repositories/reference-repository';
+export * from './repositories/in-memory-reference-store';
