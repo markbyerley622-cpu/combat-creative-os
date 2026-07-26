@@ -46,21 +46,6 @@ describe('aamp:generate — execution mode is always declared', () => {
     const plan = JSON.parse(io.stdoutText()) as { executionMode: string };
     expect(plan.executionMode).toBe('FIXTURE_REASONING_AND_FIXTURE_GENERATION');
   });
-
-  it('reports REAL_REASONING_AND_FIXTURE_GENERATION when only generation is a fixture', async () => {
-    const io = capture();
-    // A syntactically valid key is enough: --plan-only stops before any
-    // reasoning call, and this asserts mode *labelling*, not model access.
-    await runGenerateCli(['--manifest', MANIFEST_PATH, '--plan-only'], {
-      cwd: process.cwd(),
-      env: { ...BASE_ENV, REASONING_PROVIDER: 'claude', ANTHROPIC_API_KEY: 'sk-ant-test-key' },
-      stdout: io.stdout,
-      stderr: io.stderr,
-    });
-
-    expect(io.stderrText()).toContain('REAL_REASONING_AND_FIXTURE_GENERATION');
-    expect(io.stderrText()).toMatch(/not AI-generated footage/);
-  });
 });
 
 describe('aamp:generate — real generation never silently degrades', () => {

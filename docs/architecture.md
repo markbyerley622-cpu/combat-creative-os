@@ -2315,6 +2315,87 @@ hardware that cannot execute either intended quality profile.
 
 ---
 
+### AAMP — real prompt-driven source-based advertisement generation (2026-07-27)
+
+Makes `pnpm aamp:generate` produce a genuinely prompt-specific advertisement on
+an ordinary laptop: a natural-language brief plus a library of real owned assets
+in, a rights-clean 1080×1920 MP4 out, with **no GPU, no ComfyUI and no generated
+footage**. ComfyUI remains an optional generation source. Full operating detail:
+`docs/runbooks/prompt-driven-advertisement-generation.md`.
+
+**What changed.**
+
+- **A campaign request replaces the generation manifest as the canonical
+  input.** `CampaignRequestV1Schema` describes a _campaign_ — the brief in the
+  requester's own words, structured product and event facts, audience,
+  objective, platform, CTA and brand kit — where the previous document described
+  a _cut_. A `promptFile` field keeps multi-paragraph briefs out of PowerShell
+  quoting. The legacy `--manifest` form still works.
+
+- **The brief now reaches the agents.** `campaignPrompt` and ordered
+  `factualConstraints` are additive typed inputs on all four planning agents,
+  and each gained a new prompt version carrying a shared brief-handling
+  addendum: the brief is authoritative, facts are binding, do not restate, and
+  **never name or imitate an agency** — creative intent is expressed as explicit
+  properties instead. Previously the agents saw only a derived summary and the
+  requester's actual words never left the CLI.
+
+- **Genuine reasoning is now required.** The previous milestone defaulted to
+  fixture creative because the generic mock could not satisfy the agent schemas.
+  That default is wrong once the claim is prompt-specificity, so the polarity is
+  inverted: a normal run **exits 3** with an actionable message rather than
+  quietly producing generic output, and fixture creative requires an explicit
+  `--fixture-demo`.
+
+- **A production asset manifest with enforced rights.**
+  `ProductionAssetManifestV1Schema` records classification, owner, permitted
+  output use, optional attribution and expiry, checksum and declared metadata.
+  `ANALYSIS_ONLY` and `UNKNOWN_RIGHTS` are refused at parse time — benchmark and
+  competitor material cannot enter a production manifest at all — and
+  resolution additionally refuses expired licences, unsafe paths, missing or
+  empty files, checksum mismatches and kind mismatches. Rights and containment
+  are checked before any byte is read; everything accepted is measured with
+  ffprobe, and a declared value that disagrees is recorded as a discrepancy
+  while the measured one is used.
+
+- **Deterministic, explainable source selection.** Successive `FEATURE` beats
+  walk `INFORMATION → PREDICTION → DISCUSSION`, turning generic beats into the
+  requested arc. Scoring is a pure function of request and manifest with an
+  asset-id tie-break, so the same approved request always yields the same edit —
+  without which a human approval would mean nothing. Every selection records why
+  it won. No usable source means a designed `BRAND_CARD` or a typed
+  missing-source error, never unrelated footage.
+
+- **Prompt-specific edit, scorecard and a run directory.** The edit builder
+  chooses transitions from the story move being made, holds stills with a push,
+  places captions per scene inside the declared safe areas, and carries
+  per-source provenance. `creative-scorecard.json` separates _measured_ checks
+  (product-visible timing, cut density, CTA duration, export compliance) from
+  _heuristic_ dimension scores, and always carries `requiresHumanApproval: true`
+  and `agencyGradeClaim: NOT_ASSESSED`. Each run writes ten artefacts; a test
+  asserts no secret appears in any of them.
+
+**Boundaries.** `packages/agents` gained additive optional input fields and four
+new prompt versions (snapshots updated deliberately); no other package changed.
+The three human gates are untouched — the CLI dispatches no approval signal, and
+writes no `Asset`/`AssetProvenance` rows.
+
+**Proven.** The committed Combat Reviews acceptance fixture runs the whole chain
+to a real 1080×1920 H.264/AAC 15.000s MP4, ffprobe-verified, QA `PASS`, with
+every render source covered by provenance and the requested event → information
+→ prediction → discussion arc present and in order.
+
+**Not proven.** The acceptance fixture runs in `FIXTURE_DEMO`, so it establishes
+the pipeline rather than the prompt-specificity of the copy; prompt propagation
+is proven separately at the input boundary, where it needs no model. Real AI
+video generation remains unproven on this hardware. Sources are trimmed from
+their start with no in-point search, scene audio is not mixed, and loudness is
+normalised but not measured back out.
+
+**Next milestone: Creative Memory benchmark ingestion.**
+
+---
+
 ## 9. What this document deliberately does not do
 
 Per instructions, no application code, no package.json, no Prisma schema file, and

@@ -25,6 +25,7 @@ export const COMBAT_REVIEWS_BRIEF: CampaignStrategistInput = {
   keyMessages: ['12 Fight Events This Weekend', 'Every Combat Sport. One App.'],
   mandatories: ['Download Free'],
   priorLearnings: [],
+  factualConstraints: [],
 };
 
 export const COMBAT_REVIEWS_STRATEGY_RESULT: CampaignStrategistResult = {

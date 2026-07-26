@@ -36,10 +36,51 @@ this code**, because this machine has a 4 GB GPU against a 12 GB floor and
 configured. Also note **mock reasoning ignores the campaign prompt**: it
 replays committed golden fixtures. See the "ComfyUI video generation" section
 below, `docs/runbooks/comfyui-video-generation.md` and `docs/architecture.md`
-§8's vertical-slice-2 entry. **The next milestone is real prompt-driven
-source-based advertisement generation.** AAMP-1 step 3 (the `SERIALIZABLE`
+§8's vertical-slice-2 entry.
+
+**Real prompt-driven source-based advertisement generation is done** — a
+natural-language brief plus a library of owned assets now produces a
+prompt-specific vertical advertisement with no GPU and no generated footage.
+See the "Prompt-driven source generation" section below and
+`docs/runbooks/prompt-driven-advertisement-generation.md`. **The next milestone
+is Creative Memory benchmark ingestion.** AAMP-1 step 3 (the `SERIALIZABLE`
 budget transaction, `docs/aamp-architecture.md` §6 task 5) remains outstanding
 and unstarted.
+
+## Prompt-driven source generation — permanent rules
+
+- **A normal run requires genuine reasoning.** `REASONING_PROVIDER=mock` is
+  refused (exit 3) unless the operator explicitly passes `--fixture-demo`.
+  Fixture creative replays committed golden results and **ignores the campaign
+  prompt entirely**, so it can never stand in for a campaign result. Never add
+  a silent fallback from real reasoning to fixtures.
+- **The brief reaches the agents verbatim.** `campaignPrompt` and ordered
+  `factualConstraints` are typed inputs on all four planning agents; the
+  derived `objective`/`keyMessages` are a summary, never a replacement. Every
+  planning prompt version carries the shared brief-handling addendum.
+- **No agency imitation, ever.** Creative intent is expressed as explicit
+  properties — pacing, contrast, framing, typography, rhythm. Every planning
+  prompt forbids naming or imitating an agency, studio or existing campaign.
+- **Only `OWNED`, `COMMISSIONED` and `LICENSED_FOR_OUTPUT` may reach FFmpeg**,
+  and only with `permittedOutputUse: true`. `ANALYSIS_ONLY` and
+  `UNKNOWN_RIGHTS` are refused when the production manifest is parsed —
+  benchmark and competitor material must never enter it. Expired licences,
+  unsafe paths, checksum mismatches, missing files and kind mismatches are
+  refused before or during resolution, never worked around.
+- **Selection is deterministic and explainable.** Scores are pure functions of
+  the request and manifest, ties break on asset id, nothing reads a clock.
+  Every selection records why it won. When nothing fits, use the designed
+  `BRAND_CARD` or raise the typed missing-source error — never substitute
+  unrelated footage.
+- **Measurements beat declarations.** Every accepted asset is probed with
+  ffprobe; a declared duration or dimension that disagrees is recorded as a
+  discrepancy and the measured value is what the timeline uses.
+- **Technically valid, prompt-specific and agency-grade are three different
+  claims.** QA measures the first and gates READY on it. Only a `REAL` run
+  supports the second. The system never asserts the third: the scorecard always
+  carries `agencyGradeClaim: NOT_ASSESSED` and `requiresHumanApproval: true`,
+  and its dimension scores are structural heuristics, not quality judgements.
+- **A QA failure prevents READY.** No heuristic score may override it.
 
 ## Real media rendering — permanent rules (vertical slice 1)
 

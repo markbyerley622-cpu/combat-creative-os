@@ -24,6 +24,10 @@ export const ShotPromptEngineerInputSchema = z.object({
       suggestedAction: z.string().optional(),
     })
     .optional(),
+  /** The requester's brief, verbatim. See `CampaignStrategistInputSchema` for why the summary is not a substitute. */
+  campaignPrompt: z.string().min(1).max(8000).optional(),
+  /** Binding product/event facts as `PRODUCT — …` / `EVENT — …` lines. */
+  factualConstraints: z.array(z.string().min(1)).default([]),
 });
 export type ShotPromptEngineerInput = z.infer<typeof ShotPromptEngineerInputSchema>;
 

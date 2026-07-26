@@ -1,0 +1,124 @@
+{
+  "manifestVersion": 1,
+  "library": "Combat Reviews owned production library (repository-safe synthetic fixtures)",
+  "assets": [
+    {
+      "id": "logo-primary",
+      "path": "../../../packages/media/fixtures/generated/logo.png",
+      "kind": "IMAGE",
+      "role": "LOGO",
+      "description": "Combat Reviews primary logo lockup",
+      "rights": {
+        "classification": "OWNED",
+        "owner": "Combat Reviews",
+        "permittedOutputUse": true,
+        "restrictions": []
+      },
+      "tags": ["logo", "brand"]
+    },
+    {
+      "id": "clip-training",
+      "path": "../../../packages/media/fixtures/generated/clip-training.mp4",
+      "kind": "VIDEO",
+      "role": "SOURCE_CLIP",
+      "description": "Owned training-session footage — heavy bag work, gym lighting",
+      "rights": {
+        "classification": "OWNED",
+        "owner": "Combat Reviews",
+        "permittedOutputUse": true,
+        "restrictions": []
+      },
+      "beats": ["HOOK"],
+      "tags": ["gym", "training", "combat", "fight", "energy"]
+    },
+    {
+      "id": "clip-sparring",
+      "path": "../../../packages/media/fixtures/generated/clip-sparring.mp4",
+      "kind": "VIDEO",
+      "role": "SOURCE_CLIP",
+      "description": "Owned sparring footage — ring work suitable for event coverage beats",
+      "rights": {
+        "classification": "OWNED",
+        "owner": "Combat Reviews",
+        "permittedOutputUse": true,
+        "restrictions": []
+      },
+      "beats": ["EVENT_DETAIL"],
+      "tags": ["sparring", "ring", "events", "weekend", "card"]
+    },
+    {
+      "id": "screen-fight-card",
+      "path": "../../../packages/media/fixtures/generated/screenshot-fight-card.png",
+      "kind": "IMAGE",
+      "role": "APP_SCREENSHOT",
+      "description": "Combat Reviews app — this weekend's fight card and event details screen",
+      "rights": {
+        "classification": "OWNED",
+        "owner": "Combat Reviews",
+        "permittedOutputUse": true,
+        "restrictions": []
+      },
+      "beats": ["EVENT_DETAIL", "INFORMATION"],
+      "tags": ["events", "card", "details", "schedule", "weekend"]
+    },
+    {
+      "id": "screen-predictions",
+      "path": "../../../packages/media/fixtures/generated/screenshot-rankings.png",
+      "kind": "IMAGE",
+      "role": "APP_SCREENSHOT",
+      "description": "Combat Reviews app — community predictions and fighter rankings screen",
+      "rights": {
+        "classification": "OWNED",
+        "owner": "Combat Reviews",
+        "permittedOutputUse": true,
+        "restrictions": []
+      },
+      "beats": ["PREDICTION"],
+      "tags": ["predictions", "rankings", "picks", "community"]
+    },
+    {
+      "id": "screen-discussion",
+      "path": "../../../packages/media/fixtures/generated/screenshot-reviews.png",
+      "kind": "IMAGE",
+      "role": "APP_SCREENSHOT",
+      "description": "Combat Reviews app — round-by-round scorecards and post-fight discussion screen",
+      "rights": {
+        "classification": "OWNED",
+        "owner": "Combat Reviews",
+        "permittedOutputUse": true,
+        "restrictions": []
+      },
+      "beats": ["DISCUSSION", "INFORMATION"],
+      "tags": ["discussion", "scorecard", "reviews", "argue", "rounds"]
+    },
+    {
+      "id": "brand-card-cta",
+      "path": "../../../packages/media/fixtures/generated/logo.png",
+      "kind": "IMAGE",
+      "role": "BRAND_CARD",
+      "description": "Combat Reviews brand card — designed fallback when no footage fits a beat",
+      "rights": {
+        "classification": "OWNED",
+        "owner": "Combat Reviews",
+        "permittedOutputUse": true,
+        "restrictions": []
+      },
+      "beats": ["CTA"],
+      "tags": ["brand", "cta", "download"]
+    },
+    {
+      "id": "music-bed",
+      "path": "../../../packages/media/fixtures/generated/music-bed.wav",
+      "kind": "AUDIO",
+      "role": "MUSIC",
+      "description": "Commissioned percussive music bed, cleared for paid media",
+      "rights": {
+        "classification": "COMMISSIONED",
+        "owner": "Combat Reviews",
+        "permittedOutputUse": true,
+        "restrictions": []
+      },
+      "tags": ["music", "percussion"]
+    }
+  ]
+}

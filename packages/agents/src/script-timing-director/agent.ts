@@ -5,7 +5,7 @@ import {
   defineAgent,
 } from '@combat/agent-runtime';
 import { ScriptTimingDirectorInputSchema, ScriptTimingDirectorResultSchema } from './schema';
-import { V1 } from './prompts/v1';
+import { V2 } from './prompts/v2';
 
 /**
  * Canonical registry id is `script-timing-director` (preserved from the
@@ -20,7 +20,7 @@ export const scriptTimingDirectorAgent = defineAgent({
   disabledByDefault: false,
   inputSchema: ScriptTimingDirectorInputSchema,
   resultSchema: ScriptTimingDirectorResultSchema,
-  promptVersion: V1,
+  promptVersion: V2,
   modelPolicy: { ...DEFAULT_MODEL_POLICY, effort: 'high' },
   tokenBudget: DEFAULT_TOKEN_BUDGET,
   toolPolicy: NO_TOOL_POLICY,

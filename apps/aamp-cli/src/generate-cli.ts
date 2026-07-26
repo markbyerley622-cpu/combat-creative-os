@@ -20,6 +20,14 @@ import {
 
 import { buildRenderManifest } from './build-render-manifest';
 import {
+  CampaignRequestValidationError,
+  loadCampaignRequest,
+  type CampaignRequest,
+} from './campaign-request';
+import { planCampaign } from './plan-campaign';
+import { resolveReasoningPolicy, type ReasoningPolicy } from './reasoning-policy';
+import { EXIT_CODES, runDirectoryFor, runSourceCampaign } from './run-source-campaign';
+import {
   describeExecutionMode,
   isFullyReal,
   resolveExecutionMode,
@@ -57,22 +65,47 @@ import { runAgentPipeline } from './run-agents';
 const DEFAULT_OUTPUT_DIRECTORY = '.aamp-output';
 
 export interface GenerateCliOptions {
-  readonly manifestPath: string;
+  /** Canonical input: a campaign request describing what to advertise and why. */
+  readonly requestPath?: string;
+  /** Overrides the request's own `sourceAssetManifest`. */
+  readonly assetsPath?: string;
+  /** Overrides the request's own `outputDirectory`. */
+  readonly outputDirectory?: string;
+  /** Legacy input from the ComfyUI gateway milestone. Still supported. */
+  readonly manifestPath?: string;
   readonly outputRoot?: string;
   readonly json: boolean;
-  /** Stops after the agents have produced shot briefs. Useful without an endpoint. */
+  /** Stops after the agents have produced shot briefs. */
   readonly planOnly: boolean;
+  /**
+   * Opt in to replayed fixture creative. Without it, a run that has no real
+   * reasoning provider fails rather than quietly producing generic output.
+   */
+  readonly fixtureDemo: boolean;
 }
 
 export function parseGenerateCliArguments(argv: readonly string[]): GenerateCliOptions {
+  let requestPath: string | undefined;
+  let assetsPath: string | undefined;
+  let outputDirectory: string | undefined;
   let manifestPath: string | undefined;
   let outputRoot: string | undefined;
   let json = false;
   let planOnly = false;
+  let fixtureDemo = false;
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     switch (arg) {
+      case '--request':
+        requestPath = argv[++i];
+        break;
+      case '--assets':
+        assetsPath = argv[++i];
+        break;
+      case '--output-dir':
+        outputDirectory = argv[++i];
+        break;
       case '--manifest':
         manifestPath = argv[++i];
         break;
@@ -85,15 +118,36 @@ export function parseGenerateCliArguments(argv: readonly string[]): GenerateCliO
       case '--plan-only':
         planOnly = true;
         break;
+      case '--fixture-demo':
+        fixtureDemo = true;
+        break;
       default:
         if (arg && arg.startsWith('--')) throw new Error(`Unknown option ${arg}`);
     }
   }
 
-  if (!manifestPath) {
-    throw new Error('Usage: aamp:generate --manifest <absolute-or-repository-relative-json-path>');
+  if (!requestPath && !manifestPath) {
+    throw new Error(
+      [
+        'Usage: aamp:generate --request <campaign-request.json> [--assets <production-assets.json>] [--output-dir <dir>]',
+        '  --fixture-demo   replay committed fixture creative instead of calling a real reasoning model',
+        '  --plan-only      stop after planning, before any render',
+        '  --json           machine-readable output',
+        '',
+        'The legacy --manifest <generation-manifest.json> form from the ComfyUI gateway milestone is still accepted.',
+      ].join('\n'),
+    );
   }
-  return { manifestPath, ...(outputRoot ? { outputRoot } : {}), json, planOnly };
+  return {
+    ...(requestPath ? { requestPath } : {}),
+    ...(assetsPath ? { assetsPath } : {}),
+    ...(outputDirectory ? { outputDirectory } : {}),
+    ...(manifestPath ? { manifestPath } : {}),
+    ...(outputRoot ? { outputRoot } : {}),
+    json,
+    planOnly,
+    fixtureDemo,
+  };
 }
 
 export async function findRepositoryRoot(startDir: string): Promise<string> {
@@ -164,6 +218,15 @@ function resolveAssetPath(
   return absolute;
 }
 
+/**
+ * Dispatches on which input form was given.
+ *
+ * `--request` is the canonical interface introduced by the prompt-driven
+ * source milestone. `--manifest` is the ComfyUI gateway milestone's generation
+ * manifest, kept working so that flow and its acceptance test remain usable —
+ * the two describe genuinely different things (a campaign versus a cut), so
+ * they get different code paths rather than one contorted union.
+ */
 export async function runGenerateCli(
   argv: readonly string[],
   context: GenerateCliContext,
@@ -176,10 +239,21 @@ export async function runGenerateCli(
     return 2;
   }
 
+  if (options.requestPath) {
+    return runCampaignRequestCli(options, context);
+  }
+  return runLegacyManifestCli(options, context);
+}
+
+async function runLegacyManifestCli(
+  options: GenerateCliOptions,
+  context: GenerateCliContext,
+): Promise<number> {
   const repositoryRoot = await findRepositoryRoot(context.cwd);
-  const manifestPath = isAbsolute(options.manifestPath)
-    ? options.manifestPath
-    : resolve(repositoryRoot, options.manifestPath);
+  const legacyManifest = options.manifestPath as string;
+  const manifestPath = isAbsolute(legacyManifest)
+    ? legacyManifest
+    : resolve(repositoryRoot, legacyManifest);
   const manifestDir = dirname(manifestPath);
   const outputRoot = options.outputRoot
     ? resolve(repositoryRoot, options.outputRoot)
@@ -449,6 +523,162 @@ export async function runGenerateCli(
     return 1;
   }
   return 0;
+}
+
+/**
+ * The canonical flow: a campaign request, real reasoning, real owned assets, a
+ * deterministic render, and a run directory that records every decision.
+ */
+async function runCampaignRequestCli(
+  options: GenerateCliOptions,
+  context: GenerateCliContext,
+): Promise<number> {
+  const repositoryRoot = await findRepositoryRoot(context.cwd);
+  const requestPath = isAbsolute(options.requestPath!)
+    ? options.requestPath!
+    : resolve(repositoryRoot, options.requestPath!);
+
+  let env: AampCliEnv;
+  try {
+    env = aampCliEnvSchema.parse(context.env);
+  } catch (error) {
+    context.stderr(
+      `Configuration is invalid:\n${error instanceof Error ? error.message : String(error)}\n`,
+    );
+    return EXIT_CODES.INVALID_CAMPAIGN_REQUEST;
+  }
+
+  let request: CampaignRequest;
+  try {
+    request = await loadCampaignRequest(requestPath);
+  } catch (error) {
+    context.stderr(
+      `${
+        error instanceof CampaignRequestValidationError
+          ? error.message
+          : `Could not read campaign request at ${requestPath}: ${error instanceof Error ? error.message : String(error)}`
+      }\n`,
+    );
+    return EXIT_CODES.INVALID_CAMPAIGN_REQUEST;
+  }
+
+  // CLI flags override the request's own paths, so one request file can be
+  // pointed at a different asset library or output root without editing it.
+  if (options.assetsPath) {
+    request = {
+      ...request,
+      sourceAssetManifestPath: isAbsolute(options.assetsPath)
+        ? options.assetsPath
+        : resolve(repositoryRoot, options.assetsPath),
+    };
+  }
+
+  // --- reasoning policy: the refusal that makes this milestone mean anything
+  let policy: ReasoningPolicy;
+  try {
+    policy = resolveReasoningPolicy({
+      runMode: options.fixtureDemo ? 'FIXTURE_DEMO' : 'REAL',
+      reasoningProvider: env.REASONING_PROVIDER,
+      reasoningModel: env.REASONING_MODEL,
+      ...(env.ANTHROPIC_API_KEY ? { anthropicApiKey: env.ANTHROPIC_API_KEY } : {}),
+    });
+  } catch (error) {
+    context.stderr(`${error instanceof Error ? error.message : String(error)}\n`);
+    return EXIT_CODES.REAL_REASONING_UNAVAILABLE;
+  }
+
+  context.stderr(
+    policy.runMode === 'REAL'
+      ? `run mode: REAL — reasoning via ${policy.providerName} (${policy.reasoningModel}); prompt sha256 ${request.promptSha256.slice(0, 16)}…\n`
+      : `WARNING: run mode: FIXTURE_DEMO — creative is replayed from committed fixtures and ignores this campaign prompt. Not a campaign result.\n`,
+  );
+
+  const reasoningProvider = policy.useFixtureReasoning
+    ? createFixtureReasoningProvider(12)
+    : await createClaudeReasoningProvider(env.ANTHROPIC_API_KEY!);
+
+  const workflowRunId = context.workflowRunId ?? `aamp-cli-${randomUUID()}`;
+  const outputRoot = options.outputDirectory
+    ? resolve(repositoryRoot, options.outputDirectory)
+    : resolve(repositoryRoot, request.outputDirectory);
+  const runDirectory = runDirectoryFor(outputRoot, request.name, workflowRunId);
+
+  if (options.planOnly) {
+    try {
+      const plan = await planCampaign({
+        request,
+        reasoningProvider,
+        workflowRunId,
+        onProgress: (message) => {
+          if (!options.json) context.stderr(`  ${message}\n`);
+        },
+      });
+      context.stdout(
+        `${JSON.stringify(
+          {
+            runMode: policy.runMode,
+            promptSha256: request.promptSha256,
+            agentVersions: plan.agentVersions,
+            shots: plan.shots,
+            captionLines: plan.captionLines,
+          },
+          null,
+          2,
+        )}\n`,
+      );
+      return EXIT_CODES.SUCCESS;
+    } catch (error) {
+      context.stderr(`${error instanceof Error ? error.message : String(error)}\n`);
+      return EXIT_CODES.PLANNING_FAILURE;
+    }
+  }
+
+  const result = await runSourceCampaign({
+    request,
+    reasoningProvider,
+    reasoningPolicy: policy,
+    runDirectory,
+    repositoryRoot,
+    binaries: resolveFfmpegBinaries(context.env),
+    workflowRunId,
+    now: context.now ? context.now() : new Date(),
+    ...(context.runner ? { runner: context.runner } : {}),
+    onProgress: (message) => {
+      if (!options.json) context.stderr(`  ${message}\n`);
+    },
+  });
+
+  if (options.json) {
+    context.stdout(`${JSON.stringify(result, null, 2)}\n`);
+  } else if (result.exitCode === EXIT_CODES.SUCCESS || result.exitCode === EXIT_CODES.QA_FAILURE) {
+    context.stdout(
+      `${[
+        `run mode:          ${policy.runMode}`,
+        `campaign ID:       ${request.campaignId}`,
+        `prompt sha256:     ${request.promptSha256}`,
+        `run directory:     ${result.runDirectory}`,
+        `final MP4:         ${result.outputPath ?? 'none'}`,
+        `duration:          ${
+          result.measuredDurationSeconds === null || result.measuredDurationSeconds === undefined
+            ? 'unknown'
+            : `${result.measuredDurationSeconds.toFixed(3)}s`
+        }`,
+        `resolution:        ${result.measuredResolution ?? '?'}`,
+        `codecs:            ${result.measuredCodecs ?? '?'}`,
+        `QA status:         ${result.qaVerdict ?? 'unknown'}`,
+        `heuristic score:   ${result.heuristicAverage ?? '?'} / 5 (structural only, not a quality verdict)`,
+        `status:            ${result.exitCode === EXIT_CODES.SUCCESS ? 'RENDERED — REQUIRES HUMAN APPROVAL' : 'REJECTED BY QA'}`,
+      ].join('\n')}\n`,
+    );
+  }
+
+  if (result.failure) context.stderr(`\n${result.failure}\n`);
+  if (policy.runMode !== 'REAL' && result.exitCode === EXIT_CODES.SUCCESS) {
+    context.stderr(
+      '\nWARNING: FIXTURE_DEMO run — the creative ignores this campaign prompt. Do not present this as a campaign result.\n',
+    );
+  }
+  return result.exitCode;
 }
 
 if (require.main === module) {
