@@ -158,6 +158,104 @@ export function refineAuthConfig(
 }
 
 /**
+ * AAMP generation vertical slice 2 — video generation provider selection.
+ *
+ * The default stays `mock` so CI, local tests and a fresh clone need no GPU,
+ * no endpoint and no credentials (CLAUDE.md: "Every real-media milestone must
+ * preserve mock mode"). `refineVideoGenerationConfig` is what stops that
+ * default from being a production foot-gun: a production process that selects
+ * `mock`, or selects `comfyui` without an endpoint, refuses to start.
+ *
+ * `COMFYUI_API_KEY` is optional because a self-hosted ComfyUI has no
+ * authentication at all; it exists for endpoints published behind an
+ * authenticating proxy. Like every other secret here it is read only through
+ * this schema, never `process.env` in adapter code, and it is redacted by
+ * `createLogger`'s pino configuration.
+ */
+export const videoGenerationEnvSchema = z.object({
+  VIDEO_GENERATION_PROVIDER: z.enum(['mock', 'comfyui']).default('mock'),
+  COMFYUI_BASE_URL: z.string().optional(),
+  /**
+   * End-to-end deadline for one shot, not a per-HTTP-request timeout. Video
+   * sampling is minutes of GPU work, so the default is generous; the request
+   * timeout underneath it is a separate, much shorter budget.
+   */
+  COMFYUI_OUTPUT_TIMEOUT_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(15 * 60_000),
+  /**
+   * Kept a plain string rather than a `z.enum` of the profile keys because
+   * `packages/config` must not depend on `packages/providers`. The value is
+   * validated against the real registry when the provider is constructed, and
+   * `apps/worker`'s test asserts the two lists agree.
+   */
+  COMFYUI_WORKFLOW_PROFILE: z.string().min(1).default('LTX_2_3_DRAFT'),
+  COMFYUI_CLIENT_ID: z.string().min(1).default('combat-creative-os'),
+  COMFYUI_API_KEY: z.string().optional(),
+  /** Where retrieved generated clips land. Repository-relative unless absolute. */
+  COMFYUI_OUTPUT_DIR: z.string().min(1).default('.aamp-output/generated'),
+});
+export type VideoGenerationEnv = z.infer<typeof videoGenerationEnvSchema>;
+
+/**
+ * Fails closed on both halves of the "no silent mock" rule.
+ *
+ * Selecting `comfyui` without an endpoint is an obvious misconfiguration.
+ * Leaving `mock` selected in production is the *dangerous* one: the process
+ * would come up healthy, run the whole workflow, charge budget, pass its gates
+ * and deliver an advertisement built from placeholder metadata — the exact
+ * failure the AAMP rules call out ("Never substitute a mock result"). It is
+ * caught here, at startup, rather than discovered in a deliverable.
+ */
+export function refineVideoGenerationConfig(
+  env: { NODE_ENV: 'development' | 'test' | 'production' } & VideoGenerationEnv,
+  ctx: z.RefinementCtx,
+): void {
+  if (env.VIDEO_GENERATION_PROVIDER === 'mock') {
+    if (env.NODE_ENV === 'production') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['VIDEO_GENERATION_PROVIDER'],
+        message:
+          'VIDEO_GENERATION_PROVIDER=mock is refused in production — the mock produces no real media, so a production process running it would deliver fabricated output',
+      });
+    }
+    return;
+  }
+
+  if (!env.COMFYUI_BASE_URL?.trim()) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['COMFYUI_BASE_URL'],
+      message:
+        'COMFYUI_BASE_URL is required when VIDEO_GENERATION_PROVIDER=comfyui — refusing to start rather than silently falling back to the mock provider',
+    });
+    return;
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(env.COMFYUI_BASE_URL);
+  } catch {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['COMFYUI_BASE_URL'],
+      message: `COMFYUI_BASE_URL is not a valid URL: ${env.COMFYUI_BASE_URL}`,
+    });
+    return;
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['COMFYUI_BASE_URL'],
+      message: `COMFYUI_BASE_URL must be http: or https:, got ${parsed.protocol}`,
+    });
+  }
+}
+
+/**
  * M5: asset-ingestion limits. Deliberately not "configurable" per MIME type
  * — a single byte ceiling plus a code-level MIME allowlist (see
  * packages/workflows' ingest-asset-activity.ts) is enough for this
@@ -206,13 +304,30 @@ export const workerEnvSchema = baseEnvSchema
   .merge(assetEnvSchema)
   .merge(observabilityEnvSchema)
   .merge(reasoningEnvSchema)
+  .merge(videoGenerationEnvSchema)
   .extend({
     WORKER_HEALTH_HOST: z.string().min(1).default('0.0.0.0'),
     WORKER_HEALTH_PORT: z.coerce.number().int().positive().default(4100),
   })
   // M14: fails closed rather than silently falling back to the mock provider.
-  .superRefine(refineReasoningConfig);
+  .superRefine(refineReasoningConfig)
+  // AAMP slice 2: the same discipline for the video-generation provider.
+  .superRefine(refineVideoGenerationConfig);
 export type WorkerEnv = z.infer<typeof workerEnvSchema>;
+
+/**
+ * `apps/aamp-cli` — the prompt-to-MP4 composition root. It runs the same
+ * agents and the same ComfyUI adapter the Worker does, but reaches neither
+ * Temporal nor the API, so it carries reasoning + generation config and
+ * nothing else. No `DATABASE_URL`: the CLI writes its artefacts to disk and
+ * leaves repository registration to the Activity path.
+ */
+export const aampCliEnvSchema = baseEnvSchema
+  .merge(reasoningEnvSchema)
+  .merge(videoGenerationEnvSchema)
+  .superRefine(refineReasoningConfig)
+  .superRefine(refineVideoGenerationConfig);
+export type AampCliEnv = z.infer<typeof aampCliEnvSchema>;
 
 /**
  * The dashboard holds no secret. It needs only the **publishable** key — a

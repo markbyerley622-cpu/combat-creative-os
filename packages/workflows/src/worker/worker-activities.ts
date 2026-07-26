@@ -64,6 +64,15 @@ import {
   createVerifyShotSelectionActivity,
   pingActivity,
 } from '../activities';
+import type {
+  GeneratedMediaInspection,
+  GeneratedMediaInspector,
+} from '../activities/poll-shot-generation-activity';
+
+// Re-exported from the composition-root surface: `apps/worker` builds the real
+// ffprobe-backed inspector and needs the type without reaching into the
+// `activities` namespace.
+export type { GeneratedMediaInspection, GeneratedMediaInspector };
 import type { CampaignProductionActivities } from '../workflows/campaign-production-workflow-activities';
 import type { CompositingActivities } from '../workflows/compositing-workflow-activities';
 import type { PerformanceAnalysisActivities } from '../workflows/performance-analysis-workflow-activities';
@@ -130,6 +139,12 @@ export interface WorkerActivityDependencies {
   /** `@combat/agents`' canonical `AGENT_REGISTRY` in production; injected so tests can narrow it. */
   readonly agentRegistry: Readonly<Record<string, AgentDefinition<unknown, unknown>>>;
   readonly costEstimates: WorkerActivityCostEstimates;
+  /**
+   * Measures a generated clip before its Asset may be marked READY. Required
+   * whenever `videoGenerationProvider` materialises real files; the
+   * metadata-only mock produces nothing to measure, so tests leave it out.
+   */
+  readonly generatedMediaInspector?: GeneratedMediaInspector;
   readonly logger?: Logger;
   /**
    * Temporal's own attempt counter for the currently-executing Activity, used
@@ -300,6 +315,7 @@ export function createWorkerActivities(deps: WorkerActivityDependencies): Worker
       shotSpecificationDb: db,
       shotGenerationDb: db,
       budgetDb: db,
+      licenseDb: db,
       estimatedCostCentsPerSecond: costEstimates.shotGenerationCentsPerSecond,
     }),
     pollShotGenerationActivity: createPollShotGenerationActivity({
@@ -307,6 +323,9 @@ export function createWorkerActivities(deps: WorkerActivityDependencies): Worker
       shotGenerationDb: db,
       assetDb: db,
       budgetDb: db,
+      ...(deps.generatedMediaInspector
+        ? { generatedMediaInspector: deps.generatedMediaInspector }
+        : {}),
     }),
     cancelShotGenerationActivity: createCancelShotGenerationActivity({
       videoGenerationProvider: deps.videoGenerationProvider,

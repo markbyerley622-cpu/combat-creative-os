@@ -2180,6 +2180,109 @@ absent.
 
 ---
 
+### AAMP generation vertical slice 2 — ComfyUI video generation (2026-07-26)
+
+Closes the loop from a campaign prompt to a rendered advertisement: **PROMPT →
+existing specialist agents → shot specifications → real ComfyUI generation →
+generated clips → the existing FFmpeg renderer → actual-media QA → a
+downloadable 1080×1920 MP4.** Scope was held to exactly that — no Creative
+Memory, no publishing, no analytics, no tenancy or billing work.
+
+**One thing this slice does not do: prove real generation.** See "Honest
+status" below. Full operational detail is in
+`docs/runbooks/comfyui-video-generation.md`.
+
+**What changed.**
+
+- **A real ComfyUI adapter behind the existing interface.**
+  `packages/providers/src/video-generation.comfyui.ts` implements
+  `VideoGenerationProvider` over ComfyUI's documented HTTP/WebSocket protocol
+  (`/prompt`, `/history/{id}`, `/queue`, `/view`, `/interrupt`, `/object_info`,
+  `/system_stats`, `/upload/image`, `/ws`). `comfyui/protocol.ts` is the parse
+  boundary — every response crosses a Zod schema, so an unexpected shape is a
+  typed `MALFORMED_RESPONSE` rather than an `undefined` three frames later.
+  Three properties are load-bearing: the job id **is** ComfyUI's `prompt_id`,
+  derived deterministically from the attempt's idempotency key, so status and
+  retrieval survive a worker restart and a retry never queues a second paid
+  render; callers **cannot author graphs**; and provider success is **not**
+  treated as a usable file — `fetchResult` downloads, hashes and refuses empty
+  or missing output.
+
+- **Versioned, provider-owned workflow profiles.** `comfyui/workflow-profiles.ts`
+  declares model identifier, expected model files, licence metadata, required
+  node classes, VRAM/RAM/disk floors, supported modes/dimensions/durations,
+  reference control, default negative prompt, template version and a
+  compatibility-validation function. Node class and input names were read out of
+  ComfyUI's own source, never recalled. A `templateStatus` field records how far
+  verification actually got: `LTX_2_3_DRAFT` is
+  `SIGNATURES_VERIFIED_NOT_EXECUTED`, and `HUNYUAN_VIDEO_1_5_QUALITY` is
+  `REQUIRES_LIVE_VERIFICATION` and **refuses to build a graph**, because its
+  dual text-encoder wiring could not be established from official sources.
+  Guessing it and shipping it as working is precisely what "never claim support
+  merely because a profile exists" forbids.
+
+- **A new composition root, `apps/aamp-cli`.** `pnpm aamp:generate --manifest
+<campaign-generation-manifest.json>` runs the existing Campaign Strategist,
+  Creative Director, Script/Timing Director and Shot Prompt Engineer through
+  `executeAgent` and the canonical `AGENT_REGISTRY`, submits shots to the
+  configured provider, measures the retrieved clips, assembles the existing
+  `RenderManifest`, and calls the existing `renderAdvertisement`. It is
+  composition, not a second agent framework or a second renderer. It lives in
+  `apps/` rather than a library because it wires config to concrete
+  collaborators, exactly as `apps/worker` does — which also keeps
+  `@combat/workflows` from acquiring a dependency on `@combat/config`.
+
+- **Configuration-driven provider selection, failing closed twice.**
+  `apps/worker` previously constructed `MockVideoGenerationProvider`
+  unconditionally. `workerEnvSchema` now refuses `VIDEO_GENERATION_PROVIDER=mock`
+  in production and refuses `comfyui` with no `COMFYUI_BASE_URL`, and
+  `createVideoGenerationProvider` re-checks both at construction. A production
+  process cannot be talked into the mock by configuration.
+
+- **Measured media gates asset readiness.** `pollShotGenerationActivity` takes a
+  `GeneratedMediaInspector` and, for any candidate carrying a real file, probes
+  it with ffprobe before persisting. Duration, size, checksum and MIME type on
+  the `Asset` are now measurements; an unreadable, empty or non-video result
+  fails the attempt and releases the reservation instead of registering a READY
+  asset the renderer would choke on later. The previous code wrote
+  `sizeBytes: 0` and used the candidate id as the checksum.
+
+- **Rights enforced before transmission.** `comfyui/reference-rights.ts` refuses
+  `ANALYSIS_ONLY`, missing rights metadata, an expired licence and an
+  unrecognised usage class — before any upload is attempted. It is the
+  generation-side twin of `@combat/media`'s render-side source resolution.
+  `dispatchShotGenerationActivity` resolves each reference's rights from its
+  `LicenseRecord` and passes the Shot Prompt Engineer's structured creative
+  attributes through to the adapter, so framing, lighting and camera decisions
+  reach the model instead of surviving only if the agent restated them in prose.
+
+**Boundaries.** `packages/providers` gained `zod`; it still does not depend on
+`@combat/domain` or `@combat/config` — `ShotCreativeAttributes` and
+`ReferenceRights` are structural mirrors, and the composition roots map between
+them. `apps/worker` gained `@combat/media` for ffprobe. All three human gates are
+untouched; the CLI dispatches no approval signal.
+
+**Honest status.** No real, model-generated frame has passed through this code.
+Inspection found a **GTX 1650 Ti with 4 GB VRAM** — three times below
+`LTX_2_3_DRAFT`'s 12 GB floor and six times below Hunyuan's 24 GB — and no
+`COMFYUI_BASE_URL` was configured. Execution mode is `UNAVAILABLE`:
+**`BLOCKED_BY_HARDWARE`** locally, **`BLOCKED_BY_MISSING_REMOTE_ENDPOINT`**
+remotely. No model was downloaded, because none could run. Every protocol test
+runs against an in-process fake ComfyUI server, which proves the adapter speaks
+the protocol correctly and proves nothing whatever about video quality; the
+binding acceptance test is opt-in (`COMFYUI_INTEGRATION=1 pnpm --filter
+@combat/providers test:comfyui`) and additionally asserts non-zero motion via
+`mpdecimate`, so a frozen frame fails it. Image-to-video through the _Temporal_
+path is not yet reachable: reference bytes need storage materialisation in the
+dispatch Activity, so it fails closed; the CLI path supplies real local paths
+and is fully exercisable. The CLI does not write `Asset`/`AssetProvenance` rows —
+repository registration stays with the Activity. No live Temporal server is
+available here, so the wired Worker has not been run against one.
+
+**Next milestone: close prompt-to-video usability gaps before Creative Memory.**
+
+---
+
 ## 9. What this document deliberately does not do
 
 Per instructions, no application code, no package.json, no Prisma schema file, and

@@ -30,6 +30,40 @@ importers:
         specifier: ^5.5.4
         version: 5.9.3
 
+  apps/aamp-cli:
+    dependencies:
+      '@combat/agent-runtime':
+        specifier: workspace:*
+        version: link:../../packages/agent-runtime
+      '@combat/agents':
+        specifier: workspace:*
+        version: link:../../packages/agents
+      '@combat/config':
+        specifier: workspace:*
+        version: link:../../packages/config
+      '@combat/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
+      '@combat/media':
+        specifier: workspace:*
+        version: link:../../packages/media
+      '@combat/providers':
+        specifier: workspace:*
+        version: link:../../packages/providers
+      zod:
+        specifier: ^3.23.8
+        version: 3.25.76
+    devDependencies:
+      '@types/node':
+        specifier: ^22.7.4
+        version: 22.20.1
+      typescript:
+        specifier: ^5.5.4
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.1
+        version: 2.1.9(@types/node@22.20.1)(supports-color@8.1.1)(terser@5.49.0)
+
   apps/api:
     dependencies:
       '@combat/auth':
@@ -130,6 +164,9 @@ importers:
       '@combat/database':
         specifier: workspace:*
         version: link:../../packages/database
+      '@combat/media':
+        specifier: workspace:*
+        version: link:../../packages/media
       '@combat/observability':
         specifier: workspace:*
         version: link:../../packages/observability
@@ -337,6 +374,9 @@ importers:
       '@combat/media':
         specifier: workspace:*
         version: link:../media
+      zod:
+        specifier: ^3.23.8
+        version: 3.25.76
     devDependencies:
       '@types/node':
         specifier: ^22.7.4

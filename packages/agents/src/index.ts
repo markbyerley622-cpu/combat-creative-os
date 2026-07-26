@@ -1,6 +1,12 @@
 export * from './registry';
 export * from './agent-contract';
 
+// Golden per-agent results for the Combat Reviews 15s brief. Exported so a
+// composition root can drive the creative chain deterministically with no
+// paid API key — see `apps/aamp-cli`'s fixture reasoning provider, which is
+// required to announce that the creative is canned rather than generated.
+export * from './fixtures/combat-reviews-15s';
+
 export * from './shared/quality-finding';
 export * from './shared/rubrics';
 

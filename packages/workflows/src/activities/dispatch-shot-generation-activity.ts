@@ -2,14 +2,20 @@ import type { ShotGenerationDataSource, ShotSpecificationDataSource } from '@com
 import {
   MAX_SHOT_GENERATION_ATTEMPTS,
   checkAndReserveBudget,
+  getLicenseRecord,
   getOrCreateShotGenerationAttempt,
   getOrCreateShotGenerationJob,
   getShotSpecification,
   releaseBudget,
   type BudgetDataSource,
+  type LicenseDataSource,
 } from '@combat/database';
 import type { BudgetLevel } from '@combat/domain';
-import { VideoGenerationError, type VideoGenerationProvider } from '@combat/providers';
+import {
+  VideoGenerationError,
+  type ReferenceImageInput,
+  type VideoGenerationProvider,
+} from '@combat/providers';
 
 /**
  * Estimated cost, in cents, per second of requested footage per candidate —
@@ -66,6 +72,35 @@ export interface DispatchShotGenerationActivityDeps {
   readonly shotGenerationDb: ShotGenerationDataSource;
   readonly budgetDb: BudgetDataSource;
   readonly estimatedCostCentsPerSecond: number;
+  /**
+   * Resolves each reference asset's `LicenseRecord`. Optional so existing
+   * mock-backed call sites keep working; when it is absent, references travel
+   * with no rights metadata and any adapter that would actually transmit them
+   * refuses (fail-closed by construction, not by convention).
+   */
+  readonly licenseDb?: LicenseDataSource;
+}
+
+/**
+ * Maps a stored `LicenseRecord` onto the provider-side usage class.
+ *
+ * `FULL_BUY_OUT` is the only licence that makes the footage effectively ours,
+ * so it maps to `OWNED`; everything else is `LICENSED_FOR_OUTPUT`, which is
+ * still output-eligible but keeps the distinction visible in provenance.
+ * There is deliberately no branch that produces `ANALYSIS_ONLY` here: the
+ * schema has no such licence type, so an analysis-only reference simply has no
+ * `LicenseRecord` and is refused for want of rights metadata.
+ */
+function toReferenceRights(
+  license: { licenseType: string; rightsHolder: string; expiresAt?: Date } | null,
+): ReferenceImageInput['rights'] | undefined {
+  if (!license) return undefined;
+  return {
+    usageClass: license.licenseType === 'FULL_BUY_OUT' ? 'OWNED' : 'LICENSED_FOR_OUTPUT',
+    rightsHolder: license.rightsHolder,
+    licenseType: license.licenseType,
+    ...(license.expiresAt ? { expiresAt: license.expiresAt.toISOString() } : {}),
+  };
 }
 
 function buildIdempotencyKey(
@@ -165,6 +200,18 @@ export function createDispatchShotGenerationActivity(
       }
     }
 
+    // Rights are resolved before dispatch so the adapter can enforce them
+    // before a single byte leaves this process.
+    const referenceImages: ReferenceImageInput[] = [];
+    for (const assetId of spec.referenceAssetIds) {
+      const license = deps.licenseDb
+        ? // eslint-disable-next-line no-await-in-loop -- bounded by the shot's reference count and kept ordered so reference roles stay stable
+          await getLicenseRecord(deps.licenseDb, workspaceId, assetId)
+        : null;
+      const rights = toReferenceRights(license);
+      referenceImages.push({ assetId, ...(rights ? { rights } : {}) });
+    }
+
     try {
       // Capability validation happens inside `submit()` itself (every
       // `VideoGenerationProvider` implementation is required to reject an
@@ -178,11 +225,25 @@ export function createDispatchShotGenerationActivity(
         mode,
         promptText: spec.generationPrompt,
         negativePrompt: spec.negativePrompt,
-        referenceImages:
-          spec.referenceAssetIds.length > 0
-            ? spec.referenceAssetIds.map((assetId) => ({ assetId }))
-            : undefined,
+        referenceImages: referenceImages.length > 0 ? referenceImages : undefined,
         candidateCount: job.requestedCandidateCount,
+        // The structured creative intent behind `generationPrompt`. A real
+        // adapter re-composes these for its own model's prompt conventions;
+        // without them the Shot Prompt Engineer's framing, lighting and
+        // camera decisions would reach the model only if it happened to
+        // restate them in prose.
+        creativeAttributes: {
+          subject: spec.subject,
+          action: spec.action,
+          environment: spec.environment,
+          cameraMovement: spec.cameraMovement,
+          lensFraming: spec.lensFraming,
+          lighting: spec.lighting,
+          colorTreatment: spec.colorTreatment,
+          motionIntensity: spec.motionIntensity,
+          continuityRequirements: spec.continuityRequirements,
+          visualObjective: spec.visualObjective,
+        },
         params: {
           durationSeconds: spec.generationParams.durationSeconds,
           aspectRatio: spec.generationParams.aspectRatio,

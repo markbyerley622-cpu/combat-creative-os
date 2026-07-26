@@ -44,11 +44,39 @@ export type PollShotGenerationOutput =
     }
   | { readonly terminal: true; readonly status: 'CANCELLED' };
 
+/**
+ * What must be true of a generated file before its Asset may be READY.
+ *
+ * Every field is measured from the bytes on disk by ffprobe — none of it is
+ * echoed back from the generation request. AAMP's output-quality rule is
+ * explicit that "measurements from the produced file are binding"; this is
+ * that rule applied at the generation boundary, the same way
+ * `@combat/media`'s actual-media QA applies it at the render boundary.
+ */
+export interface GeneratedMediaInspection {
+  readonly durationSeconds: number;
+  readonly widthPx: number;
+  readonly heightPx: number;
+  readonly videoCodec: string;
+  readonly sizeBytes: number;
+}
+
+export type GeneratedMediaInspector = (input: {
+  readonly localPath: string;
+  readonly sizeBytes: number;
+}) => Promise<GeneratedMediaInspection>;
+
 export interface PollShotGenerationActivityDeps {
   readonly videoGenerationProvider: VideoGenerationProvider;
   readonly shotGenerationDb: ShotGenerationDataSource;
   readonly assetDb: AssetDataSource;
   readonly budgetDb: BudgetDataSource;
+  /**
+   * Required whenever the provider materialises real files (any candidate ref
+   * carrying a `localPath`). Absent for the metadata-only mock, which has no
+   * bytes to measure.
+   */
+  readonly generatedMediaInspector?: GeneratedMediaInspector;
 }
 
 async function releaseOrChargeAcrossLevels(
@@ -168,9 +196,56 @@ export function createPollShotGenerationActivity(
       const candidateRefs = await deps.videoGenerationProvider.fetchResult(handle);
       const usage = await deps.videoGenerationProvider.getUsage(handle);
 
+      // Measure every real file *before* anything is persisted. A provider
+      // that reports SUCCEEDED but produced an unreadable, empty or
+      // wrong-codec clip must fail the attempt, not register a READY asset
+      // that the renderer discovers is broken several stages later.
+      const inspections = new Map<number, GeneratedMediaInspection>();
+      for (const ref of candidateRefs) {
+        if (!ref.localPath) continue;
+        if (!deps.generatedMediaInspector) {
+          return await failAttemptWithMediaProblem(
+            deps,
+            { workspaceId, campaignId, shotId, providerId },
+            attempt,
+            attemptId,
+            `Provider returned a real file for candidate ${ref.candidateIndex} but no generatedMediaInspector is wired — refusing to mark unverified media READY`,
+            false,
+          );
+        }
+        try {
+          // eslint-disable-next-line no-await-in-loop -- bounded by candidate count and kept ordered for deterministic failure reporting
+          const inspection = await deps.generatedMediaInspector({
+            localPath: ref.localPath,
+            sizeBytes: ref.sizeBytes ?? 0,
+          });
+          if (inspection.sizeBytes <= 0 || inspection.durationSeconds <= 0) {
+            return await failAttemptWithMediaProblem(
+              deps,
+              { workspaceId, campaignId, shotId, providerId },
+              attempt,
+              attemptId,
+              `Generated candidate ${ref.candidateIndex} measured ${inspection.sizeBytes} bytes / ${inspection.durationSeconds}s — not a usable clip`,
+              false,
+            );
+          }
+          inspections.set(ref.candidateIndex, inspection);
+        } catch (error) {
+          return await failAttemptWithMediaProblem(
+            deps,
+            { workspaceId, campaignId, shotId, providerId },
+            attempt,
+            attemptId,
+            `Generated candidate ${ref.candidateIndex} could not be inspected: ${error instanceof Error ? error.message : String(error)}`,
+            true,
+          );
+        }
+      }
+
       const candidateIds: string[] = [];
       const assetIds: string[] = [];
       for (const ref of candidateRefs) {
+        const inspection = inspections.get(ref.candidateIndex);
         // eslint-disable-next-line no-await-in-loop -- candidates must be persisted in order for deterministic candidateIndex-based idempotency
         const candidate: GenerationCandidateRecord = await createGenerationCandidate(
           deps.shotGenerationDb,
@@ -181,7 +256,11 @@ export function createPollShotGenerationActivity(
             candidateIndex: ref.candidateIndex,
             providerCandidateRef: ref.assetId,
             seed: ref.seed,
-            durationSeconds: ref.durationSeconds,
+            // The measured length wins over the requested one: latent video
+            // models snap frame counts, so what came back is frequently not
+            // exactly what was asked for, and the edit timeline must be built
+            // against reality.
+            durationSeconds: inspection?.durationSeconds ?? ref.durationSeconds,
             aspectRatio: ref.aspectRatio as GenerationCandidateRecord['aspectRatio'],
             status: 'SUCCEEDED',
           },
@@ -192,13 +271,19 @@ export function createPollShotGenerationActivity(
           campaignId,
           kind: 'VIDEO_CANDIDATE',
           s3Key: ref.s3Key,
-          checksum: ref.assetId,
-          mimeType: 'video/mp4',
+          checksum: ref.checksumSha256 ?? ref.assetId,
+          mimeType: ref.mimeType ?? 'video/mp4',
           originalFilename: `${shotId}-${ref.candidateIndex}.mp4`,
-          sizeBytes: 0,
+          sizeBytes: inspection?.sizeBytes ?? ref.sizeBytes ?? 0,
+          // READY is reachable only for a file that was measured, or for a
+          // provider that produced no file to measure (the mock).
           ingestionStatus: 'READY',
           generatedByActivity: 'pollShotGenerationActivity',
           providerJobRef: handle.jobId,
+          // Which reference assets contributed to this generation — the
+          // lineage half of "Record every reference asset and its role".
+          derivedFromAssetIds:
+            ref.provenance?.referenceAssets.map((reference) => reference.assetId) ?? [],
         });
 
         // eslint-disable-next-line no-await-in-loop -- same rationale as above
@@ -272,6 +357,42 @@ export function createPollShotGenerationActivity(
       failureRetryable: failure?.retryable ?? true,
       failureMessage: failure?.message ?? `Provider job ended in status ${status}`,
     };
+  };
+}
+
+/**
+ * Ends an attempt that produced bytes we could not stand behind.
+ *
+ * The reservation is released in full (nothing usable was delivered, so
+ * nothing is charged) and the attempt is marked FAILED. Retryability is the
+ * caller's judgement: an unreadable file may well succeed on a re-roll, while
+ * a missing inspector is a wiring defect that retrying cannot fix.
+ */
+async function failAttemptWithMediaProblem(
+  deps: PollShotGenerationActivityDeps,
+  ctx: { workspaceId: string; campaignId: string; shotId: string; providerId: string },
+  attempt: NonNullable<Awaited<ReturnType<typeof getShotGenerationAttemptById>>>,
+  attemptId: string,
+  message: string,
+  retryable: boolean,
+): Promise<PollShotGenerationOutput> {
+  await releaseOrChargeAcrossLevels(deps, ctx, attempt.idempotencyKey, {
+    kind: 'RELEASE',
+    amountCents: attempt.estimatedCostCents ?? 0,
+  });
+  await updateShotGenerationAttempt(deps.shotGenerationDb, attemptId, {
+    status: 'FAILED',
+    failureReason: 'PROVIDER_ERROR' as never,
+    failureRetryable: retryable,
+    failureMessage: message,
+    completedAt: new Date(),
+  });
+  return {
+    terminal: true,
+    status: 'FAILED',
+    failureReason: 'PROVIDER_ERROR',
+    failureRetryable: retryable,
+    failureMessage: message,
   };
 }
 

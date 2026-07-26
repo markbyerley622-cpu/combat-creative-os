@@ -1,0 +1,72 @@
+{
+  "manifestVersion": 1,
+  "name": "combat-reviews-15s",
+  "workspaceId": "6f1d5f6c-6d3a-4a2e-9c5f-0f2a1b3c4d5e",
+  "campaignId": "9a7c2e11-4b8d-4f3a-8e6c-1d2f3a4b5c6d",
+
+  "brandName": "Combat Reviews",
+  "campaignPrompt": "Combat Reviews is the app that settles every argument about a fight. Show a fan mid-argument about a close round, then reveal the app's round-by-round scorecard as the thing that ends the debate. Fast, confident, gym-lit, built for a vertical feed.",
+  "objective": "Drive app installs from combat-sports fans who argue about fight results",
+  "targetAudience": "Combat sports fans aged 18-34 who watch every card and argue about scorecards afterwards",
+  "hook": "Who really won that round?",
+  "keyMessages": ["Every round scored, not just the result", "Stop arguing. Start proving it."],
+  "mandatories": ["Logo must appear in the first three seconds", "End on the install CTA"],
+
+  "outputDurationSeconds": 15,
+  "budgetCents": 0,
+
+  "generation": {
+    "profile": "LTX_2_3_DRAFT",
+    "shotCount": 1,
+    "maxShotDurationSeconds": 4,
+    "candidateCount": 1
+  },
+
+  "cta": {
+    "headline": "Download Combat Reviews",
+    "subline": "Score every round yourself",
+    "durationSeconds": 3
+  },
+
+  "assets": [
+    {
+      "id": "logo",
+      "role": "LOGO",
+      "kind": "IMAGE",
+      "path": "../../../packages/media/fixtures/generated/logo.png",
+      "description": "Combat Reviews logo lockup",
+      "license": {
+        "usageClass": "OWNED",
+        "rightsHolder": "Combat Reviews",
+        "licenseType": "FULL_BUY_OUT",
+        "restrictions": []
+      }
+    },
+    {
+      "id": "app-scorecard",
+      "role": "APP_SCREENSHOT",
+      "kind": "IMAGE",
+      "path": "../../../packages/media/fixtures/generated/screenshot-reviews.png",
+      "description": "Combat Reviews app — round-by-round scorecard screen",
+      "license": {
+        "usageClass": "OWNED",
+        "rightsHolder": "Combat Reviews",
+        "licenseType": "FULL_BUY_OUT",
+        "restrictions": []
+      }
+    },
+    {
+      "id": "app-fight-card",
+      "role": "APP_SCREENSHOT",
+      "kind": "IMAGE",
+      "path": "../../../packages/media/fixtures/generated/screenshot-fight-card.png",
+      "description": "Combat Reviews app — upcoming fight card screen",
+      "license": {
+        "usageClass": "OWNED",
+        "rightsHolder": "Combat Reviews",
+        "licenseType": "FULL_BUY_OUT",
+        "restrictions": []
+      }
+    }
+  ]
+}

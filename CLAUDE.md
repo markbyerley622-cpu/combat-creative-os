@@ -23,10 +23,19 @@ AAMP-1 step 1 entry.
 **AAMP real-media vertical slice 1 (real FFmpeg advertisement rendering) is
 done** — the system produces a genuine playable 1080×1920 MP4 from a render
 manifest. See the "Real media rendering" section below and
-`docs/architecture.md` §8's vertical-slice-1 entry. **The next milestone is
-ComfyUI video generation integration behind `VideoGenerationProvider`.** AAMP-1
-step 3 (the `SERIALIZABLE` budget transaction, `docs/aamp-architecture.md` §6
-task 5) remains outstanding and unstarted.
+`docs/architecture.md` §8's vertical-slice-1 entry.
+
+**AAMP generation vertical slice 2 (ComfyUI video generation) is implemented
+but not proven** — the whole chain from campaign prompt through the specialist
+agents, a real ComfyUI adapter and the FFmpeg renderer to actual-media QA
+exists and is tested, but **no model-generated frame has ever passed through
+it**: this machine has a 4 GB GPU against a 12 GB floor, and no endpoint is
+configured. See the "ComfyUI video generation" section below,
+`docs/runbooks/comfyui-video-generation.md` and `docs/architecture.md` §8's
+vertical-slice-2 entry. **The next milestone is closing prompt-to-video
+usability gaps before Creative Memory.** AAMP-1 step 3 (the `SERIALIZABLE`
+budget transaction, `docs/aamp-architecture.md` §6 task 5) remains outstanding
+and unstarted.
 
 ## Real media rendering — permanent rules (vertical slice 1)
 
@@ -65,6 +74,51 @@ task 5) remains outstanding and unstarted.
 - **CI never invokes real FFmpeg.** The live integration test detects the binary
   and skips loudly when it is absent. Commands: `pnpm aamp:fixtures`, then
   `pnpm aamp:render --manifest packages/media/fixtures/combat-reviews-15s.manifest.json`.
+
+## ComfyUI video generation — permanent rules (generation vertical slice 2)
+
+- **Callers never author ComfyUI graphs.** Only server-owned, versioned
+  profiles in `packages/providers/src/comfyui/workflow-profiles.ts` build a
+  node graph; `submit()` takes the vendor-neutral request shape plus a profile
+  key. A path from an API body to a ComfyUI node would be remote code
+  execution on the render host.
+- **Never invent node names, input names or workflow JSON.** Take them from
+  ComfyUI's own source, the official model tutorials or maintained first-party
+  examples, and record the source. A profile's `templateStatus` states how far
+  verification got — `SIGNATURES_VERIFIED_NOT_EXECUTED` is not
+  `EXECUTED_AGAINST_LIVE_SERVER`, and only a passing opt-in real integration
+  test may raise it. A profile that cannot be established from official
+  sources refuses to build a graph rather than shipping a guess.
+- **No authored string becomes a path, filename or command.** Prompt text
+  travels only as a JSON value inside a node's `inputs`. Output filename
+  prefixes and uploaded reference filenames are checksum-derived. Filenames
+  ComfyUI returns are used only as URL-encoded `/view` query parameters, never
+  joined onto a local path.
+- **Every response crosses `comfyui/protocol.ts`.** A shape this client does
+  not expect is a typed failure at the boundary, never an `undefined` read
+  three call frames later.
+- **The job id is ComfyUI's `prompt_id`, derived from the idempotency key.**
+  That is what makes polling survive a restart and a retry land on the same
+  job instead of paying for a second render. Do not replace it with a random
+  id or an in-memory handle.
+- **Provider success never marks an asset READY.** Bytes are downloaded,
+  hashed, and measured with ffprobe before persistence; an unreadable, empty
+  or non-video result fails the attempt and releases its reservation.
+  Measurements from the file are binding — never persist a requested value as
+  if it were measured.
+- **Rights are enforced before transmission.** `ANALYSIS_ONLY`, absent rights
+  metadata, an expired licence and an unrecognised usage class all refuse
+  before an upload is attempted. Only `OWNED`, `LICENSED_FOR_OUTPUT` and
+  provenance-permitting `GENERATED` may be sent.
+- **Production cannot select the mock.** `refineVideoGenerationConfig` refuses
+  `mock` in production and refuses `comfyui` without an endpoint; the factory
+  re-checks both. Never add a fallback that quietly substitutes the mock — a
+  fabricated advertisement that passes every gate is the failure mode being
+  guarded against.
+- **CI never contacts a ComfyUI endpoint and never downloads a model.** The
+  fake protocol server is for protocol tests only and is not evidence of
+  working generation. The binding acceptance test is opt-in:
+  `COMFYUI_INTEGRATION=1 pnpm --filter @combat/providers test:comfyui`.
 
 ## Authentication — permanent rules (AAMP-1 step 2, ADR-0006)
 
