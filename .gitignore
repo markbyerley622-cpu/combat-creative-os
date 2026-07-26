@@ -58,3 +58,10 @@ packages/media/fixtures/generated/
 # committed. The manifests that describe it are committed; the media is not.
 .aamp-reference-analysis/
 packages/media/fixtures/reference-generated/
+
+# Creative Memory retrieval — local Qdrant storage (Docker named volume is
+# separate, but a bind-mounted or embedded store must never be committed) and
+# any model cache. No vectors, weights or endpoint credentials are committed.
+.qdrant/
+qdrant_storage/
+.aamp-model-cache/

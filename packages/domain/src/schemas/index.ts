@@ -33,3 +33,4 @@ export * from './learning-record';
 export * from './prompt-template';
 export * from './budget-policy';
 export * from './creative-memory';
+export * from './creative-memory-retrieval';

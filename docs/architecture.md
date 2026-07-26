@@ -2473,6 +2473,82 @@ exist.
 
 ---
 
+### AAMP — Creative Memory retrieval, Qdrant and reranking (2026-07-27)
+
+Makes the reference library searchable: query and filters in, ranked
+agent-safe insights out, through real vector search. Retrieval only — no agent
+consumes it yet. Detail: `docs/runbooks/creative-memory-retrieval.md`.
+
+**What changed.**
+
+- **Versioned retrieval contracts** in `@combat/domain`, with two distinct
+  result types. `AGENT_SAFE` carries abstractions and measurements;
+  `ADMIN` adds title, agency, URL and diagnostics. A test walks the serialised
+  agent-safe payload against `AGENT_SAFE_FORBIDDEN_KEYS` and path/URL/media
+  patterns — checking the JSON rather than the type, because the risk is a
+  field added later that the type permits and nobody re-reads.
+
+- **A real non-neural baseline.** `STRUCTURAL_BASELINE_V1` ranks references on
+  this machine with no weights, GPU or endpoint: a hashed bag-of-terms block
+  over reviewed annotations plus a structured block of measured craft
+  statistics, deterministic end to end. It is lexical, not semantic, and is
+  labelled `NON_NEURAL_STRUCTURAL_BASELINE` wherever it surfaces.
+
+- **Typed Qwen3-VL adapters, honestly scoped.** Model IDs and dimensions
+  (2B → 2048, 8B → 4096) are from the official repository. That repository
+  documents `transformers` and vLLM serving and **no HTTP API**, so the
+  adapter's request shape is recorded as a _repository-defined_ contract rather
+  than presented as official. Normalisation is unspecified upstream, so it is
+  enforced defensively rather than assumed. `checkHealth()` confirms model and
+  width before indexing.
+
+- **Qdrant, with collections keyed by identity.** A collection name encodes
+  profile, model revision, dimension and document schema version, so
+  incomparable vectors cannot share one — a mismatch becomes a missing
+  collection instead of silently incoherent neighbours. Point ids are
+  deterministic, so re-indexing overwrites. Payloads carry filterable
+  non-secret metadata only.
+
+- **Eligibility enforced twice.** Only `READY_FOR_RETRIEVAL` references with an
+  approved annotation are indexed, and eligibility is recomputed from
+  PostgreSQL _after_ the vector search — so a reference withdrawn since
+  indexing vanishes immediately rather than at the next reindex.
+
+- **Reranking that cannot lie.** `fallbackStatus` is part of the contract, in
+  every explanation and in agent-safe output. A neural reranker that errors
+  falls back to structural reranking explicitly labelled as such. There is no
+  generated natural-language explanation — only real scoring components.
+
+- **Infrastructure and persistence.** Qdrant added to Compose (`v1.12.4`, named
+  volume, health check, 127.0.0.1-bound) leaving Postgres, Temporal and MinIO
+  volumes untouched. Migration `20260727020143_add_creative_memory_retrieval_index`
+  adds index-state tables; drift check reports no difference.
+
+**A real defect found and fixed during integration.** Defaulting
+`QDRANT__SERVICE__API_KEY` to an empty string made Qdrant enable authentication
+with an empty key: `/healthz` kept answering while every data request returned
+401, which reads as a client bug. The default was removed and the reason
+recorded in the Compose file.
+
+**Proven.** `STRUCTURAL_BASELINE_V1` end to end against **live Qdrant**: real
+collection creation at the declared width, indexing, all three benchmark
+queries returning the objectively-correct top-one reference, persistence across
+a fresh client, point deletion removing a reference from results, dimension
+refusal, and a typed outage failure. Plus 21 ranking/boundary tests covering
+filters, diversification, idempotence, staleness, workspace isolation and the
+agent-safe boundary.
+
+**Not proven.** Qwen 2B and 8B retrieval quality — implemented, offline-tested
+for dimension, mismatch, malformed-response, timeout and redaction behaviour,
+but never run against a real endpoint. FiftyOne 1.0.1 cannot install on this
+repository's Python 3.12.10 (it declares 3.9–3.11); the pin was deliberately
+left unchanged and both supported paths documented.
+
+**Next milestone: role-specific Creative Memory injection and agency benchmark
+governance.**
+
+---
+
 ## 9. What this document deliberately does not do
 
 Per instructions, no application code, no package.json, no Prisma schema file, and

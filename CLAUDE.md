@@ -48,8 +48,16 @@ See the "Prompt-driven source generation" section below and
 advertisements can be catalogued link-only or analysed locally, segmented into
 scenes with real detection, measured, annotated and projected to FiftyOne, all
 permanently separated from production. See the "Creative Memory" rules below
-and `docs/runbooks/creative-memory-ingestion.md`. **The next milestone is
-multimodal embedding, Qdrant retrieval and reranking.** AAMP-1 step 3 (the
+and `docs/runbooks/creative-memory-ingestion.md`.
+
+**Creative Memory retrieval is done, with one profile proven and two not** —
+`STRUCTURAL_BASELINE_V1` (real, deterministic, non-neural) is proven end to end
+against live Qdrant; the Qwen3-VL 2B and 8B profiles are implemented behind
+typed endpoint adapters and **unproven**, because no endpoint was available.
+See the "Creative Memory retrieval" rules below and
+`docs/runbooks/creative-memory-retrieval.md`. **The next milestone is
+role-specific Creative Memory injection and agency benchmark governance.**
+AAMP-1 step 3 (the
 `SERIALIZABLE` budget transaction, `docs/aamp-architecture.md` §6 task 5)
 remains outstanding and unstarted.
 
@@ -231,6 +239,39 @@ remains outstanding and unstarted.
 - **Mock reasoning ignores the campaign prompt.** It replays committed golden
   fixtures, so it exercises plumbing and says nothing about creative quality.
   Never evaluate or report creative quality from a `FIXTURE_REASONING` run.
+
+## Creative Memory retrieval — permanent rules
+
+- **Retrieval grants no output rights.** Indexing, retrieving, reranking and
+  returning a reference changes nothing about what it may be used for. Every
+  search result carries that notice; do not remove it.
+- **The agent-safe boundary is a separate type with a separate projection.**
+  `AGENT_SAFE` results carry abstractions and measurements only — never a path,
+  URL, byte, transcript, advertising copy, frame, logo or production-asset id.
+  A test walks the serialised JSON against `AGENT_SAFE_FORBIDDEN_KEYS`; keep it
+  exhaustive when adding a field.
+- **Never report non-neural retrieval as neural.** `STRUCTURAL_BASELINE_V1` is
+  labelled `NON_NEURAL_STRUCTURAL_BASELINE`, and a reranker that did not run
+  must set `fallbackStatus` accordingly. A neural profile without an endpoint
+  is refused at the config boundary rather than falling back silently.
+- **Qwen quality is unproven until the opt-in binding test passes** against a
+  real endpoint. Do not describe it as working.
+- **PostgreSQL stays canonical; Qdrant holds vectors and filterable payload
+  only.** No path, URL, credential, transcript or byte reaches Qdrant.
+  Eligibility is recomputed from PostgreSQL after the vector search, so a
+  withdrawn or unapproved reference disappears immediately.
+- **A collection is keyed by profile, model revision, dimension and document
+  schema version.** Never mix vectors across those; bump the name instead.
+  Point ids are deterministic so re-indexing overwrites.
+- **Refuse before writing**: wrong-width vectors, `NaN`/`Infinity` components,
+  a collection whose dimension disagrees, an endpoint serving a different
+  model. A half-filled collection of wrong vectors fails silently and looks
+  plausible, which is worse than an empty one.
+- **No model weights are ever downloaded.**
+  `CREATIVE_MEMORY_MODEL_DOWNLOAD_POLICY` defaults to `deny`; keep it that way.
+- **Do not default `QDRANT__SERVICE__API_KEY` to an empty value** — Qdrant
+  treats empty as "auth enabled with an empty key" and 401s every data request
+  while `/healthz` still answers.
 
 ## Authentication — permanent rules (AAMP-1 step 2, ADR-0006)
 

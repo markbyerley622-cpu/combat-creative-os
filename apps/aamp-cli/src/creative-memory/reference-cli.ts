@@ -16,6 +16,9 @@ import {
   PySceneDetectProvider,
   UnavailableTranscriptionProvider,
   WhisperCliTranscriptionProvider,
+  type MultimodalEmbeddingProvider,
+  type MultimodalRerankerProvider,
+  type QdrantClient,
   type SceneDetectionProvider,
   type TranscriptionProvider,
 } from '@combat/providers';
@@ -23,6 +26,13 @@ import {
 import { findRepositoryRoot } from '../generate-cli';
 import { launchCommand, projectToFiftyOne } from './fiftyone-projection';
 import { ingestReferences } from './ingest-references';
+import {
+  runIndexCommand,
+  runIndexStatusCommand,
+  runRemoveFromIndexCommand,
+  runSearchCommand,
+  type RetrievalContext,
+} from './retrieval-commands';
 
 /**
  * `pnpm aamp:reference <command>` — the Creative Memory operator surface.
@@ -71,6 +81,23 @@ export interface ReferenceCliContext {
   readonly runner?: CommandRunner;
   readonly sceneDetector?: SceneDetectionProvider;
   readonly transcriber?: TranscriptionProvider;
+  /** Retrieval collaborators. Injected by tests; production builds them from env. */
+  readonly embedder?: MultimodalEmbeddingProvider;
+  readonly reranker?: MultimodalRerankerProvider;
+  readonly qdrant?: QdrantClient;
+}
+
+/** Narrows the ingestion CLI context onto the retrieval commands' own shape. */
+function retrievalContext(context: ReferenceCliContext): RetrievalContext {
+  return {
+    db: context.db,
+    env: context.env as RetrievalContext['env'],
+    stdout: context.stdout,
+    stderr: context.stderr,
+    ...(context.embedder ? { embedder: context.embedder } : {}),
+    ...(context.reranker ? { reranker: context.reranker } : {}),
+    ...(context.qdrant ? { qdrant: context.qdrant } : {}),
+  };
 }
 
 function usage(): string {
@@ -144,6 +171,20 @@ export async function runReferenceCli(
       return approveCommand(values, context);
     case 'project':
       return projectCommand(values, context, absolute, repositoryRoot);
+    // --- retrieval (Creative Memory semantic search) ------------------------
+    case 'index':
+    case 'reindex':
+      return runIndexCommand(
+        values,
+        command === 'reindex' ? new Set([...flags, 'force']) : flags,
+        retrievalContext(context),
+      );
+    case 'index-status':
+      return runIndexStatusCommand(values, retrievalContext(context));
+    case 'search':
+      return runSearchCommand(values, retrievalContext(context));
+    case 'remove-from-index':
+      return runRemoveFromIndexCommand(values, retrievalContext(context));
     default:
       context.stderr(`${usage()}\n`);
       return REFERENCE_EXIT_CODES.INVALID_MANIFEST;

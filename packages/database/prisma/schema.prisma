@@ -1939,6 +1939,7 @@ model ReferenceAdvertisement {
   annotations     ReferenceAnnotation[]
   craftMetrics    ReferenceCraftMetrics?
   derived         ReferenceDerivedArtifact[]
+  indexEntries    CreativeMemoryIndexEntry[]
 
   @@unique([workspaceId, referenceKey])
   @@index([workspaceId])
@@ -1989,6 +1990,7 @@ model ReferenceScene {
   advertisement ReferenceAdvertisement    @relation(fields: [referenceAdvertisementId], references: [id], onDelete: Cascade)
   frames        ReferenceFrame[]
   derived       ReferenceDerivedArtifact[]
+  indexEntries  CreativeMemoryIndexEntry[]
 
   @@unique([referenceAdvertisementId, sceneIndex])
   @@index([workspaceId])
@@ -2152,3 +2154,89 @@ model ReferenceDerivedArtifact {
   @@map("reference_derived_artifacts")
 }
 
+// ============================================================================
+// Creative Memory retrieval index state.
+//
+// PostgreSQL remains canonical: these rows record what was indexed, from which
+// input, into which collection, and whether that vector is still current.
+// Qdrant holds the vectors and a filterable payload — never rights, never
+// provenance, never annotation text.
+// ============================================================================
+
+enum CreativeMemoryProfile {
+  STRUCTURAL_BASELINE_V1
+  QWEN3_VL_2B_QUALITY_V1
+  QWEN3_VL_8B_REMOTE_QUALITY_V1
+}
+
+enum CreativeMemoryIndexState {
+  PENDING
+  INDEXING
+  INDEXED
+  STALE
+  DELETED
+  FAILED
+}
+
+enum CreativeMemoryIndexFailureType {
+  EMBEDDING_FAILED
+  DIMENSION_MISMATCH
+  INVALID_VECTOR
+  QDRANT_UNAVAILABLE
+  UPSERT_FAILED
+  INELIGIBLE
+}
+
+model CreativeMemoryIndexRun {
+  id                String                @id @default(uuid())
+  workspaceId       String
+  profile           CreativeMemoryProfile
+  qdrantCollection  String
+  startedAt         DateTime              @default(now())
+  completedAt       DateTime?
+  indexedCount      Int                   @default(0)
+  skippedCount      Int                   @default(0)
+  failedCount       Int                   @default(0)
+
+  entries CreativeMemoryIndexEntry[]
+
+  @@index([workspaceId])
+  @@map("creative_memory_index_runs")
+}
+
+model CreativeMemoryIndexEntry {
+  id                       String                          @id @default(uuid())
+  workspaceId              String
+  referenceSceneId         String
+  referenceAdvertisementId String
+  profile                  CreativeMemoryProfile
+  modelRevision            String
+  vectorDimension          Int
+  /// sha256 of the canonical embedding input. Any change to a contributing
+  /// annotation, transcript, frame or craft metric changes this and marks the
+  /// entry STALE.
+  embeddingInputHash       String
+  vectorChecksum           String
+  qdrantCollection         String
+  qdrantPointId            String
+  state                    CreativeMemoryIndexState        @default(PENDING)
+  indexedAt                DateTime?
+  lastVerifiedAt           DateTime?
+  failureType              CreativeMemoryIndexFailureType?
+  /// Redacted before persistence — never carries an endpoint credential.
+  failureDetail            String?
+  indexRunId               String?
+  createdAt                DateTime                        @default(now())
+  updatedAt                DateTime                        @updatedAt
+
+  scene         ReferenceScene          @relation(fields: [referenceSceneId], references: [id], onDelete: Cascade)
+  advertisement ReferenceAdvertisement  @relation(fields: [referenceAdvertisementId], references: [id], onDelete: Cascade)
+  indexRun      CreativeMemoryIndexRun? @relation(fields: [indexRunId], references: [id], onDelete: SetNull)
+
+  /// One entry per scene per profile: re-indexing updates in place rather than
+  /// accumulating rows, which is what makes indexing idempotent.
+  @@unique([referenceSceneId, profile])
+  @@index([workspaceId])
+  @@index([workspaceId, state])
+  @@map("creative_memory_index_entries")
+}

@@ -19,6 +19,7 @@ networks:
 volumes:
   postgres-data:
   minio-data:
+  qdrant-data:
 
 services:
   postgres:
@@ -103,4 +104,38 @@ services:
       mc mb --ignore-existing local/$$MINIO_BUCKET &&
       exit 0
       "
+    networks: [combat-creative-os]
+
+  # Creative Memory vector search. Stores embedding vectors and filterable
+  # payload only — PostgreSQL remains canonical for reference rights,
+  # provenance, annotations and processing state, and no reference media,
+  # path, URL or credential is ever written here.
+  #
+  # Bound to 127.0.0.1 so a development instance is not reachable off-host.
+  # QDRANT_API_KEY is optional locally and read from the environment; never
+  # commit a value for it.
+  qdrant:
+    image: qdrant/qdrant:v1.12.4
+    restart: unless-stopped
+    ports:
+      - '127.0.0.1:${QDRANT_HTTP_PORT:-6333}:6333'
+      - '127.0.0.1:${QDRANT_GRPC_PORT:-6334}:6334'
+    environment:
+      # QDRANT__SERVICE__API_KEY is deliberately NOT defaulted here. Qdrant
+      # treats an *empty* value as "authentication enabled with an empty key",
+      # which makes every data request 401 while /healthz keeps answering — a
+      # confusing failure that looks like a client bug. Local development is
+      # bound to 127.0.0.1 instead; to enable auth, set a real value in an
+      # override file or the shell environment and set QDRANT_API_KEY to match.
+      QDRANT__TELEMETRY_DISABLED: 'true'
+    volumes:
+      - qdrant-data:/qdrant/storage
+    healthcheck:
+      # The image has no curl or wget; Qdrant ships a `qdrant` binary and a
+      # shell, so readiness is probed over the TCP port with bash's /dev/tcp.
+      test: ['CMD-SHELL', 'bash -c "exec 3<>/dev/tcp/127.0.0.1/6333" || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
     networks: [combat-creative-os]

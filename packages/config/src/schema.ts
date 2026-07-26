@@ -256,6 +256,52 @@ export function refineVideoGenerationConfig(
 }
 
 /**
+ * Creative Memory retrieval configuration.
+ *
+ * `CREATIVE_MEMORY_MODEL_DOWNLOAD_POLICY` defaults to `deny` and is the only
+ * switch that could ever permit a model download. No code path in this
+ * repository fetches weights regardless — the setting exists so that a future
+ * one cannot be added without an operator deliberately flipping it, and so the
+ * refusal is visible in configuration rather than buried in a comment.
+ *
+ * Endpoint credentials are read only through this schema and are redacted from
+ * every error, log line, generated artefact and Qdrant payload.
+ */
+export const creativeMemoryEnvSchema = z.object({
+  CREATIVE_MEMORY_EMBEDDING_PROFILE: z
+    .enum(['STRUCTURAL_BASELINE_V1', 'QWEN3_VL_2B_QUALITY_V1', 'QWEN3_VL_8B_REMOTE_QUALITY_V1'])
+    .default('STRUCTURAL_BASELINE_V1'),
+  CREATIVE_MEMORY_EMBEDDING_ENDPOINT: z.string().optional(),
+  CREATIVE_MEMORY_RERANKER_ENDPOINT: z.string().optional(),
+  CREATIVE_MEMORY_EMBEDDING_API_KEY: z.string().optional(),
+  CREATIVE_MEMORY_MODEL_DOWNLOAD_POLICY: z.enum(['deny', 'allow']).default('deny'),
+  CREATIVE_MEMORY_MODEL_CACHE_DIR: z.string().min(1).default('.aamp-model-cache'),
+  CREATIVE_MEMORY_BATCH_SIZE: z.coerce.number().int().positive().max(256).default(16),
+  CREATIVE_MEMORY_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),
+  QDRANT_URL: z.string().min(1).default('http://127.0.0.1:6333'),
+  QDRANT_API_KEY: z.string().optional(),
+});
+export type CreativeMemoryEnv = z.infer<typeof creativeMemoryEnvSchema>;
+
+/**
+ * A neural profile without an endpoint cannot work, and falling back to the
+ * structural baseline silently would mean a collection labelled "Qwen"
+ * holding non-neural vectors. Refused at the config boundary instead.
+ */
+export function refineCreativeMemoryConfig(env: CreativeMemoryEnv, ctx: z.RefinementCtx): void {
+  if (
+    env.CREATIVE_MEMORY_EMBEDDING_PROFILE !== 'STRUCTURAL_BASELINE_V1' &&
+    !env.CREATIVE_MEMORY_EMBEDDING_ENDPOINT?.trim()
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['CREATIVE_MEMORY_EMBEDDING_ENDPOINT'],
+      message: `CREATIVE_MEMORY_EMBEDDING_ENDPOINT is required for profile ${env.CREATIVE_MEMORY_EMBEDDING_PROFILE} — refusing to start rather than silently indexing with the non-neural baseline under a neural profile name`,
+    });
+  }
+}
+
+/**
  * M5: asset-ingestion limits. Deliberately not "configurable" per MIME type
  * — a single byte ceiling plus a code-level MIME allowlist (see
  * packages/workflows' ingest-asset-activity.ts) is enough for this
@@ -325,8 +371,10 @@ export type WorkerEnv = z.infer<typeof workerEnvSchema>;
 export const aampCliEnvSchema = baseEnvSchema
   .merge(reasoningEnvSchema)
   .merge(videoGenerationEnvSchema)
+  .merge(creativeMemoryEnvSchema)
   .superRefine(refineReasoningConfig)
-  .superRefine(refineVideoGenerationConfig);
+  .superRefine(refineVideoGenerationConfig)
+  .superRefine(refineCreativeMemoryConfig);
 export type AampCliEnv = z.infer<typeof aampCliEnvSchema>;
 
 /**
