@@ -1,4 +1,3 @@
-import { z } from 'zod';
 import type { FastifyInstance } from 'fastify';
 import { roleHasPermission, type RoleName } from '@combat/domain';
 import {
@@ -13,13 +12,13 @@ import {
   listQualityFailuresForAssessment,
 } from '@combat/database';
 import type { FinalQaDatabase } from './final-qa-database';
+import { requirePrincipal } from './authentication';
 
 export interface FinalQaRouteDeps {
   readonly db: FinalQaDatabase;
 }
 
 const BASE = '/workspaces/:workspaceId/campaigns/:campaignId/final-qa';
-const UserIdQuerySchema = z.object({ userId: z.string().uuid() });
 
 /**
  * M11 — the read-only surface behind `apps/dashboard`'s Final Approval screen:
@@ -42,13 +41,9 @@ export function registerFinalQaRoutes(
     BASE,
     async (request, reply) => {
       const { workspaceId, campaignId } = request.params;
-      const parsed = UserIdQuerySchema.safeParse(request.query);
-      if (!parsed.success) {
-        return reply.status(400).send({ error: 'INVALID_QUERY', issues: parsed.error.issues });
-      }
 
       const memberships = await listMembershipsForWorkspace(deps.db, workspaceId);
-      const membership = memberships.find((m) => m.userId === parsed.data.userId);
+      const membership = memberships.find((m) => m.userId === requirePrincipal(request).userId);
       if (!membership) {
         return reply
           .status(403)

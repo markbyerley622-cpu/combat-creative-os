@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { SessionGate } from '@/components/SessionGate';
+import { WorkspaceGate } from '@/components/WorkspaceGate';
 import { EmptyState, ErrorState, LoadingState, PageShell } from '@/components/PageShell';
 import {
   ApiError,
@@ -11,7 +11,7 @@ import {
   type CompositionAttemptView,
   type RoughEditSpecView,
 } from '@/lib/api-client';
-import { useSession } from '@/lib/session';
+import { useWorkspace } from '@/lib/workspace';
 
 const POLL_INTERVAL_MS = 4000;
 
@@ -187,7 +187,7 @@ function AttemptRow({ attempt }: { attempt: CompositionAttemptView }) {
 }
 
 function Compositing({ campaignId }: { campaignId: string }) {
-  const { session } = useSession();
+  const { workspace, getToken } = useWorkspace();
   const [data, setData] = useState<CompositingView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -196,8 +196,8 @@ function Compositing({ campaignId }: { campaignId: string }) {
   const cancelledRef = useRef(false);
 
   async function load() {
-    if (!session) return;
-    const client = createApiClient(session.workspaceId, session.userId);
+    if (!workspace) return;
+    const client = createApiClient(workspace.workspaceId, getToken);
     try {
       const result = await client.getCompositing(campaignId);
       if (!cancelledRef.current) {
@@ -218,14 +218,14 @@ function Compositing({ campaignId }: { campaignId: string }) {
       clearInterval(interval);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session, campaignId]);
+  }, [workspace, getToken, campaignId]);
 
   async function handleCancel() {
-    if (!session || submitting) return;
+    if (!workspace || submitting) return;
     setSubmitting(true);
     setActionError(null);
     setNotice(null);
-    const client = createApiClient(session.workspaceId, session.userId);
+    const client = createApiClient(workspace.workspaceId, getToken);
     try {
       await client.cancelCompositing(campaignId);
       setNotice('Cancellation requested.');
@@ -328,10 +328,10 @@ function Compositing({ campaignId }: { campaignId: string }) {
 
 export default function CompositingPage({ params }: { params: { campaignId: string } }) {
   return (
-    <SessionGate>
+    <WorkspaceGate>
       <PageShell title="Compositing">
         <Compositing campaignId={params.campaignId} />
       </PageShell>
-    </SessionGate>
+    </WorkspaceGate>
   );
 }

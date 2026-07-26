@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { EnvValidationError, loadApiEnv, loadWorkerEnv } from './load-env';
+import { parseAuthorizedParties } from './schema';
 
 /**
  * M14 — configuration safety.
@@ -15,6 +16,9 @@ const REPO_ROOT = join(__dirname, '..', '..', '..');
 
 const BASE_ENV = {
   DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/combat_creative_os?schema=public',
+  // AAMP-1 step 2: apps/api refuses to start without identity config, so every
+  // api-side fixture must supply one. Placeholder — not a real Clerk key.
+  CLERK_SECRET_KEY: 'sk_test_not_a_real_key',
 };
 
 describe('reasoning provider config fails closed', () => {
@@ -77,6 +81,80 @@ describe('mock mode remains the zero-config default', () => {
     expect(() => loadApiEnv({ DATABASE_URL: 'mysql://nope' } as NodeJS.ProcessEnv)).toThrow(
       EnvValidationError,
     );
+  });
+});
+
+describe('clerk identity config fails closed', () => {
+  /** `BASE_ENV` minus the key, so the omission is the only difference. */
+  const withoutKey = (extra: Record<string, string> = {}) => {
+    const { CLERK_SECRET_KEY: _omitted, ...rest } = BASE_ENV;
+    return { ...rest, ...extra } as NodeJS.ProcessEnv;
+  };
+
+  it('refuses to start the api with no CLERK_SECRET_KEY', () => {
+    expect(() => loadApiEnv(withoutKey())).toThrow(EnvValidationError);
+  });
+
+  it('refuses to start in production with no CLERK_SECRET_KEY', () => {
+    expect(() => loadApiEnv(withoutKey({ NODE_ENV: 'production' }))).toThrow(EnvValidationError);
+  });
+
+  it('names the missing variable and the failure mode it prevents', () => {
+    try {
+      loadApiEnv(withoutKey());
+      expect.unreachable('should have thrown');
+    } catch (error) {
+      expect(error).toBeInstanceOf(EnvValidationError);
+      const message = (error as EnvValidationError).message;
+      expect(message).toContain('CLERK_SECRET_KEY');
+      expect(message).toContain('no caller authentication');
+    }
+  });
+
+  it('refuses a blank or whitespace-only key', () => {
+    expect(() => loadApiEnv(withoutKey({ CLERK_SECRET_KEY: '   ' }))).toThrow(EnvValidationError);
+  });
+
+  it('rejects a publishable key pasted into the secret slot', () => {
+    try {
+      loadApiEnv(withoutKey({ CLERK_SECRET_KEY: 'pk_test_something' }));
+      expect.unreachable('should have thrown');
+    } catch (error) {
+      expect((error as EnvValidationError).message).toContain('publishable key');
+    }
+  });
+
+  it('requires an authorized-party allowlist in production', () => {
+    expect(() => loadApiEnv({ ...BASE_ENV, NODE_ENV: 'production' } as NodeJS.ProcessEnv)).toThrow(
+      EnvValidationError,
+    );
+
+    const env = loadApiEnv({
+      ...BASE_ENV,
+      NODE_ENV: 'production',
+      CLERK_AUTHORIZED_PARTIES: 'https://app.example.com',
+    } as NodeJS.ProcessEnv);
+    expect(env.CLERK_AUTHORIZED_PARTIES).toBe('https://app.example.com');
+  });
+
+  it('does not require an authorized-party allowlist outside production', () => {
+    expect(loadApiEnv(BASE_ENV as NodeJS.ProcessEnv).CLERK_SECRET_KEY).toBe(
+      'sk_test_not_a_real_key',
+    );
+  });
+});
+
+describe('parseAuthorizedParties', () => {
+  it('splits, trims and drops empties', () => {
+    expect(parseAuthorizedParties('  https://a.test , https://b.test ,, ')).toEqual([
+      'https://a.test',
+      'https://b.test',
+    ]);
+  });
+
+  it('treats an unset value as no allowlist', () => {
+    expect(parseAuthorizedParties(undefined)).toEqual([]);
+    expect(parseAuthorizedParties('')).toEqual([]);
   });
 });
 

@@ -14,6 +14,8 @@ import {
   type RoughEditSpecificationRecord,
 } from '@combat/database';
 import { registerCompositingRoutes } from './compositing-routes';
+import { registerAuthentication } from './authentication';
+import { bearerFor, permissiveTestAuthentication } from './test-helpers/authenticated-caller';
 
 function buildFakeWorkflowClient() {
   const signal = vi.fn(async () => undefined);
@@ -138,6 +140,10 @@ async function seed(store: InMemoryCampaignStore, opts: { withRender?: boolean }
 
 function buildApp(store: InMemoryCampaignStore, workflowClient: WorkflowClient) {
   const app = Fastify();
+  // AAMP-1 step 2: these suites exercise authorization, so the caller arrives
+  // authenticated exactly as a production caller does — a verified bearer
+  // token, never a request field. See test-helpers/authenticated-caller.ts.
+  registerAuthentication(app, permissiveTestAuthentication().hookDeps);
   registerCompositingRoutes(app, {
     db: store,
     storageProvider: new MockStorageProvider(),
@@ -153,7 +159,8 @@ describe('compositing routes', () => {
     const app = buildApp(store, buildFakeWorkflowClient().workflowClient);
     const res = await app.inject({
       method: 'GET',
-      url: `/workspaces/${s.workspaceId}/campaigns/${s.campaignId}/compositing?userId=${s.reviewerId}`,
+      url: `/workspaces/${s.workspaceId}/campaigns/${s.campaignId}/compositing`,
+      headers: bearerFor(s.reviewerId),
     });
     expect(res.statusCode).toBe(200);
     const body = res.json();
@@ -170,7 +177,8 @@ describe('compositing routes', () => {
     const app = buildApp(store, buildFakeWorkflowClient().workflowClient);
     const res = await app.inject({
       method: 'GET',
-      url: `/workspaces/${s.workspaceId}/campaigns/${s.campaignId}/compositing?userId=${s.reviewerId}`,
+      url: `/workspaces/${s.workspaceId}/campaigns/${s.campaignId}/compositing`,
+      headers: bearerFor(s.reviewerId),
     });
     expect(res.statusCode).toBe(200);
     expect(res.json().roughEditSpecification).toBeNull();
@@ -182,7 +190,8 @@ describe('compositing routes', () => {
     const app = buildApp(store, buildFakeWorkflowClient().workflowClient);
     const res = await app.inject({
       method: 'GET',
-      url: `/workspaces/${s.workspaceId}/campaigns/${s.campaignId}/compositing/preview?userId=${s.reviewerId}`,
+      url: `/workspaces/${s.workspaceId}/campaigns/${s.campaignId}/compositing/preview`,
+      headers: bearerFor(s.reviewerId),
     });
     expect(res.statusCode).toBe(200);
     expect(JSON.stringify(res.json())).not.toContain('s3Key');
@@ -196,7 +205,8 @@ describe('compositing routes', () => {
     const res = await app.inject({
       method: 'POST',
       url: `/workspaces/${s.workspaceId}/campaigns/${s.campaignId}/compositing/cancel`,
-      payload: { userId: s.operatorId },
+      headers: bearerFor(s.operatorId),
+      payload: {},
     });
     expect(res.statusCode).toBe(202);
     expect(signal).toHaveBeenCalledTimes(1);
@@ -210,7 +220,8 @@ describe('compositing routes', () => {
     const res = await app.inject({
       method: 'POST',
       url: `/workspaces/${s.workspaceId}/campaigns/${s.campaignId}/compositing/cancel`,
-      payload: { userId: s.reviewerId },
+      headers: bearerFor(s.reviewerId),
+      payload: {},
     });
     expect(res.statusCode).toBe(403);
     expect(signal).not.toHaveBeenCalled();
@@ -222,7 +233,8 @@ describe('compositing routes', () => {
     const app = buildApp(store, buildFakeWorkflowClient().workflowClient);
     const res = await app.inject({
       method: 'GET',
-      url: `/workspaces/${randomUUID()}/campaigns/${s.campaignId}/compositing?userId=${s.reviewerId}`,
+      url: `/workspaces/${randomUUID()}/campaigns/${s.campaignId}/compositing`,
+      headers: bearerFor(s.reviewerId),
     });
     expect(res.statusCode).toBe(403);
   });

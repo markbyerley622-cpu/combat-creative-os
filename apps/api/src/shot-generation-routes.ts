@@ -1,4 +1,3 @@
-import { z } from 'zod';
 import type { FastifyInstance } from 'fastify';
 import {
   getBudgetStatus,
@@ -11,12 +10,11 @@ import {
   listShotsForScript,
 } from '@combat/database';
 import type { ShotGenerationDatabase } from './shot-generation-database';
+import { requirePrincipal } from './authentication';
 
 export interface ShotGenerationRouteDeps {
   readonly db: ShotGenerationDatabase;
 }
-
-const UserIdQuerySchema = z.object({ userId: z.string().uuid() });
 
 async function authorize(
   db: ShotGenerationDatabase,
@@ -68,11 +66,7 @@ export function registerShotGenerationRoutes(
     Querystring: unknown;
   }>('/workspaces/:workspaceId/campaigns/:campaignId/shot-generation', async (request, reply) => {
     const { workspaceId, campaignId } = request.params;
-    const parsedQuery = UserIdQuerySchema.safeParse(request.query);
-    if (!parsedQuery.success) {
-      return reply.status(400).send({ error: 'INVALID_QUERY', issues: parsedQuery.error.issues });
-    }
-    const auth = await authorize(deps.db, workspaceId, parsedQuery.data.userId);
+    const auth = await authorize(deps.db, workspaceId, requirePrincipal(request).userId);
     if (!auth.ok) return reply.status(auth.status).send(auth.body);
 
     const [script, workspaceBudget, campaignBudget] = await Promise.all([

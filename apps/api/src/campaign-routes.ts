@@ -29,6 +29,7 @@ import {
 import { workflows } from '@combat/workflows';
 import type { CampaignDatabase } from './campaign-database';
 import { campaignProductionWorkflowId } from './campaign-workflow-id';
+import { requirePrincipal } from './authentication';
 
 export interface CampaignRouteDeps {
   db: CampaignDatabase;
@@ -40,36 +41,33 @@ export interface CampaignRouteDeps {
 const DEFAULT_TASK_QUEUE = 'campaign-production';
 
 /**
- * `userId` is read from the request body/query exactly like
- * approval-routes.ts's existing endpoints — there is still no session/auth
- * layer (CLAUDE.md/docs/architecture.md §7.1: "no real caller authentication
- * yet"). This is a temporary, explicitly-documented placeholder, not
- * production authentication: a real caller identity would come from a
- * verified session/token, never a client-supplied field.
+ * AAMP-1 step 2: the caller's identity is `request.principal.userId`, set by
+ * the authentication hook from a verified Clerk session token. No schema in
+ * this file carries a `userId`, and each is `.strict()` — so a client that
+ * still sends one gets a 400 rather than having it quietly ignored, which is
+ * what makes "no mutating route accepts caller identity from request input"
+ * an enforced property rather than a convention.
  */
-const CreateCampaignBodySchema = z.object({
-  userId: z.string().uuid(),
-  name: z.string().min(1),
-  idempotencyKey: z.string().min(1).optional(),
-});
+const CreateCampaignBodySchema = z
+  .object({
+    name: z.string().min(1),
+    idempotencyKey: z.string().min(1).optional(),
+  })
+  .strict();
 
-const SaveDraftBriefBodySchema = z.object({
-  userId: z.string().uuid(),
-  content: CampaignBriefContentSchema.partial(),
-});
+const SaveDraftBriefBodySchema = z
+  .object({
+    content: CampaignBriefContentSchema.partial(),
+  })
+  .strict();
 
-const SubmitBriefBodySchema = z.object({
-  userId: z.string().uuid(),
-  content: CampaignBriefContentSchema,
-});
+const SubmitBriefBodySchema = z
+  .object({
+    content: CampaignBriefContentSchema,
+  })
+  .strict();
 
-const StartWorkflowBodySchema = z.object({
-  userId: z.string().uuid(),
-});
-
-const UserIdQuerySchema = z.object({
-  userId: z.string().uuid(),
-});
+const StartWorkflowBodySchema = z.object({}).strict();
 
 interface AuthorizedRequestOk {
   ok: true;
@@ -124,7 +122,12 @@ export function registerCampaignRoutes(
       if (!parsed.success) {
         return reply.status(400).send({ error: 'INVALID_BODY', issues: parsed.error.issues });
       }
-      const auth = await authorize(deps.db, workspaceId, parsed.data.userId, 'MANAGE_CAMPAIGNS');
+      const auth = await authorize(
+        deps.db,
+        workspaceId,
+        requirePrincipal(request).userId,
+        'MANAGE_CAMPAIGNS',
+      );
       if (!auth.ok) return reply.status(auth.status).send(auth.body);
 
       const campaign = await createCampaign(deps.db, workspaceId, {
@@ -140,11 +143,7 @@ export function registerCampaignRoutes(
     '/workspaces/:workspaceId/campaigns',
     async (request, reply) => {
       const { workspaceId } = request.params;
-      const parsedQuery = UserIdQuerySchema.safeParse(request.query);
-      if (!parsedQuery.success) {
-        return reply.status(400).send({ error: 'INVALID_QUERY', issues: parsedQuery.error.issues });
-      }
-      const auth = await authorize(deps.db, workspaceId, parsedQuery.data.userId, null);
+      const auth = await authorize(deps.db, workspaceId, requirePrincipal(request).userId, null);
       if (!auth.ok) return reply.status(auth.status).send(auth.body);
 
       const campaigns = await listCampaignsForWorkspace(deps.db, workspaceId);
@@ -161,7 +160,12 @@ export function registerCampaignRoutes(
       if (!parsed.success) {
         return reply.status(400).send({ error: 'INVALID_BODY', issues: parsed.error.issues });
       }
-      const auth = await authorize(deps.db, workspaceId, parsed.data.userId, 'MANAGE_CAMPAIGNS');
+      const auth = await authorize(
+        deps.db,
+        workspaceId,
+        requirePrincipal(request).userId,
+        'MANAGE_CAMPAIGNS',
+      );
       if (!auth.ok) return reply.status(auth.status).send(auth.body);
 
       const campaign = await getCampaign(deps.db, workspaceId, campaignId);
@@ -186,7 +190,12 @@ export function registerCampaignRoutes(
       if (!parsed.success) {
         return reply.status(400).send({ error: 'INVALID_BODY', issues: parsed.error.issues });
       }
-      const auth = await authorize(deps.db, workspaceId, parsed.data.userId, 'MANAGE_CAMPAIGNS');
+      const auth = await authorize(
+        deps.db,
+        workspaceId,
+        requirePrincipal(request).userId,
+        'MANAGE_CAMPAIGNS',
+      );
       if (!auth.ok) return reply.status(auth.status).send(auth.body);
 
       const campaign = await getCampaign(deps.db, workspaceId, campaignId);
@@ -217,7 +226,12 @@ export function registerCampaignRoutes(
       if (!parsed.success) {
         return reply.status(400).send({ error: 'INVALID_BODY', issues: parsed.error.issues });
       }
-      const auth = await authorize(deps.db, workspaceId, parsed.data.userId, 'MANAGE_CAMPAIGNS');
+      const auth = await authorize(
+        deps.db,
+        workspaceId,
+        requirePrincipal(request).userId,
+        'MANAGE_CAMPAIGNS',
+      );
       if (!auth.ok) return reply.status(auth.status).send(auth.body);
 
       const campaign = await getCampaign(deps.db, workspaceId, campaignId);
@@ -278,11 +292,7 @@ export function registerCampaignRoutes(
     '/workspaces/:workspaceId/campaigns/:campaignId/status',
     async (request, reply) => {
       const { workspaceId, campaignId } = request.params;
-      const parsedQuery = UserIdQuerySchema.safeParse(request.query);
-      if (!parsedQuery.success) {
-        return reply.status(400).send({ error: 'INVALID_QUERY', issues: parsedQuery.error.issues });
-      }
-      const auth = await authorize(deps.db, workspaceId, parsedQuery.data.userId, null);
+      const auth = await authorize(deps.db, workspaceId, requirePrincipal(request).userId, null);
       if (!auth.ok) return reply.status(auth.status).send(auth.body);
 
       const campaign = await getCampaign(deps.db, workspaceId, campaignId);
@@ -304,11 +314,7 @@ export function registerCampaignRoutes(
     '/workspaces/:workspaceId/campaigns/:campaignId/strategy',
     async (request, reply) => {
       const { workspaceId, campaignId } = request.params;
-      const parsedQuery = UserIdQuerySchema.safeParse(request.query);
-      if (!parsedQuery.success) {
-        return reply.status(400).send({ error: 'INVALID_QUERY', issues: parsedQuery.error.issues });
-      }
-      const auth = await authorize(deps.db, workspaceId, parsedQuery.data.userId, null);
+      const auth = await authorize(deps.db, workspaceId, requirePrincipal(request).userId, null);
       if (!auth.ok) return reply.status(auth.status).send(auth.body);
 
       const campaign = await getCampaign(deps.db, workspaceId, campaignId);
@@ -324,11 +330,7 @@ export function registerCampaignRoutes(
     '/workspaces/:workspaceId/campaigns/:campaignId/concept',
     async (request, reply) => {
       const { workspaceId, campaignId } = request.params;
-      const parsedQuery = UserIdQuerySchema.safeParse(request.query);
-      if (!parsedQuery.success) {
-        return reply.status(400).send({ error: 'INVALID_QUERY', issues: parsedQuery.error.issues });
-      }
-      const auth = await authorize(deps.db, workspaceId, parsedQuery.data.userId, null);
+      const auth = await authorize(deps.db, workspaceId, requirePrincipal(request).userId, null);
       if (!auth.ok) return reply.status(auth.status).send(auth.body);
 
       const campaign = await getCampaign(deps.db, workspaceId, campaignId);
@@ -344,11 +346,7 @@ export function registerCampaignRoutes(
     '/workspaces/:workspaceId/campaigns/:campaignId/script',
     async (request, reply) => {
       const { workspaceId, campaignId } = request.params;
-      const parsedQuery = UserIdQuerySchema.safeParse(request.query);
-      if (!parsedQuery.success) {
-        return reply.status(400).send({ error: 'INVALID_QUERY', issues: parsedQuery.error.issues });
-      }
-      const auth = await authorize(deps.db, workspaceId, parsedQuery.data.userId, null);
+      const auth = await authorize(deps.db, workspaceId, requirePrincipal(request).userId, null);
       if (!auth.ok) return reply.status(auth.status).send(auth.body);
 
       const campaign = await getCampaign(deps.db, workspaceId, campaignId);
@@ -368,11 +366,7 @@ export function registerCampaignRoutes(
     '/workspaces/:workspaceId/campaigns/:campaignId/brief',
     async (request, reply) => {
       const { workspaceId, campaignId } = request.params;
-      const parsedQuery = UserIdQuerySchema.safeParse(request.query);
-      if (!parsedQuery.success) {
-        return reply.status(400).send({ error: 'INVALID_QUERY', issues: parsedQuery.error.issues });
-      }
-      const auth = await authorize(deps.db, workspaceId, parsedQuery.data.userId, null);
+      const auth = await authorize(deps.db, workspaceId, requirePrincipal(request).userId, null);
       if (!auth.ok) return reply.status(auth.status).send(auth.body);
 
       const campaign = await getCampaign(deps.db, workspaceId, campaignId);
@@ -389,11 +383,7 @@ export function registerCampaignRoutes(
     '/workspaces/:workspaceId/campaigns/:campaignId/approvals/concept/state',
     async (request, reply) => {
       const { workspaceId, campaignId } = request.params;
-      const parsedQuery = UserIdQuerySchema.safeParse(request.query);
-      if (!parsedQuery.success) {
-        return reply.status(400).send({ error: 'INVALID_QUERY', issues: parsedQuery.error.issues });
-      }
-      const auth = await authorize(deps.db, workspaceId, parsedQuery.data.userId, null);
+      const auth = await authorize(deps.db, workspaceId, requirePrincipal(request).userId, null);
       if (!auth.ok) return reply.status(auth.status).send(auth.body);
 
       const campaign = await getCampaign(deps.db, workspaceId, campaignId);

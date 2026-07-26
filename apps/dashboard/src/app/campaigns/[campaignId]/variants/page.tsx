@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { SessionGate } from '@/components/SessionGate';
+import { WorkspaceGate } from '@/components/WorkspaceGate';
 import { EmptyState, ErrorState, LoadingState, PageShell } from '@/components/PageShell';
 import {
   createApiClient,
@@ -9,7 +9,7 @@ import {
   type VariantRowView,
   type VariantsView,
 } from '@/lib/api-client';
-import { useSession } from '@/lib/session';
+import { useWorkspace } from '@/lib/workspace';
 
 const POLL_INTERVAL_MS = 4000;
 
@@ -216,15 +216,15 @@ function VariantColumn({ row, frameSpan }: { row: VariantRowView; frameSpan: num
 }
 
 function Variants({ campaignId }: { campaignId: string }) {
-  const { session } = useSession();
+  const { workspace, getToken } = useWorkspace();
   const [data, setData] = useState<VariantsView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
 
   async function load() {
-    if (!session) return;
-    const client = createApiClient(session.workspaceId, session.userId);
+    if (!workspace) return;
+    const client = createApiClient(workspace.workspaceId, getToken);
     try {
       setData(await client.getVariants(campaignId));
       setError(null);
@@ -238,13 +238,13 @@ function Variants({ campaignId }: { campaignId: string }) {
     const id = setInterval(load, POLL_INTERVAL_MS);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session, campaignId]);
+  }, [workspace, getToken, campaignId]);
 
   async function cancel() {
-    if (!session) return;
+    if (!workspace) return;
     setCancelling(true);
     setNotice(null);
-    const client = createApiClient(session.workspaceId, session.userId);
+    const client = createApiClient(workspace.workspaceId, getToken);
     try {
       await client.cancelVariants(campaignId);
       setNotice('Cancellation requested.');
@@ -317,10 +317,10 @@ function Variants({ campaignId }: { campaignId: string }) {
 
 export default function VariantsPage({ params }: { params: { campaignId: string } }) {
   return (
-    <SessionGate>
+    <WorkspaceGate>
       <PageShell title="Delivery variants">
         <Variants campaignId={params.campaignId} />
       </PageShell>
-    </SessionGate>
+    </WorkspaceGate>
   );
 }

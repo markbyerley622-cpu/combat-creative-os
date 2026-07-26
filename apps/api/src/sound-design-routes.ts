@@ -1,4 +1,3 @@
-import { z } from 'zod';
 import type { FastifyInstance } from 'fastify';
 import {
   getBudgetStatus,
@@ -10,13 +9,13 @@ import {
   listTimelineEntries,
 } from '@combat/database';
 import type { SoundDesignDatabase } from './sound-design-database';
+import { requirePrincipal } from './authentication';
 
 export interface SoundDesignRouteDeps {
   readonly db: SoundDesignDatabase;
 }
 
 const BASE = '/workspaces/:workspaceId/campaigns/:campaignId/sound-design';
-const UserIdQuerySchema = z.object({ userId: z.string().uuid() });
 
 async function authorizeMember(
   db: SoundDesignDatabase,
@@ -35,11 +34,7 @@ export function registerSoundDesignRoutes(
     BASE,
     async (request, reply) => {
       const { workspaceId, campaignId } = request.params;
-      const parsed = UserIdQuerySchema.safeParse(request.query);
-      if (!parsed.success) {
-        return reply.status(400).send({ error: 'INVALID_QUERY', issues: parsed.error.issues });
-      }
-      if (!(await authorizeMember(deps.db, workspaceId, parsed.data.userId))) {
+      if (!(await authorizeMember(deps.db, workspaceId, requirePrincipal(request).userId))) {
         return reply
           .status(403)
           .send({ error: 'FORBIDDEN', message: 'caller is not a member of this workspace' });

@@ -5,6 +5,9 @@ const validBase = {
   NODE_ENV: 'test',
   LOG_LEVEL: 'info',
   DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/combat_creative_os',
+  // Placeholder, never a real Clerk key — apps/api fails closed without one
+  // (see config-safety.test.ts's "clerk identity config fails closed").
+  CLERK_SECRET_KEY: 'sk_test_not_a_real_key',
 };
 
 describe('loadApiEnv', () => {

@@ -11,6 +11,8 @@ import {
 } from '@combat/database';
 import type { RoleName } from '@combat/domain';
 import { registerFinalQaRoutes } from './final-qa-routes';
+import { registerAuthentication } from './authentication';
+import { bearerFor, permissiveTestAuthentication } from './test-helpers/authenticated-caller';
 
 interface SeedOptions {
   readonly role?: RoleName;
@@ -131,19 +133,27 @@ async function seed(store: InMemoryCampaignStore, opts: SeedOptions = {}) {
 
 function buildApp(store: InMemoryCampaignStore) {
   const app = Fastify();
+  // AAMP-1 step 2: these suites exercise authorization, so the caller arrives
+  // authenticated exactly as a production caller does — a verified bearer
+  // token, never a request field. See test-helpers/authenticated-caller.ts.
+  registerAuthentication(app, permissiveTestAuthentication().hookDeps);
   registerFinalQaRoutes(app, { db: store });
   return app;
 }
 
-function url(s: { workspaceId: string; campaignId: string }, userId: string): string {
-  return `/workspaces/${s.workspaceId}/campaigns/${s.campaignId}/final-qa?userId=${userId}`;
+function url(s: { workspaceId: string; campaignId: string }): string {
+  return `/workspaces/${s.workspaceId}/campaigns/${s.campaignId}/final-qa`;
 }
 
 describe('final-qa routes', () => {
   it('returns the passing Final QA verdict, the master, and the delivery context', async () => {
     const store = new InMemoryCampaignStore();
     const s = await seed(store);
-    const res = await buildApp(store).inject({ method: 'GET', url: url(s, s.memberId) });
+    const res = await buildApp(store).inject({
+      method: 'GET',
+      url: url(s),
+      headers: bearerFor(s.memberId),
+    });
 
     expect(res.statusCode).toBe(200);
     const body = res.json();
@@ -165,7 +175,11 @@ describe('final-qa routes', () => {
   it('returns the typed findings of a failing verdict', async () => {
     const store = new InMemoryCampaignStore();
     const s = await seed(store, { pass: false, currentStage: 'FINAL_QA' });
-    const res = await buildApp(store).inject({ method: 'GET', url: url(s, s.memberId) });
+    const res = await buildApp(store).inject({
+      method: 'GET',
+      url: url(s),
+      headers: bearerFor(s.memberId),
+    });
 
     expect(res.statusCode).toBe(200);
     const body = res.json();
@@ -182,7 +196,11 @@ describe('final-qa routes', () => {
   it('returns a null assessment before the Final QA Controller has run', async () => {
     const store = new InMemoryCampaignStore();
     const s = await seed(store, { withMaster: false, currentStage: 'FINAL_QA' });
-    const res = await buildApp(store).inject({ method: 'GET', url: url(s, s.memberId) });
+    const res = await buildApp(store).inject({
+      method: 'GET',
+      url: url(s),
+      headers: bearerFor(s.memberId),
+    });
 
     expect(res.statusCode).toBe(200);
     expect(res.json().master).toBeNull();
@@ -201,7 +219,11 @@ describe('final-qa routes', () => {
     async (role, canApprove) => {
       const store = new InMemoryCampaignStore();
       const s = await seed(store, { role });
-      const res = await buildApp(store).inject({ method: 'GET', url: url(s, s.memberId) });
+      const res = await buildApp(store).inject({
+        method: 'GET',
+        url: url(s),
+        headers: bearerFor(s.memberId),
+      });
 
       expect(res.statusCode).toBe(200);
       expect(res.json().caller).toMatchObject({ role, canApprove });
@@ -211,7 +233,11 @@ describe('final-qa routes', () => {
   it('403s a non-member', async () => {
     const store = new InMemoryCampaignStore();
     const s = await seed(store);
-    const res = await buildApp(store).inject({ method: 'GET', url: url(s, randomUUID()) });
+    const res = await buildApp(store).inject({
+      method: 'GET',
+      url: url(s),
+      headers: bearerFor(randomUUID()),
+    });
 
     expect(res.statusCode).toBe(403);
   });
@@ -221,17 +247,21 @@ describe('final-qa routes', () => {
     const s = await seed(store);
     const res = await buildApp(store).inject({
       method: 'GET',
-      url: `/workspaces/${randomUUID()}/campaigns/${s.campaignId}/final-qa?userId=${s.memberId}`,
+      url: `/workspaces/${randomUUID()}/campaigns/${s.campaignId}/final-qa`,
+      headers: bearerFor(s.memberId),
     });
 
     expect(res.statusCode).toBe(403);
   });
 
-  it('400s a malformed userId', async () => {
+  // AAMP-1 step 2: there is no longer a "malformed caller id" case to 400 on —
+  // the caller id is never in the request. A request that presents no usable
+  // credential is unauthenticated, and 401 is the correct answer.
+  it('401s a request with no session token', async () => {
     const store = new InMemoryCampaignStore();
     const s = await seed(store);
-    const res = await buildApp(store).inject({ method: 'GET', url: url(s, 'not-a-uuid') });
+    const res = await buildApp(store).inject({ method: 'GET', url: url(s) });
 
-    expect(res.statusCode).toBe(400);
+    expect(res.statusCode).toBe(401);
   });
 });

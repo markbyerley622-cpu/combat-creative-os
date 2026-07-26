@@ -12,6 +12,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@combat/auth": "workspace:*",
     "@combat/config": "workspace:*",
     "@combat/database": "workspace:*",
     "@combat/domain": "workspace:*",

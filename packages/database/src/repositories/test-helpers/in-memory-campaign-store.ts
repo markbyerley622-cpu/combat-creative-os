@@ -30,6 +30,7 @@ import type {
 } from '../campaign-transition-service';
 import type { HumanApprovalDataSource, HumanApprovalRecord } from '../human-approval-repository';
 import type { MembershipDataSource, MembershipRecord } from '../membership-repository';
+import type { UserDataSource, UserRecord } from '../user-repository';
 import type {
   PromptDataSource,
   PromptTemplateRecord,
@@ -156,6 +157,7 @@ export class InMemoryCampaignStore
     ScriptDataSource,
     ShotDataSource,
     MembershipDataSource,
+    UserDataSource,
     LicenseDataSource,
     ShotSpecificationDataSource,
     ShotGenerationDataSource,
@@ -176,6 +178,7 @@ export class InMemoryCampaignStore
   audits: CampaignTransitionAuditRecord[] = [];
   approvals: HumanApprovalRecord[] = [];
   memberships: MembershipRecord[] = [];
+  users: UserRecord[] = [];
   /** Legacy minimal fixtures — direct-pushed by campaign-transition-service.test.ts, read only through transition-facts.ts's narrow (version/acceptedAt-only) consumption. */
   briefs: CampaignBriefFactRow[] = [];
   concepts: CreativeConceptFactRow[] = [];
@@ -371,12 +374,84 @@ export class InMemoryCampaignStore
     },
   };
 
+  /**
+   * Registers a local user already bound to a verified external subject — the
+   * state every sign-in after the first one sees. Tests use this to assert that
+   * a subject resolves to *the* seeded `User.id` their `Membership` rows point
+   * at, rather than to a freshly provisioned one.
+   */
+  seedUser(overrides: Partial<UserRecord> = {}): UserRecord {
+    const now = new Date();
+    const id = overrides.id ?? randomUUID();
+    const user: UserRecord = {
+      id,
+      email: `${id}@example.test`,
+      displayName: 'Test User',
+      clerkUserId: null,
+      createdAt: now,
+      updatedAt: now,
+      ...overrides,
+    };
+    this.assertUnique('users', 'email', this.users, (u) => u.email === user.email);
+    if (user.clerkUserId !== null) {
+      this.assertUnique(
+        'users',
+        'clerkUserId',
+        this.users,
+        (u) => u.clerkUserId === user.clerkUserId,
+      );
+    }
+    this.users.push(user);
+    return user;
+  }
+
+  user: UserDataSource['user'] = {
+    findFirst: async ({ where }) =>
+      this.users.find((u) =>
+        'clerkUserId' in where
+          ? u.clerkUserId !== null && u.clerkUserId === where.clerkUserId
+          : u.email === where.email,
+      ) ?? null,
+    create: async ({ data }) => {
+      // Mirrors both of the `users` table's unique indexes — the email one that
+      // has always existed, and `users_clerkUserId_key` added by
+      // 20260726062308_add_user_clerk_subject. Without the second, a
+      // first-login provisioning race would pass here and duplicate on Postgres.
+      this.assertUnique('users', 'email', this.users, (u) => u.email === data.email);
+      this.assertUnique(
+        'users',
+        'clerkUserId',
+        this.users,
+        (u) => u.clerkUserId === data.clerkUserId,
+      );
+      const now = new Date();
+      const user: UserRecord = { id: randomUUID(), createdAt: now, updatedAt: now, ...data };
+      this.users.push(user);
+      return user;
+    },
+    update: async ({ where, data }) => {
+      const user = this.users.find((u) => u.id === where.id);
+      if (!user) throw new Error(`user ${where.id} not found`);
+      this.assertUnique(
+        'users',
+        'clerkUserId',
+        this.users,
+        (u) => u.id !== where.id && u.clerkUserId === data.clerkUserId,
+      );
+      user.clerkUserId = data.clerkUserId;
+      user.updatedAt = new Date();
+      return user;
+    },
+  };
+
   membership: MembershipDataSource['membership'] = {
     findFirst: async ({ where }) =>
       this.memberships.find((m) => m.id === where.id && m.workspaceId === where.workspaceId) ??
       null,
     findMany: async ({ where }) =>
-      this.memberships.filter((m) => m.workspaceId === where.workspaceId),
+      this.memberships.filter((m) =>
+        'workspaceId' in where ? m.workspaceId === where.workspaceId : m.userId === where.userId,
+      ),
     create: async ({ data }) => {
       const membership: MembershipRecord = { id: randomUUID(), createdAt: new Date(), ...data };
       this.memberships.push(membership);

@@ -3,8 +3,10 @@
 Status: **AAMP-0 complete (architecture).** Implementation has begun:
 **AAMP-1 step 1 (live PostgreSQL migration baseline, §6 tasks 1–3) is done** —
 see `docs/architecture.md` §8's AAMP-1 step 1 entry and
-`docs/runbooks/database-migrations.md`. Everything else in this document remains
-unimplemented; the next step is **AAMP-1 step 2, real authentication** (§6 task 4).
+`docs/runbooks/database-migrations.md` — and **AAMP-1 step 2 (verified Clerk
+authentication, §6 task 4) is done**, see §8's AAMP-1 step 2 entry and
+**ADR-0006**. Everything else in this document remains unimplemented; the next
+step is **AAMP-1 step 3, the `SERIALIZABLE` budget transaction** (§6 task 5).
 Date: 2026-07-26. Baseline: `ad3d241` (post-M14 foundation audit repair).
 
 This document is the delivery blueprint for turning the completed M0–M14
@@ -484,13 +486,13 @@ compensating guard on stores that do not support it.
 
 ### Unresolved decisions
 
-| #   | Decision                          | Criteria (no vendor chosen here)                                                                                                                                                                                                                                   |
-| --- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 1   | Authentication mechanism          | external IdP (OIDC) vs first-party sessions: audit needs, SSO requirement, time-to-implement, blast radius of a breach                                                                                                                                             |
-| 2   | Temporal Cloud vs self-hosted     | already open (`docs/architecture.md` §7.2 item 3): ops burden, cost at expected workflow volume, data residency                                                                                                                                                    |
-| 3   | Cloud vendor / hosting            | **deliberately unresolved** — repository documentation resolves nothing. Criteria: GPU availability for AAMP-3, S3 egress cost, managed Postgres maturity, Temporal support, data residency for licensed footage, ability to run Windows `aerender` if ever needed |
-| 4   | Retention windows per `AssetKind` | storage cost vs re-generation cost vs audit obligation; blocked on real candidate volume from AAMP-3                                                                                                                                                               |
-| 5   | Approval SLA / escalation         | already open (§7.2 item 4); pick a policy before production, not before AAMP-2                                                                                                                                                                                     |
+| #   | Decision                          | Criteria (no vendor chosen here)                                                                                                                                                                                                                                          |
+| --- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Authentication mechanism          | **RESOLVED 2026-07-26 (ADR-0006): external IdP — Clerk for identity, PostgreSQL for authorization, Organizations disabled.** Decided on blast radius: first-party sessions would make this repository responsible for credential storage, reset flows and breach response |
+| 2   | Temporal Cloud vs self-hosted     | already open (`docs/architecture.md` §7.2 item 3): ops burden, cost at expected workflow volume, data residency                                                                                                                                                           |
+| 3   | Cloud vendor / hosting            | **deliberately unresolved** — repository documentation resolves nothing. Criteria: GPU availability for AAMP-3, S3 egress cost, managed Postgres maturity, Temporal support, data residency for licensed footage, ability to run Windows `aerender` if ever needed        |
+| 4   | Retention windows per `AssetKind` | storage cost vs re-generation cost vs audit obligation; blocked on real candidate volume from AAMP-3                                                                                                                                                                      |
+| 5   | Approval SLA / escalation         | already open (§7.2 item 4); pick a policy before production, not before AAMP-2                                                                                                                                                                                            |
 
 ---
 
@@ -1580,12 +1582,20 @@ committed; the drift check reports `No difference detected.`; and
 `docs/runbooks/database-migrations.md` documents the forward-only rollback and
 recovery path. Full accounting: `docs/architecture.md` §8's AAMP-1 step 1 entry.
 
-**The next step is AAMP-1 step 2: real authentication** (§6 implementation task
-4 — `packages/auth`, the `apps/api` preHandler, and removing the body-supplied
-`userId` from every route). It is the standing production blocker, and §12.1
-puts it second precisely because every later acceptance test needs a real
-principal. Note §12.4's unresolved decision 4 (external IdP versus first-party
-sessions) blocks it until answered.
+**AAMP-1 step 2 completed 2026-07-26.** §12.4's decision 4 (external IdP versus
+first-party sessions) is resolved in favour of an external IdP: **Clerk for
+identity, PostgreSQL for authorization**, Organizations disabled — ADR-0006.
+`packages/auth` exists, `apps/api` authenticates every non-public request via a
+single default-deny `onRequest` hook before any authorization work, the
+body-supplied `userId` is removed from every route and from the dashboard, and
+the development identity picker is deleted. Authorization is unchanged: role,
+membership and permission are still read from PostgreSQL, and Clerk claims are
+never trusted for any of them. Full accounting: `docs/architecture.md` §8's
+AAMP-1 step 2 entry.
+
+**The next step is AAMP-1 step 3: the `SERIALIZABLE` budget transaction** (§6
+implementation task 5 — replacing `checkAndReserveBudget`'s M14 compensating
+guard now that live Postgres exists to run it against).
 
 ### 12.3 Dependency-ordered milestone list
 
@@ -1614,8 +1624,9 @@ Both orderings are valid; §12.1 is the recommendation.
    Blocks AAMP-3.
 3. **Cloud vendor / hosting** — deliberately unresolved in the repository. Blocks
    AAMP-1's production configuration, not its local baseline.
-4. **Authentication mechanism** — external IdP vs first-party sessions. Blocks
-   AAMP-1 step 2.
+4. ~~**Authentication mechanism** — external IdP vs first-party sessions.~~
+   **Resolved 2026-07-26 (ADR-0006): Clerk for identity, PostgreSQL for
+   authorization, Clerk Organizations disabled.**
 5. **Music/SFX/voiceover licensing source** — blocks the audio half of AAMP-4.
 6. **Named accountable reviewers** for the AAMP-5 rubric.
 7. **Approval SLA / escalation policy** — `docs/architecture.md` §7.2 item 4,

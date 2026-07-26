@@ -866,17 +866,16 @@ runtime` (the harness) and eleven of the fourteen `packages/agents`
       determinism-replay guarantees the real SDK's sandbox enforces — running
       the deferred `TestWorkflowEnvironment` suite once native-binary download
       is possible remains a real gap, not a redundant addition.
-    - **(b) No real caller authentication.** `packages/auth` is still
-      deferred (item 0). The three endpoints take a client-supplied `userId`
-      in the request body and look up its `Membership` row for role — this
-      makes the RBAC check itself real and tested (a spoofed _role_ is
-      impossible without a genuine `Membership` row), but does not verify the
-      caller _is_ that `userId`; anyone who knows/guesses a valid `userId`
-      can currently act as them. This is the same "no session layer exists
-      yet" gap item 0 already named, now concretely surfaced at a real
-      endpoint rather than staying abstract. Do not treat these endpoints as
-      secure against a hostile network caller until real session/token
-      verification lands.
+    - **(b) No real caller authentication — CLOSED by AAMP-1 step 2
+      (2026-07-26), see §8's entry and ADR-0006.** As written at M3: the
+      endpoints took a client-supplied `userId` in the request body and looked
+      up its `Membership` row for role, which made the RBAC check real and
+      tested (a spoofed _role_ was impossible without a genuine `Membership`
+      row) but did not verify the caller _was_ that `userId`. `packages/auth`
+      now exists, `apps/api` authenticates every non-public request against a
+      verified Clerk session token before any route handler runs, and `userId`
+      is gone from every request body and query string. Authorization is
+      unchanged and still resolved from PostgreSQL.
     - **(c) No `WorkflowRun` mapping table.** Rather than add one (a schema
       migration, out of scope this session), the workflow ID is the
       deterministic `campaign-production:${campaignId}` convention
@@ -1982,7 +1981,8 @@ down -v` against staging or production.
 
 **Unchanged by this step.** Everything §7.1 and the M14/audit entries record as
 a production blocker still stands except the migration one. In particular:
-there is still no real caller authentication (AAMP-1 task 4); no application
+there is still no real caller authentication (AAMP-1 task 4 — closed by the
+next entry, which is where the current state is recorded); no application
 process has yet been pointed at live Postgres, so `apps/api`, the Playwright
 suite and `packages/database`'s own Vitest suite all still run against the
 in-memory store and the dev fake server; Temporal, MinIO and ffmpeg are still
@@ -1990,6 +1990,84 @@ not live (AAMP-1 tasks 6–9); `checkAndReserveBudget` still uses M14's
 compensating guard rather than a `SERIALIZABLE` transaction (AAMP-1 task 5); and
 Final QA still performs no licensing check (§7.2 item 1). A migrated schema
 proves the schema is deployable — it does not prove anything runs against it.
+
+### AAMP-1 step 2 — verified Clerk authentication (2026-07-26)
+
+Closes §7.1 item 0 and item 11b, and `docs/aamp-architecture.md` §6 task 4. Full
+rationale and rejected alternatives: **ADR-0006**. This is the standing
+production blocker the whole system carried from M3 onward.
+
+**What changed.** `packages/auth` finally exists: `ClerkTokenVerifier` /
+`ClerkProfileDirectory` interfaces, a `VerifiedPrincipal`, `resolvePrincipal`,
+and one real `@clerk/backend` adapter behind them. `apps/api` installs a single
+instance-wide `onRequest` hook that resolves the principal **before** any route
+handler, Zod parse, repository read or `roleHasPermission` call. It is
+default-deny — `/health` and `/ready` are the entire public allowlist — so a
+route added later is authenticated without its author doing anything.
+`apps/dashboard` uses `@clerk/nextjs` with one `clerkMiddleware`, `ClerkProvider`
+and a `UserButton`; the development identity picker and its `localStorage`
+"session" are deleted.
+
+**Identity is verified; authorization did not move.** A verified token yields
+exactly one fact — the Clerk subject. Role, membership, workspace and permission
+are still read from PostgreSQL through the same repository boundary, in the same
+order (membership → permission → campaign ownership → child-resource
+association). `route-authorization.ts`'s registry and its both-directions
+conformance tests are untouched and still pass; the cross-workspace 404 behaviour
+is unchanged and re-proven. A test pins the property directly: with a
+byte-identical token, changing only `Membership.role` turns 403 into 201.
+
+**Schema.** `User.clerkUserId String? @unique`, migration
+`20260726062308_add_user_clerk_subject`. Nullable because a user may exist before
+first sign-in (seeded fixtures, invited members); unique because one subject
+resolving to two local users would split a person's permissions undetectably.
+`resolveUserForClerkSubject` is idempotent in three ordered steps — already
+mapped (writes nothing, calls Clerk not at all), invited-but-unlinked (links, so
+pre-granted `Membership` rows survive), genuinely new (creates; a concurrent
+duplicate loses the unique index and re-reads the winner). The migration was
+generated by `prisma migrate diff` rather than `migrate dev`, because
+`migrate dev` demands a TTY it cannot get here and the new unique constraint
+raises a confirmation prompt; it is still generator-produced, was applied with
+`migrate deploy`, and `migrate status` plus a drift check both report clean.
+
+**Client-supplied identity is removed, not ignored.** `userId` is gone from every
+body and query string in `apps/api` and from all 32 dashboard API calls. The body
+schemas that carried it are `.strict()`, so sending one is a 400 rather than a
+silent discard, and a source-level test asserts no route file reads `userId` from
+`request.body`/`request.query`. `GET /me` is new: it returns the verified
+caller's own `Membership` rows, which is where the dashboard's `workspaceId` now
+comes from — the browser cannot name a workspace it is not in.
+
+**Clerk Organizations are not used.** Tenancy stays `Workspace` + `Membership`.
+`VerifiedPrincipal` deliberately carries no workspace or organisation field, so
+no route can take tenant scope from a token. Tests scan `packages/auth`, every
+`apps/api` route file and the dashboard source tree for organisation claims and
+components.
+
+**Fails closed.** `apiEnvSchema` refuses to start without `CLERK_SECRET_KEY` in
+_any_ environment, rejects a `pk_*` publishable key pasted into the secret slot,
+and requires `CLERK_AUTHORIZED_PARTIES` when `NODE_ENV=production`. The
+dashboard's schema has no secret-key field at all, and a test asserts no
+dashboard source file mentions one — the structural half of "the secret cannot
+enter a client bundle".
+
+**Still not proven.** Authentication has not run against live Clerk from this
+environment: every test uses deterministic in-process fakes, with no credential
+and no network call. What is proven is the verification path, the subject-to-user
+mapping, provisioning idempotency under concurrency, and the 401/403/404 matrix.
+The Playwright suite runs in an `e2e-fake` mode where the browser presents a
+fixture token — not a bypass (the API verifies either way, the fake verifier is
+unreachable from any production import path and unselectable by configuration,
+and the mode is refused when `NEXT_PUBLIC_DEPLOY_ENV=production`), but it does
+mean the browser suite does not exercise Clerk itself.
+
+**Unchanged.** Every other production blocker stands: no application process has
+been pointed at live Postgres, so tests still run against the in-memory store;
+Temporal, MinIO and ffmpeg are not live (AAMP-1 tasks 6–9);
+`checkAndReserveBudget` still uses M14's compensating guard rather than a
+`SERIALIZABLE` transaction (task 5); there are no real Veo/Runway/ComfyUI
+adapters, no real export/render implementation, no ad-platform integration, and
+Final QA still performs no licensing check (§7.2 item 1).
 
 ---
 

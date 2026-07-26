@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { SessionGate } from '@/components/SessionGate';
+import { WorkspaceGate } from '@/components/WorkspaceGate';
 import { EmptyState, ErrorState, LoadingState, PageShell } from '@/components/PageShell';
 import {
   createApiClient,
@@ -10,7 +10,7 @@ import {
   type ShotGenerationShotView,
   type ShotGenerationView,
 } from '@/lib/api-client';
-import { useSession } from '@/lib/session';
+import { useWorkspace } from '@/lib/workspace';
 
 const POLL_INTERVAL_MS = 4000;
 
@@ -123,13 +123,13 @@ function ShotCard({ shot }: { shot: ShotGenerationShotView }) {
 }
 
 function ShotGeneration({ campaignId }: { campaignId: string }) {
-  const { session } = useSession();
+  const { workspace, getToken } = useWorkspace();
   const [data, setData] = useState<ShotGenerationView | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!session) return;
-    const client = createApiClient(session.workspaceId, session.userId);
+    if (!workspace) return;
+    const client = createApiClient(workspace.workspaceId, getToken);
     let cancelled = false;
 
     async function poll() {
@@ -151,7 +151,7 @@ function ShotGeneration({ campaignId }: { campaignId: string }) {
       clearInterval(interval);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session, campaignId]);
+  }, [workspace, getToken, campaignId]);
 
   if (error) return <ErrorState message={error} />;
   if (!data) return <LoadingState label="Loading shot generation progress…" />;
@@ -181,10 +181,10 @@ function ShotGeneration({ campaignId }: { campaignId: string }) {
 
 export default function ShotGenerationPage({ params }: { params: { campaignId: string } }) {
   return (
-    <SessionGate>
+    <WorkspaceGate>
       <PageShell title="Shot generation">
         <ShotGeneration campaignId={params.campaignId} />
       </PageShell>
-    </SessionGate>
+    </WorkspaceGate>
   );
 }

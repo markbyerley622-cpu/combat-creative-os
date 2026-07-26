@@ -19,6 +19,7 @@ import {
 import type { StorageProvider } from '@combat/providers';
 import { workflows } from '@combat/workflows';
 import type { CompositingDatabase } from './compositing-database';
+import { requirePrincipal } from './authentication';
 
 export interface CompositingRouteDeps {
   readonly db: CompositingDatabase;
@@ -28,8 +29,6 @@ export interface CompositingRouteDeps {
 }
 
 const BASE = '/workspaces/:workspaceId/campaigns/:campaignId/compositing';
-const UserIdQuerySchema = z.object({ userId: z.string().uuid() });
-
 async function authorize(
   db: CompositingDatabase,
   workspaceId: string,
@@ -69,10 +68,7 @@ export function registerCompositingRoutes(
     BASE,
     async (request, reply) => {
       const { workspaceId, campaignId } = request.params;
-      const parsed = UserIdQuerySchema.safeParse(request.query);
-      if (!parsed.success)
-        return reply.status(400).send({ error: 'INVALID_QUERY', issues: parsed.error.issues });
-      const auth = await authorize(deps.db, workspaceId, parsed.data.userId, null);
+      const auth = await authorize(deps.db, workspaceId, requirePrincipal(request).userId, null);
       if (!auth.ok) return reply.status(auth.status).send(auth.body);
 
       const campaign = await getCampaign(deps.db, workspaceId, campaignId);
@@ -169,10 +165,7 @@ export function registerCompositingRoutes(
     `${BASE}/preview`,
     async (request, reply) => {
       const { workspaceId, campaignId } = request.params;
-      const parsed = UserIdQuerySchema.safeParse(request.query);
-      if (!parsed.success)
-        return reply.status(400).send({ error: 'INVALID_QUERY', issues: parsed.error.issues });
-      const auth = await authorize(deps.db, workspaceId, parsed.data.userId, null);
+      const auth = await authorize(deps.db, workspaceId, requirePrincipal(request).userId, null);
       if (!auth.ok) return reply.status(auth.status).send(auth.body);
       const campaign = await getCampaign(deps.db, workspaceId, campaignId);
       if (!campaign)
@@ -205,10 +198,15 @@ export function registerCompositingRoutes(
     `${BASE}/cancel`,
     async (request, reply) => {
       const { workspaceId, campaignId } = request.params;
-      const body = z.object({ userId: z.string().uuid() }).safeParse(request.body);
+      const body = z.object({}).strict().safeParse(request.body);
       if (!body.success)
         return reply.status(400).send({ error: 'INVALID_BODY', issues: body.error.issues });
-      const auth = await authorize(deps.db, workspaceId, body.data.userId, 'TRIGGER_GENERATION');
+      const auth = await authorize(
+        deps.db,
+        workspaceId,
+        requirePrincipal(request).userId,
+        'TRIGGER_GENERATION',
+      );
       if (!auth.ok) return reply.status(auth.status).send(auth.body);
       const campaign = await getCampaign(deps.db, workspaceId, campaignId);
       if (!campaign)

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { SessionGate } from '@/components/SessionGate';
+import { WorkspaceGate } from '@/components/WorkspaceGate';
 import { EmptyState, ErrorState, LoadingState, PageShell } from '@/components/PageShell';
 import {
   createApiClient,
@@ -9,7 +9,7 @@ import {
   type SoundCueView,
   type SoundDesignView,
 } from '@/lib/api-client';
-import { useSession } from '@/lib/session';
+import { useWorkspace } from '@/lib/workspace';
 
 const POLL_INTERVAL_MS = 4000;
 
@@ -48,13 +48,13 @@ function CueRow({ cue }: { cue: SoundCueView }) {
 }
 
 function SoundDesign({ campaignId }: { campaignId: string }) {
-  const { session } = useSession();
+  const { workspace, getToken } = useWorkspace();
   const [data, setData] = useState<SoundDesignView | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function load() {
-    if (!session) return;
-    const client = createApiClient(session.workspaceId, session.userId);
+    if (!workspace) return;
+    const client = createApiClient(workspace.workspaceId, getToken);
     try {
       setData(await client.getSoundDesign(campaignId));
       setError(null);
@@ -68,7 +68,7 @@ function SoundDesign({ campaignId }: { campaignId: string }) {
     const id = setInterval(load, POLL_INTERVAL_MS);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session, campaignId]);
+  }, [workspace, getToken, campaignId]);
 
   if (error) return <ErrorState message={error} />;
   if (!data) return <LoadingState label="Loading sound design…" />;
@@ -138,10 +138,10 @@ function SoundDesign({ campaignId }: { campaignId: string }) {
 
 export default function SoundDesignPage({ params }: { params: { campaignId: string } }) {
   return (
-    <SessionGate>
+    <WorkspaceGate>
       <PageShell title="Sound design">
         <SoundDesign campaignId={params.campaignId} />
       </PageShell>
-    </SessionGate>
+    </WorkspaceGate>
   );
 }

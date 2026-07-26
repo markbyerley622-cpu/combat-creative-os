@@ -20,6 +20,7 @@ import {
 } from '@combat/database';
 import type { PerformanceDatabase } from './performance-database';
 import { assertBelongsToCampaign } from './route-authorization';
+import { requirePrincipal } from './authentication';
 
 export interface PerformanceRouteDeps {
   readonly db: PerformanceDatabase;
@@ -27,8 +28,6 @@ export interface PerformanceRouteDeps {
 
 const CAMPAIGN_BASE = '/workspaces/:workspaceId/campaigns/:campaignId/performance';
 const LEARNINGS_BASE = '/workspaces/:workspaceId/learnings';
-const UserIdQuerySchema = z.object({ userId: z.string().uuid() });
-
 const RawMetricsSchema = z.object({
   impressions: z.number().int().nonnegative(),
   reach: z.number().int().nonnegative().optional(),
@@ -38,32 +37,32 @@ const RawMetricsSchema = z.object({
   spendCents: z.number().int().nonnegative(),
 });
 
-const IngestBodySchema = z.object({
-  userId: z.string().uuid(),
-  /** FIXTURE or MANUAL_ENTRY only — M13 has no platform connector. */
-  source: PerformanceSourceSchema,
-  fixtureRef: z.string().min(1).optional(),
-  observations: z
-    .array(
-      z.object({
-        platform: DeliveryPlatformSchema,
-        externalPostId: z.string().min(1),
-        externalAccountId: z.string().min(1).optional(),
-        creativeVariantId: z.string().uuid().optional(),
-        variantAssetId: z.string().uuid().optional(),
-        durationSeconds: z.number().int().positive().optional(),
-        periodStart: z.string().datetime(),
-        periodEnd: z.string().datetime(),
-        raw: RawMetricsSchema,
-      }),
-    )
-    .min(1),
-});
+/** AAMP-1 step 2: ingestion is attributed to the verified principal; `.strict()` rejects a claimed one. */
+const IngestBodySchema = z
+  .object({
+    /** FIXTURE or MANUAL_ENTRY only — M13 has no platform connector. */
+    source: PerformanceSourceSchema,
+    fixtureRef: z.string().min(1).optional(),
+    observations: z
+      .array(
+        z.object({
+          platform: DeliveryPlatformSchema,
+          externalPostId: z.string().min(1),
+          externalAccountId: z.string().min(1).optional(),
+          creativeVariantId: z.string().uuid().optional(),
+          variantAssetId: z.string().uuid().optional(),
+          durationSeconds: z.number().int().positive().optional(),
+          periodStart: z.string().datetime(),
+          periodEnd: z.string().datetime(),
+          raw: RawMetricsSchema,
+        }),
+      )
+      .min(1),
+  })
+  .strict();
 
-const ReviewBodySchema = z.object({
-  userId: z.string().uuid(),
-  decision: z.enum(['APPROVED', 'REJECTED']),
-});
+/** AAMP-1 step 2: the reviewer is the verified principal; `.strict()` rejects a claimed one. */
+const ReviewBodySchema = z.object({ decision: z.enum(['APPROVED', 'REJECTED']) }).strict();
 
 async function authorize(
   db: PerformanceDatabase,
@@ -123,7 +122,12 @@ export function registerPerformanceRoutes(
       // Performance data is reporting data — gated on VIEW_REPORTING's
       // write-side counterpart, MANAGE_CAMPAIGNS, so an ANALYST can read
       // history but not fabricate it.
-      const auth = await authorize(deps.db, workspaceId, parsed.data.userId, 'MANAGE_CAMPAIGNS');
+      const auth = await authorize(
+        deps.db,
+        workspaceId,
+        requirePrincipal(request).userId,
+        'MANAGE_CAMPAIGNS',
+      );
       if (!auth.ok) return reply.status(auth.status).send(auth.body);
 
       const campaign = await getCampaign(deps.db, workspaceId, campaignId);
@@ -178,7 +182,7 @@ export function registerPerformanceRoutes(
               periodStart: new Date(entry.periodStart),
               periodEnd: new Date(entry.periodEnd),
               raw: entry.raw,
-              ingestedByUserId: parsed.data.userId,
+              ingestedByUserId: requirePrincipal(request).userId,
               fixtureRef: parsed.data.fixtureRef,
             },
           );
@@ -220,11 +224,12 @@ export function registerPerformanceRoutes(
     CAMPAIGN_BASE,
     async (request, reply) => {
       const { workspaceId, campaignId } = request.params;
-      const parsed = UserIdQuerySchema.safeParse(request.query);
-      if (!parsed.success) {
-        return reply.status(400).send({ error: 'INVALID_QUERY', issues: parsed.error.issues });
-      }
-      const auth = await authorize(deps.db, workspaceId, parsed.data.userId, 'VIEW_REPORTING');
+      const auth = await authorize(
+        deps.db,
+        workspaceId,
+        requirePrincipal(request).userId,
+        'VIEW_REPORTING',
+      );
       if (!auth.ok) return reply.status(auth.status).send(auth.body);
 
       const campaign = await getCampaign(deps.db, workspaceId, campaignId);
@@ -265,11 +270,12 @@ export function registerPerformanceRoutes(
     LEARNINGS_BASE,
     async (request, reply) => {
       const { workspaceId } = request.params;
-      const parsed = UserIdQuerySchema.safeParse(request.query);
-      if (!parsed.success) {
-        return reply.status(400).send({ error: 'INVALID_QUERY', issues: parsed.error.issues });
-      }
-      const auth = await authorize(deps.db, workspaceId, parsed.data.userId, 'VIEW_REPORTING');
+      const auth = await authorize(
+        deps.db,
+        workspaceId,
+        requirePrincipal(request).userId,
+        'VIEW_REPORTING',
+      );
       if (!auth.ok) return reply.status(auth.status).send(auth.body);
 
       const records = await listLearningRecords(deps.db, workspaceId);
@@ -310,13 +316,18 @@ export function registerPerformanceRoutes(
       if (!parsed.success) {
         return reply.status(400).send({ error: 'INVALID_BODY', issues: parsed.error.issues });
       }
-      const auth = await authorize(deps.db, workspaceId, parsed.data.userId, 'APPROVE_CONCEPT');
+      const auth = await authorize(
+        deps.db,
+        workspaceId,
+        requirePrincipal(request).userId,
+        'APPROVE_CONCEPT',
+      );
       if (!auth.ok) return reply.status(auth.status).send(auth.body);
 
       try {
         const record = await reviewLearningRecord(deps.db, workspaceId, learningId, {
           status: parsed.data.decision,
-          reviewedByUserId: parsed.data.userId,
+          reviewedByUserId: requirePrincipal(request).userId,
         });
         return reply
           .status(200)

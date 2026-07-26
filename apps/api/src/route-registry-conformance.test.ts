@@ -28,6 +28,7 @@ import {
   parseRouteTree,
   routeKey,
 } from './route-inventory';
+import { bearerFor, permissiveTestAuthentication } from './test-helpers/authenticated-caller';
 
 /**
  * Post-M14 audit finding C-3 — registry conformance made real, plus a
@@ -73,9 +74,13 @@ function buildHarness(store: InMemoryCampaignStore) {
   const signal = spy();
   const start = spy();
   const storageProvider = new MockStorageProvider();
+  const auth = permissiveTestAuthentication();
   const app = buildServer({
     logger: silentLogger,
     prisma: fakePrisma(),
+    tokenVerifier: auth.tokenVerifier,
+    profileDirectory: auth.profileDirectory,
+    userDb: auth.userDb,
     approvalDb: store,
     campaignDb: store,
     assetDb: store,
@@ -427,21 +432,21 @@ async function seedFor(
   let revision = set.revision;
   if (route.path.endsWith('/shot-review/approve')) {
     const result = await setShotSelectionCandidate(store, workspaceId, {
+      userId,
       setId: set.id,
       shotId: shot.id,
       candidateId: candidate.id,
       expectedRevision: revision,
-      userId,
     });
     if (result.ok) revision = result.set.revision;
   }
   if (route.path.endsWith('/shot-review/request-regeneration')) {
     const result = await rejectShotSelection(store, workspaceId, {
+      userId,
       setId: set.id,
       shotId: shot.id,
       expectedRevision: revision,
       regenerationFeedback: 'try again',
-      userId,
     });
     if (result.ok) revision = result.set.revision;
   }
@@ -480,35 +485,32 @@ async function seedFor(
 
 /** A well-formed body for `path`, using the seeded resource ids. */
 function bodyFor(path: string, ctx: ProbeContext): Record<string, unknown> {
-  const { userId, setId, shotId, candidateId, revision } = ctx;
-  if (path.endsWith('/approvals/concept')) return { userId, decision: 'APPROVED' };
-  if (path.endsWith('/approvals/final')) return { userId, decision: 'APPROVED' };
-  if (path.endsWith('/campaigns'))
-    return { userId, name: 'Probe campaign', idempotencyKey: randomUUID() };
-  if (path.endsWith('/brief/draft')) return { userId, content: {} };
-  if (path.endsWith('/brief/submit')) return { userId, content: BRIEF_CONTENT };
-  if (path.endsWith('/workflow/start')) return { userId };
-  if (path.endsWith('/assets/request-upload')) return { userId, ...UPLOAD_BODY };
+  const { setId, shotId, candidateId, revision } = ctx;
+  if (path.endsWith('/approvals/concept')) return { decision: 'APPROVED' };
+  if (path.endsWith('/approvals/final')) return { decision: 'APPROVED' };
+  if (path.endsWith('/campaigns')) return { name: 'Probe campaign', idempotencyKey: randomUUID() };
+  if (path.endsWith('/brief/draft')) return { content: {} };
+  if (path.endsWith('/brief/submit')) return { content: BRIEF_CONTENT };
+  if (path.endsWith('/workflow/start')) return {};
+  if (path.endsWith('/assets/request-upload')) return { ...UPLOAD_BODY };
   if (path.endsWith('/assets/confirm-upload'))
     return {
-      userId,
       uploadId: ctx.uploadId ?? randomUUID(),
       ...UPLOAD_BODY,
       sizeBytes: Buffer.byteLength('probe-bytes'),
     };
-  if (path.endsWith('/shot-review/draft')) return { userId };
+  if (path.endsWith('/shot-review/draft')) return {};
   if (path.endsWith('/shot-review/select'))
-    return { userId, setId, shotId, candidateId, expectedRevision: revision };
+    return { setId, shotId, candidateId, expectedRevision: revision };
   if (path.endsWith('/shot-review/reject-shot'))
-    return { userId, setId, shotId, expectedRevision: revision, regenerationFeedback: 'try again' };
-  if (path.endsWith('/shot-review/comment')) return { userId, body: 'a comment' };
-  if (path.endsWith('/shot-review/approve')) return { userId, setId, expectedRevision: revision };
-  if (path.endsWith('/shot-review/request-regeneration')) return { userId, setId };
-  if (path.endsWith('/compositing/cancel')) return { userId };
-  if (path.endsWith('/variants/cancel')) return { userId };
+    return { setId, shotId, expectedRevision: revision, regenerationFeedback: 'try again' };
+  if (path.endsWith('/shot-review/comment')) return { body: 'a comment' };
+  if (path.endsWith('/shot-review/approve')) return { setId, expectedRevision: revision };
+  if (path.endsWith('/shot-review/request-regeneration')) return { setId };
+  if (path.endsWith('/compositing/cancel')) return {};
+  if (path.endsWith('/variants/cancel')) return {};
   if (path.endsWith('/performance/observations'))
     return {
-      userId,
       source: 'FIXTURE',
       observations: [
         {
@@ -520,7 +522,7 @@ function bodyFor(path: string, ctx: ProbeContext): Record<string, unknown> {
         },
       ],
     };
-  if (path.endsWith('/learnings/:learningId/review')) return { userId, decision: 'APPROVED' };
+  if (path.endsWith('/learnings/:learningId/review')) return { decision: 'APPROVED' };
   throw new Error(`no probe body defined for ${path}`);
 }
 
@@ -569,7 +571,8 @@ describe('C-3 — a caller holding the audited permission is accepted', () => {
         const requested = await app.inject({
           method: 'POST',
           url: urlFor('/workspaces/:workspaceId/campaigns/:campaignId/assets/request-upload', ctx),
-          payload: { userId: ctx.userId, ...UPLOAD_BODY },
+          headers: bearerFor(ctx.userId),
+          payload: UPLOAD_BODY,
         });
         const { uploadId, uploadUrl } = requested.json();
         ctx.uploadId = uploadId as string;
@@ -583,6 +586,7 @@ describe('C-3 — a caller holding the audited permission is accepted', () => {
       const response = await app.inject({
         method: 'POST',
         url: urlFor(route.path, ctx),
+        headers: bearerFor(ctx.userId),
         payload: bodyFor(route.path, ctx),
       });
 
@@ -608,6 +612,7 @@ describe('C-3 — a caller lacking only the audited permission is refused', () =
       const response = await app.inject({
         method: 'POST',
         url: urlFor(route.path, ctx),
+        headers: bearerFor(ctx.userId),
         payload: bodyFor(route.path, ctx),
       });
 

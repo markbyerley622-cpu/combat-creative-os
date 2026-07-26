@@ -4,6 +4,8 @@ import Fastify from 'fastify';
 import { InMemoryCampaignStore, addMembership } from '@combat/database';
 import { MockStorageProvider } from '@combat/providers';
 import { registerAssetRoutes, type AssetRouteLimits } from './asset-routes';
+import { registerAuthentication } from './authentication';
+import { bearerFor, permissiveTestAuthentication } from './test-helpers/authenticated-caller';
 
 const LIMITS: AssetRouteLimits = {
   maxUploadBytes: 1000,
@@ -15,6 +17,10 @@ function buildApp() {
   const store = new InMemoryCampaignStore();
   const storage = new MockStorageProvider();
   const app = Fastify();
+  // AAMP-1 step 2: these suites exercise authorization, so the caller arrives
+  // authenticated exactly as a production caller does — a verified bearer
+  // token, never a request field. See test-helpers/authenticated-caller.ts.
+  registerAuthentication(app, permissiveTestAuthentication().hookDeps);
   registerAssetRoutes(app, { db: store, storageProvider: storage, limits: LIMITS });
   return { app, store, storage };
 }
@@ -46,8 +52,8 @@ async function requestAndUpload(
   const requestUpload = await app.inject({
     method: 'POST',
     url: `/workspaces/${params.workspaceId}/campaigns/${params.campaignId}/assets/request-upload`,
+    headers: bearerFor(params.userId),
     payload: {
-      userId: params.userId,
       originalFilename: filename,
       mimeType: 'image/png',
       sizeBytes: Buffer.byteLength(body),
@@ -65,12 +71,8 @@ async function requestAndUpload(
   return { uploadId, filename, body };
 }
 
-function confirmUploadPayload(
-  userId: string,
-  fixture: { uploadId: string; filename: string; body: string },
-) {
+function confirmUploadPayload(fixture: { uploadId: string; filename: string; body: string }) {
   return {
-    userId,
     uploadId: fixture.uploadId,
     originalFilename: fixture.filename,
     mimeType: 'image/png',
@@ -95,7 +97,8 @@ async function uploadAndConfirm(
   return app.inject({
     method: 'POST',
     url: `/workspaces/${params.workspaceId}/campaigns/${params.campaignId}/assets/confirm-upload`,
-    payload: confirmUploadPayload(params.userId, fixture),
+    headers: bearerFor(params.userId),
+    payload: confirmUploadPayload(fixture),
   });
 }
 
@@ -109,8 +112,8 @@ describe('POST .../assets/request-upload', () => {
     const response = await app.inject({
       method: 'POST',
       url: `/workspaces/${workspaceId}/campaigns/${campaign.id}/assets/request-upload`,
+      headers: bearerFor(userId),
       payload: {
-        userId,
         originalFilename: 'logo.png',
         mimeType: 'image/png',
         sizeBytes: 100,
@@ -134,8 +137,8 @@ describe('POST .../assets/request-upload', () => {
     const response = await app.inject({
       method: 'POST',
       url: `/workspaces/${workspaceId}/campaigns/${campaign.id}/assets/request-upload`,
+      headers: bearerFor(userId),
       payload: {
-        userId,
         originalFilename: 'evil.exe',
         mimeType: 'application/x-msdownload',
         sizeBytes: 100,
@@ -156,8 +159,8 @@ describe('POST .../assets/request-upload', () => {
     const response = await app.inject({
       method: 'POST',
       url: `/workspaces/${workspaceId}/campaigns/${campaign.id}/assets/request-upload`,
+      headers: bearerFor(userId),
       payload: {
-        userId,
         originalFilename: 'huge.png',
         mimeType: 'image/png',
         sizeBytes: LIMITS.maxUploadBytes + 1,
@@ -179,8 +182,8 @@ describe('POST .../assets/request-upload', () => {
     const response = await app.inject({
       method: 'POST',
       url: `/workspaces/${workspaceId}/campaigns/${campaign.id}/assets/request-upload`,
+      headers: bearerFor(userId),
       payload: {
-        userId,
         originalFilename: 'logo.png',
         mimeType: 'image/png',
         sizeBytes: 100,
@@ -200,8 +203,8 @@ describe('POST .../assets/request-upload', () => {
     const response = await app.inject({
       method: 'POST',
       url: `/workspaces/${workspaceId}/campaigns/${campaign.id}/assets/request-upload`,
+      headers: bearerFor(userId),
       payload: {
-        userId,
         originalFilename: 'logo.png',
         mimeType: 'image/png',
         sizeBytes: 100,
@@ -220,8 +223,8 @@ describe('POST .../assets/request-upload', () => {
     const response = await app.inject({
       method: 'POST',
       url: `/workspaces/${workspaceId}/campaigns/${campaign.id}/assets/request-upload`,
+      headers: bearerFor(randomUUID()),
       payload: {
-        userId: randomUUID(),
         originalFilename: 'logo.png',
         mimeType: 'image/png',
         sizeBytes: 100,
@@ -268,12 +271,14 @@ describe('POST .../assets/confirm-upload', () => {
     const first = await app.inject({
       method: 'POST',
       url: confirmUrl,
-      payload: confirmUploadPayload(userId, fixture),
+      headers: bearerFor(userId),
+      payload: confirmUploadPayload(fixture),
     });
     const second = await app.inject({
       method: 'POST',
       url: confirmUrl,
-      payload: confirmUploadPayload(userId, fixture),
+      headers: bearerFor(userId),
+      payload: confirmUploadPayload(fixture),
     });
 
     expect(first.statusCode).toBe(201);
@@ -293,8 +298,8 @@ describe('POST .../assets/confirm-upload', () => {
     const response = await app.inject({
       method: 'POST',
       url: `/workspaces/${workspaceId}/campaigns/${campaign.id}/assets/confirm-upload`,
+      headers: bearerFor(userId),
       payload: {
-        userId,
         uploadId: randomUUID(),
         originalFilename: 'logo.png',
         mimeType: 'image/png',
@@ -316,8 +321,8 @@ describe('POST .../assets/confirm-upload', () => {
     const response = await app.inject({
       method: 'POST',
       url: `/workspaces/${workspaceId}/campaigns/${campaign.id}/assets/confirm-upload`,
+      headers: bearerFor(userId),
       payload: {
-        userId,
         uploadId: randomUUID(),
         originalFilename: 'logo.png',
         mimeType: 'image/png',
@@ -348,7 +353,8 @@ describe('GET .../assets/:assetId', () => {
 
     const response = await app.inject({
       method: 'GET',
-      url: `/workspaces/${workspaceId}/campaigns/${campaign.id}/assets/${assetId}?userId=${readerId}`,
+      url: `/workspaces/${workspaceId}/campaigns/${campaign.id}/assets/${assetId}`,
+      headers: bearerFor(readerId),
     });
 
     expect(response.statusCode).toBe(200);
@@ -372,7 +378,8 @@ describe('GET .../assets/:assetId', () => {
 
     const response = await app.inject({
       method: 'GET',
-      url: `/workspaces/${workspaceId}/campaigns/${campaignB.id}/assets/${assetId}?userId=${userId}`,
+      url: `/workspaces/${workspaceId}/campaigns/${campaignB.id}/assets/${assetId}`,
+      headers: bearerFor(userId),
     });
 
     expect(response.statusCode).toBe(404);
@@ -395,7 +402,8 @@ describe('GET .../assets/:assetId', () => {
 
     const response = await app.inject({
       method: 'GET',
-      url: `/workspaces/${otherWorkspaceId}/campaigns/${campaign.id}/assets/${assetId}?userId=${otherUserId}`,
+      url: `/workspaces/${otherWorkspaceId}/campaigns/${campaign.id}/assets/${assetId}`,
+      headers: bearerFor(otherUserId),
     });
 
     expect(response.statusCode).toBe(404);
@@ -418,7 +426,8 @@ describe('GET .../assets/:assetId/download-url', () => {
     const before = Date.now();
     const response = await app.inject({
       method: 'GET',
-      url: `/workspaces/${workspaceId}/campaigns/${campaign.id}/assets/${assetId}/download-url?userId=${userId}`,
+      url: `/workspaces/${workspaceId}/campaigns/${campaign.id}/assets/${assetId}/download-url`,
+      headers: bearerFor(userId),
     });
 
     expect(response.statusCode).toBe(200);
@@ -443,7 +452,8 @@ describe('GET .../assets/:assetId/download-url', () => {
 
     const response = await app.inject({
       method: 'GET',
-      url: `/workspaces/${workspaceId}/campaigns/${campaign.id}/assets/${assetId}/download-url?userId=${randomUUID()}`,
+      url: `/workspaces/${workspaceId}/campaigns/${campaign.id}/assets/${assetId}/download-url`,
+      headers: bearerFor(randomUUID()),
     });
 
     expect(response.statusCode).toBe(403);

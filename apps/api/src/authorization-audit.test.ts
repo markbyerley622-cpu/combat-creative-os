@@ -15,6 +15,7 @@ import type { WorkflowClient } from '@temporalio/client';
 import { buildServer } from './server';
 import { MUTATING_ROUTES } from './route-authorization';
 import { diffRouteSets, listRegisteredMutatingRoutes } from './route-inventory';
+import { bearerFor, permissiveTestAuthentication } from './test-helpers/authenticated-caller';
 
 /**
  * M14 — the authorization audit, executed rather than asserted in prose.
@@ -61,9 +62,13 @@ function buildHarness(store: InMemoryCampaignStore): Harness {
     getHandle: () => ({ signal, query: async () => undefined }),
   } as unknown as WorkflowClient;
 
+  const auth = permissiveTestAuthentication();
   const app = buildServer({
     logger: silentLogger,
     prisma: fakePrisma(),
+    tokenVerifier: auth.tokenVerifier,
+    profileDirectory: auth.profileDirectory,
+    userDb: auth.userDb,
     approvalDb: store,
     campaignDb: store,
     assetDb: store,
@@ -164,34 +169,28 @@ const UPLOAD_BODY = {
 };
 
 /** A representative body for each mutating path, with `:params` substituted. */
-function bodyFor(
-  path: string,
-  ctx: { userId: string; setId: string; shotId: string },
-): Record<string, unknown> {
-  const { userId, setId, shotId } = ctx;
-  if (path.endsWith('/approvals/concept')) return { userId, decision: 'APPROVED' };
-  if (path.endsWith('/approvals/final')) return { userId, decision: 'APPROVED' };
-  if (path.endsWith('/campaigns'))
-    return { userId, name: 'Probe campaign', idempotencyKey: randomUUID() };
-  if (path.endsWith('/brief/draft')) return { userId, content: {} };
-  if (path.endsWith('/brief/submit')) return { userId, content: BRIEF_CONTENT };
-  if (path.endsWith('/workflow/start')) return { userId };
-  if (path.endsWith('/assets/request-upload')) return { userId, ...UPLOAD_BODY };
-  if (path.endsWith('/assets/confirm-upload'))
-    return { userId, uploadId: randomUUID(), ...UPLOAD_BODY };
-  if (path.endsWith('/shot-review/draft')) return { userId };
+function bodyFor(path: string, ctx: { setId: string; shotId: string }): Record<string, unknown> {
+  const { setId, shotId } = ctx;
+  if (path.endsWith('/approvals/concept')) return { decision: 'APPROVED' };
+  if (path.endsWith('/approvals/final')) return { decision: 'APPROVED' };
+  if (path.endsWith('/campaigns')) return { name: 'Probe campaign', idempotencyKey: randomUUID() };
+  if (path.endsWith('/brief/draft')) return { content: {} };
+  if (path.endsWith('/brief/submit')) return { content: BRIEF_CONTENT };
+  if (path.endsWith('/workflow/start')) return {};
+  if (path.endsWith('/assets/request-upload')) return { ...UPLOAD_BODY };
+  if (path.endsWith('/assets/confirm-upload')) return { uploadId: randomUUID(), ...UPLOAD_BODY };
+  if (path.endsWith('/shot-review/draft')) return {};
   if (path.endsWith('/shot-review/select'))
-    return { userId, setId, shotId, candidateId: randomUUID(), expectedRevision: 0 };
+    return { setId, shotId, candidateId: randomUUID(), expectedRevision: 0 };
   if (path.endsWith('/shot-review/reject-shot'))
-    return { userId, setId, shotId, expectedRevision: 0, regenerationFeedback: 'try again' };
-  if (path.endsWith('/shot-review/comment')) return { userId, body: 'a comment' };
-  if (path.endsWith('/shot-review/approve')) return { userId, setId, expectedRevision: 0 };
-  if (path.endsWith('/shot-review/request-regeneration')) return { userId, setId };
-  if (path.endsWith('/compositing/cancel')) return { userId };
-  if (path.endsWith('/variants/cancel')) return { userId };
+    return { setId, shotId, expectedRevision: 0, regenerationFeedback: 'try again' };
+  if (path.endsWith('/shot-review/comment')) return { body: 'a comment' };
+  if (path.endsWith('/shot-review/approve')) return { setId, expectedRevision: 0 };
+  if (path.endsWith('/shot-review/request-regeneration')) return { setId };
+  if (path.endsWith('/compositing/cancel')) return {};
+  if (path.endsWith('/variants/cancel')) return {};
   if (path.endsWith('/performance/observations'))
     return {
-      userId,
       source: 'FIXTURE',
       observations: [
         {
@@ -203,7 +202,7 @@ function bodyFor(
         },
       ],
     };
-  if (path.endsWith('/learnings/:learningId/review')) return { userId, decision: 'APPROVED' };
+  if (path.endsWith('/learnings/:learningId/review')) return { decision: 'APPROVED' };
   throw new Error(`no probe body defined for ${path}`);
 }
 
@@ -309,7 +308,8 @@ describe('M14 — adversarial: a caller with no membership mutates nothing', () 
       const response = await app.inject({
         method: 'POST',
         url: urlFor(route.path, { ...seeded, learningId: randomUUID() }),
-        payload: bodyFor(route.path, { ...seeded, userId: stranger }),
+        headers: bearerFor(stranger),
+        payload: bodyFor(route.path, seeded),
       });
 
       expect(response.statusCode).toBe(403);
@@ -335,6 +335,7 @@ describe('M14 — adversarial: an under-privileged member mutates nothing', () =
     const response = await app.inject({
       method: 'POST',
       url: urlFor(route.path, { ...seeded, learningId: randomUUID() }),
+      headers: bearerFor(seeded.userId),
       payload: bodyFor(route.path, seeded),
     });
 
@@ -363,7 +364,8 @@ describe('M14 — adversarial: cross-workspace access', () => {
         campaignId: b.campaignId,
         learningId: randomUUID(),
       }),
-      payload: bodyFor(route.path, { ...a, userId: a.userId }),
+      headers: bearerFor(a.userId),
+      payload: bodyFor(route.path, a),
     });
 
     // 404, never 403 — a campaign in another tenant is indistinguishable
@@ -384,7 +386,8 @@ describe('M14 — adversarial: cross-workspace access', () => {
     const response = await app.inject({
       method: 'POST',
       url: `/workspaces/${b.workspaceId}/campaigns/${b.campaignId}/approvals/concept`,
-      payload: { userId: a.userId, decision: 'APPROVED' },
+      headers: bearerFor(a.userId),
+      payload: { decision: 'APPROVED' },
     });
 
     expect(response.statusCode).toBe(403);
@@ -426,7 +429,8 @@ describe('M14 — adversarial: cross-workspace access', () => {
     const response = await app.inject({
       method: 'POST',
       url: `/workspaces/${a.workspaceId}/learnings/${target.id}/review`,
-      payload: { userId: a.userId, decision: 'APPROVED' },
+      headers: bearerFor(a.userId),
+      payload: { decision: 'APPROVED' },
     });
 
     expect(response.statusCode).toBe(404);
@@ -443,8 +447,7 @@ describe('M14 — adversarial: intra-workspace resource association', () => {
   it.each([
     [
       '/shot-review/select',
-      (setId: string, shotId: string, userId: string) => ({
-        userId,
+      (setId: string, shotId: string) => ({
         setId,
         shotId,
         candidateId: randomUUID(),
@@ -453,22 +456,15 @@ describe('M14 — adversarial: intra-workspace resource association', () => {
     ],
     [
       '/shot-review/reject-shot',
-      (setId: string, shotId: string, userId: string) => ({
-        userId,
+      (setId: string, shotId: string) => ({
         setId,
         shotId,
         expectedRevision: 0,
         regenerationFeedback: 'try again',
       }),
     ],
-    [
-      '/shot-review/approve',
-      (setId: string, _shotId: string, userId: string) => ({ userId, setId, expectedRevision: 0 }),
-    ],
-    [
-      '/shot-review/request-regeneration',
-      (setId: string, _shotId: string, userId: string) => ({ userId, setId }),
-    ],
+    ['/shot-review/approve', (setId: string, _shotId: string) => ({ setId, expectedRevision: 0 })],
+    ['/shot-review/request-regeneration', (setId: string, _shotId: string) => ({ setId })],
   ] as const)(
     'POST %s rejects a setId belonging to a different campaign in the same workspace',
     async (suffix, makeBody) => {
@@ -487,7 +483,8 @@ describe('M14 — adversarial: intra-workspace resource association', () => {
       const response = await app.inject({
         method: 'POST',
         url: `/workspaces/${victim.workspaceId}/campaigns/${otherCampaignId}${suffix}`,
-        payload: makeBody(victim.setId, victim.shotId, victim.userId),
+        headers: bearerFor(victim.userId),
+        payload: makeBody(victim.setId, victim.shotId),
       });
 
       expect(response.statusCode).toBe(404);
@@ -522,8 +519,8 @@ describe('M14 — adversarial: intra-workspace resource association', () => {
     const response = await app.inject({
       method: 'POST',
       url: `/workspaces/${victim.workspaceId}/campaigns/${otherCampaignId}/performance/observations`,
+      headers: bearerFor(victim.userId),
       payload: {
-        userId: victim.userId,
         source: 'FIXTURE',
         observations: [
           {
@@ -555,7 +552,8 @@ describe('M14 — adversarial: malformed input never reaches persistence', () =>
       const response = await app.inject({
         method: 'POST',
         url: urlFor(route.path, { ...seeded, learningId: randomUUID() }),
-        payload: { userId: 'not-a-uuid', garbage: true },
+        headers: bearerFor(seeded.userId),
+        payload: { garbage: true },
       });
 
       expect(response.statusCode).toBe(400);

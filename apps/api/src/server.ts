@@ -1,7 +1,7 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import type { Logger } from '@combat/observability';
-import { createPrismaClient, type PrismaClient } from '@combat/database';
+import { createPrismaClient, type PrismaClient, type UserDataSource } from '@combat/database';
 import {
   createMinioStorageProvider,
   MockReviewProvider,
@@ -34,6 +34,10 @@ import { registerVariantRoutes } from './variant-routes';
 import { createPerformanceDatabase, type PerformanceDatabase } from './performance-database';
 import { registerPerformanceRoutes } from './performance-routes';
 import { createWorkflowClient, type TemporalEnv } from './temporal-client';
+import { registerAuthentication } from './authentication';
+import { registerMeRoutes } from './me-routes';
+import { createUserDatabase } from './user-database';
+import type { ClerkProfileDirectory, ClerkTokenVerifier } from '@combat/auth';
 
 /**
  * MinIO's own documented local-dev defaults (matching .env.example's
@@ -62,6 +66,18 @@ const DEFAULT_ASSET_LIMITS: AssetRouteLimits = {
 export interface BuildServerOptions {
   logger: Logger;
   prisma?: PrismaClient;
+  /**
+   * AAMP-1 step 2 — verifies the caller's session token. Required, with no
+   * default: there is no such thing as a server built without authentication,
+   * and omitting it must be a compile error rather than a silently open API.
+   * `src/index.ts` passes the real `@clerk/backend` adapter; tests and
+   * `dev-fake-server.ts` pass the deterministic fake from `@combat/auth/testing`.
+   */
+  tokenVerifier: ClerkTokenVerifier;
+  /** Resolves a subject's profile on first sign-in only — see `resolvePrincipal`. */
+  profileDirectory: ClerkProfileDirectory;
+  /** Where local `User` rows are read and provisioned; defaults to the Prisma client. */
+  userDb?: UserDataSource;
   /** Overrides the `*DataSource` adapter the approval routes use — tests inject an in-memory fake here. */
   approvalDb?: ApprovalDatabase;
   /** Overrides the M4 campaign-intake routes' `*DataSource` adapter — tests inject an in-memory fake here. */
@@ -115,6 +131,9 @@ export function buildServer({
   finalQaDb = createFinalQaDatabase(prisma),
   variantDb = createVariantDatabase(prisma),
   performanceDb = createPerformanceDatabase(prisma),
+  tokenVerifier,
+  profileDirectory,
+  userDb = createUserDatabase(prisma),
   reviewProvider = new MockReviewProvider(),
   temporalEnv = { TEMPORAL_ADDRESS: 'localhost:7233', TEMPORAL_NAMESPACE: 'default' },
   workflowClient = createWorkflowClient(temporalEnv),
@@ -156,6 +175,18 @@ export function buildServer({
     };
   });
 
+  // AAMP-1 step 2: installed *before* every route below, so no handler can run
+  // without a verified principal. `/health` and `/ready` above are registered
+  // earlier but stay reachable via `PUBLIC_ROUTES` — the hook applies to the
+  // whole instance regardless of registration order, so the exemption is an
+  // explicit allowlist, never an accident of ordering.
+  registerAuthentication(app, {
+    verifier: tokenVerifier,
+    directory: profileDirectory,
+    db: userDb,
+  });
+
+  registerMeRoutes(app, { db: approvalDb });
   registerApprovalRoutes(app, { db: approvalDb, workflowClient });
   registerCampaignRoutes(app, { db: campaignDb, workflowClient });
   registerAssetRoutes(app, { db: assetDb, storageProvider, limits: assetLimits });

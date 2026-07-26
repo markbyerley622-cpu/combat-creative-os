@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { bearer, signIn } from './auth';
 
 /**
  * Post-M14 audit finding H-3 — browser coverage for the two human approval
@@ -26,16 +27,10 @@ const FIXTURES = {
 };
 const API_BASE_URL = 'http://127.0.0.1:4100';
 
-async function signIn(page: import('@playwright/test').Page, userId: string) {
-  await page.goto('/');
-  await page.getByLabel('Workspace ID').fill(FIXTURES.workspaceId);
-  await page.getByLabel('User ID (membership)').fill(userId);
-  await page.getByRole('button', { name: 'Continue' }).click();
-}
-
 async function loadSelectionSet(request: import('@playwright/test').APIRequestContext) {
   const review = await request.get(
-    `${API_BASE_URL}/workspaces/${FIXTURES.workspaceId}/campaigns/${FIXTURES.shotSelectionCampaignId}/shot-review?userId=${FIXTURES.reviewerUserId}`,
+    `${API_BASE_URL}/workspaces/${FIXTURES.workspaceId}/campaigns/${FIXTURES.shotSelectionCampaignId}/shot-review`,
+    { headers: bearer(FIXTURES.reviewerUserId) },
   );
   expect(review.status()).toBe(200);
   const body = await review.json();
@@ -76,8 +71,8 @@ test.describe('Shot selection gate', () => {
     const response = await request.post(
       `${API_BASE_URL}/workspaces/${FIXTURES.workspaceId}/campaigns/${FIXTURES.shotSelectionCampaignId}/shot-review/approve`,
       {
+        headers: bearer(FIXTURES.reviewerUserId),
         data: {
-          userId: FIXTURES.reviewerUserId,
           setId: set.id,
           expectedRevision: set.revision,
         },
@@ -101,8 +96,8 @@ test.describe('Shot selection gate', () => {
     const response = await request.post(
       `${API_BASE_URL}/workspaces/${FIXTURES.workspaceId}/campaigns/${FIXTURES.conceptCampaignId}/shot-review/approve`,
       {
+        headers: bearer(FIXTURES.reviewerUserId),
         data: {
-          userId: FIXTURES.ownerUserId,
           setId: set.id,
           expectedRevision: set.revision,
         },
@@ -147,7 +142,7 @@ test.describe('Final approval gate', () => {
 
     const response = await request.post(
       `${API_BASE_URL}/workspaces/${FIXTURES.workspaceId}/campaigns/${FIXTURES.finalApprovalCampaignId}/approvals/final`,
-      { data: { userId: FIXTURES.reviewerUserId, decision: 'APPROVED' } },
+      { headers: bearer(FIXTURES.reviewerUserId), data: { decision: 'APPROVED' } },
     );
 
     expect(response.status()).toBe(403);
@@ -157,7 +152,7 @@ test.describe('Final approval gate', () => {
   test('an authorized decision is recorded as a persisted approval', async ({ request }) => {
     const response = await request.post(
       `${API_BASE_URL}/workspaces/${FIXTURES.workspaceId}/campaigns/${FIXTURES.finalApprovalCampaignId}/approvals/final`,
-      { data: { userId: FIXTURES.ownerUserId, decision: 'APPROVED' } },
+      { headers: bearer(FIXTURES.ownerUserId), data: { decision: 'APPROVED' } },
     );
 
     expect(response.status()).toBe(202);

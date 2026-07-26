@@ -2,21 +2,21 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { SessionGate } from '@/components/SessionGate';
+import { WorkspaceGate } from '@/components/WorkspaceGate';
 import { ErrorState, LoadingState, PageShell } from '@/components/PageShell';
 import { createApiClient, type CampaignStatus } from '@/lib/api-client';
-import { useSession } from '@/lib/session';
+import { useWorkspace } from '@/lib/workspace';
 
 const POLL_INTERVAL_MS = 4000;
 
 function ProductionProgress({ campaignId }: { campaignId: string }) {
-  const { session } = useSession();
+  const { workspace, getToken } = useWorkspace();
   const [status, setStatus] = useState<CampaignStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!session) return;
-    const client = createApiClient(session.workspaceId, session.userId);
+    if (!workspace) return;
+    const client = createApiClient(workspace.workspaceId, getToken);
     let cancelled = false;
 
     async function poll() {
@@ -37,7 +37,7 @@ function ProductionProgress({ campaignId }: { campaignId: string }) {
       cancelled = true;
       clearInterval(interval);
     };
-  }, [session, campaignId]);
+  }, [workspace, getToken, campaignId]);
 
   if (error) return <ErrorState message={error} />;
   if (!status) return <LoadingState label="Loading campaign status…" />;
@@ -127,10 +127,10 @@ function ProductionProgress({ campaignId }: { campaignId: string }) {
 
 export default function CampaignStatusPage({ params }: { params: { campaignId: string } }) {
   return (
-    <SessionGate>
+    <WorkspaceGate>
       <PageShell title="Production progress">
         <ProductionProgress campaignId={params.campaignId} />
       </PageShell>
-    </SessionGate>
+    </WorkspaceGate>
   );
 }

@@ -1,5 +1,6 @@
 export * from './client';
 export * from './repositories/membership-repository';
+export * from './repositories/user-repository';
 export * from './repositories/workspace-repository';
 export * from './repositories/campaign-repository';
 export * from './repositories/campaign-brief-repository';

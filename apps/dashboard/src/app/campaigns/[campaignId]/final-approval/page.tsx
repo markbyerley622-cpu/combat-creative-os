@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { SessionGate } from '@/components/SessionGate';
+import { WorkspaceGate } from '@/components/WorkspaceGate';
 import { EmptyState, ErrorState, LoadingState, PageShell } from '@/components/PageShell';
 import {
   createApiClient,
@@ -11,7 +11,7 @@ import {
   type FinalQaView,
   type FinalRepairTarget,
 } from '@/lib/api-client';
-import { useSession } from '@/lib/session';
+import { useWorkspace } from '@/lib/workspace';
 
 const POLL_INTERVAL_MS = 4000;
 
@@ -39,7 +39,7 @@ function FindingRow({ finding }: { finding: FinalQaFindingView }) {
 }
 
 function FinalApproval({ campaignId }: { campaignId: string }) {
-  const { session } = useSession();
+  const { workspace, getToken } = useWorkspace();
   const [data, setData] = useState<FinalQaView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -48,8 +48,8 @@ function FinalApproval({ campaignId }: { campaignId: string }) {
   const [repairTarget, setRepairTarget] = useState<FinalRepairTarget>('SOUND_DESIGN');
 
   async function load() {
-    if (!session) return;
-    const client = createApiClient(session.workspaceId, session.userId);
+    if (!workspace) return;
+    const client = createApiClient(workspace.workspaceId, getToken);
     try {
       setData(await client.getFinalQa(campaignId));
       setError(null);
@@ -63,13 +63,13 @@ function FinalApproval({ campaignId }: { campaignId: string }) {
     const id = setInterval(load, POLL_INTERVAL_MS);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session, campaignId]);
+  }, [workspace, getToken, campaignId]);
 
   async function submit(decision: 'APPROVED' | 'CHANGES_REQUESTED') {
-    if (!session) return;
+    if (!workspace) return;
     setSubmitting(true);
     setNotice(null);
-    const client = createApiClient(session.workspaceId, session.userId);
+    const client = createApiClient(workspace.workspaceId, getToken);
     try {
       await client.submitFinalApproval(
         campaignId,
@@ -215,10 +215,10 @@ function FinalApproval({ campaignId }: { campaignId: string }) {
 
 export default function FinalApprovalPage({ params }: { params: { campaignId: string } }) {
   return (
-    <SessionGate>
+    <WorkspaceGate>
       <PageShell title="Final approval">
         <FinalApproval campaignId={params.campaignId} />
       </PageShell>
-    </SessionGate>
+    </WorkspaceGate>
   );
 }

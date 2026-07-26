@@ -2,13 +2,13 @@
 
 import { useRouter } from 'next/navigation';
 import { useState, type FormEvent } from 'react';
-import { SessionGate } from '@/components/SessionGate';
+import { WorkspaceGate } from '@/components/WorkspaceGate';
 import { ErrorState, PageShell } from '@/components/PageShell';
 import { ApiError, createApiClient } from '@/lib/api-client';
-import { useSession } from '@/lib/session';
+import { useWorkspace } from '@/lib/workspace';
 
 function CreateCampaignForm() {
-  const { session } = useSession();
+  const { workspace, getToken } = useWorkspace();
   const router = useRouter();
   const [name, setName] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -16,7 +16,7 @@ function CreateCampaignForm() {
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
-    if (!session) return;
+    if (!workspace) return;
     if (name.trim().length === 0) {
       setError('Campaign name is required.');
       return;
@@ -24,7 +24,7 @@ function CreateCampaignForm() {
     setError(null);
     setSubmitting(true);
     try {
-      const client = createApiClient(session.workspaceId, session.userId);
+      const client = createApiClient(workspace.workspaceId, getToken);
       const { campaign } = await client.createCampaign(name.trim());
       router.push(`/campaigns/${campaign.id}/brief`);
     } catch (err) {
@@ -63,8 +63,8 @@ function CreateCampaignForm() {
 
 export default function NewCampaignPage() {
   return (
-    <SessionGate>
+    <WorkspaceGate>
       <CreateCampaignForm />
-    </SessionGate>
+    </WorkspaceGate>
   );
 }

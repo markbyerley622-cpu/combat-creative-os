@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { bearer, signIn } from './auth';
 
 /**
  * M12 — the delivery-variant comparison screen, against the campaign
@@ -15,15 +16,10 @@ const FIXTURES = {
   ownerUserId: '22222222-2222-2222-2222-222222222222',
   reviewerUserId: '33333333-3333-3333-3333-333333333333',
   variantCampaignId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+  /** A verified user with no Membership row — authenticates, then is refused. */
+  strangerUserId: '99999999-9999-9999-9999-999999999999',
 };
 const API_BASE_URL = 'http://127.0.0.1:4100';
-
-async function signIn(page: import('@playwright/test').Page, userId: string) {
-  await page.goto('/');
-  await page.getByLabel('Workspace ID').fill(FIXTURES.workspaceId);
-  await page.getByLabel('User ID (membership)').fill(userId);
-  await page.getByRole('button', { name: 'Continue' }).click();
-}
 
 test.describe('Delivery variants screen', () => {
   test('compares the 15s, 10s and 6s cuts with their QA verdicts', async ({ page }) => {
@@ -96,18 +92,27 @@ test.describe('Forged request bypassing the dashboard UI', () => {
   }) => {
     const response = await request.post(
       `${API_BASE_URL}/workspaces/${FIXTURES.workspaceId}/campaigns/${FIXTURES.variantCampaignId}/variants/cancel`,
-      { data: { userId: FIXTURES.reviewerUserId } },
+      { headers: bearer(FIXTURES.reviewerUserId), data: {} },
     );
 
     expect(response.status()).toBe(403);
     expect(await response.json()).toMatchObject({ error: 'FORBIDDEN' });
   });
 
-  test('a non-member cannot read the variant list', async ({ request }) => {
+  test('a verified non-member cannot read the variant list', async ({ request }) => {
     const response = await request.get(
-      `${API_BASE_URL}/workspaces/${FIXTURES.workspaceId}/campaigns/${FIXTURES.variantCampaignId}/variants?userId=99999999-9999-9999-9999-999999999999`,
+      `${API_BASE_URL}/workspaces/${FIXTURES.workspaceId}/campaigns/${FIXTURES.variantCampaignId}/variants`,
+      { headers: bearer(FIXTURES.strangerUserId) },
     );
 
     expect(response.status()).toBe(403);
+  });
+
+  test('an unauthenticated request cannot read the variant list', async ({ request }) => {
+    const response = await request.get(
+      `${API_BASE_URL}/workspaces/${FIXTURES.workspaceId}/campaigns/${FIXTURES.variantCampaignId}/variants`,
+    );
+
+    expect(response.status()).toBe(401);
   });
 });

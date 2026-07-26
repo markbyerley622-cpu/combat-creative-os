@@ -80,6 +80,84 @@ export function refineReasoningConfig(
 export type ReasoningEnv = z.infer<typeof reasoningEnvSchema>;
 
 /**
+ * AAMP-1 step 2 — Clerk identity configuration.
+ *
+ * Both values are `optional()` at the object level only so that
+ * `refineAuthConfig` can report a *useful* message instead of Zod's generic
+ * "Required"; every composed schema that includes this applies that refinement,
+ * so an `apps/api` process cannot start without a secret key. There is no
+ * "auth disabled" mode and no environment in which one is tolerated: the
+ * deterministic fake verifier is not reachable from configuration at all (see
+ * `@combat/auth/testing`'s doc comment), so a missing key can only ever mean
+ * misconfiguration, never a legitimate degraded mode.
+ */
+export const authEnvSchema = z.object({
+  CLERK_SECRET_KEY: z.string().optional(),
+  /**
+   * Comma-separated origins whose session tokens this API accepts (`azp`).
+   * Optional: unset means "do not check the authorized party", which is only
+   * appropriate locally — `refineAuthConfig` requires it in production.
+   */
+  CLERK_AUTHORIZED_PARTIES: z.string().optional(),
+});
+export type AuthEnv = z.infer<typeof authEnvSchema>;
+
+/** Splits `CLERK_AUTHORIZED_PARTIES` into the list the Clerk adapter takes. */
+export function parseAuthorizedParties(value: string | undefined): string[] {
+  if (!value) return [];
+  return value
+    .split(',')
+    .map((party) => party.trim())
+    .filter((party) => party.length > 0);
+}
+
+/**
+ * Fails closed on missing or placeholder identity configuration — the same
+ * discipline `refineReasoningConfig` applies to the reasoning provider, for the
+ * same reason: a control that silently does nothing is worse than one that
+ * refuses to start.
+ *
+ * A publishable key in the secret slot is rejected explicitly. It is the single
+ * most likely paste error, it would fail only at the first real request, and
+ * `pk_*` is a *public* value — treating it as a secret is exactly the mistake
+ * worth catching at the config boundary.
+ */
+export function refineAuthConfig(
+  env: { NODE_ENV: 'development' | 'test' | 'production' } & AuthEnv,
+  ctx: z.RefinementCtx,
+): void {
+  const secretKey = env.CLERK_SECRET_KEY?.trim();
+  if (!secretKey) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['CLERK_SECRET_KEY'],
+      message:
+        'CLERK_SECRET_KEY is required — refusing to start rather than serving requests with no caller authentication',
+    });
+    return;
+  }
+  if (secretKey.startsWith('pk_')) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['CLERK_SECRET_KEY'],
+      message:
+        'CLERK_SECRET_KEY looks like a publishable key (pk_*) — a publishable key is public and cannot verify session tokens',
+    });
+  }
+  if (
+    env.NODE_ENV === 'production' &&
+    parseAuthorizedParties(env.CLERK_AUTHORIZED_PARTIES).length === 0
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['CLERK_AUTHORIZED_PARTIES'],
+      message:
+        'CLERK_AUTHORIZED_PARTIES is required in production — without it a session token minted for another front-end can be replayed against this API',
+    });
+  }
+}
+
+/**
  * M5: asset-ingestion limits. Deliberately not "configurable" per MIME type
  * — a single byte ceiling plus a code-level MIME allowlist (see
  * packages/workflows' ingest-asset-activity.ts) is enough for this
@@ -111,10 +189,14 @@ export const apiEnvSchema = baseEnvSchema
   .merge(minioEnvSchema)
   .merge(assetEnvSchema)
   .merge(observabilityEnvSchema)
+  .merge(authEnvSchema)
   .extend({
     API_HOST: z.string().min(1).default('0.0.0.0'),
     API_PORT: z.coerce.number().int().positive().default(4000),
-  });
+  })
+  // AAMP-1 step 2: apps/api is the only process that verifies caller identity,
+  // so it is the only one that refuses to start without identity config.
+  .superRefine(refineAuthConfig);
 export type ApiEnv = z.infer<typeof apiEnvSchema>;
 
 export const workerEnvSchema = baseEnvSchema
@@ -132,8 +214,18 @@ export const workerEnvSchema = baseEnvSchema
   .superRefine(refineReasoningConfig);
 export type WorkerEnv = z.infer<typeof workerEnvSchema>;
 
+/**
+ * The dashboard holds no secret. It needs only the **publishable** key — a
+ * value Clerk designs to ship in the client bundle — plus the sign-in/sign-up
+ * route names. `CLERK_SECRET_KEY` is deliberately absent from this schema:
+ * apps/dashboard has no code path that could read it, which is the structural
+ * half of "the secret key cannot enter a client bundle".
+ */
 export const dashboardEnvSchema = baseEnvSchema.extend({
   NEXT_PUBLIC_API_URL: z.string().url().default('http://localhost:4000'),
   PORT: z.coerce.number().int().positive().default(3000),
+  NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: z.string().min(1).optional(),
+  NEXT_PUBLIC_CLERK_SIGN_IN_URL: z.string().min(1).default('/sign-in'),
+  NEXT_PUBLIC_CLERK_SIGN_UP_URL: z.string().min(1).default('/sign-up'),
 });
 export type DashboardEnv = z.infer<typeof dashboardEnvSchema>;

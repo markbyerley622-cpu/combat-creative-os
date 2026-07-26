@@ -2,19 +2,19 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { SessionGate } from '@/components/SessionGate';
+import { WorkspaceGate } from '@/components/WorkspaceGate';
 import { EmptyState, ErrorState, LoadingState, PageShell } from '@/components/PageShell';
 import { ApiError, createApiClient, type Campaign } from '@/lib/api-client';
-import { useSession } from '@/lib/session';
+import { useWorkspace } from '@/lib/workspace';
 
 function CampaignList() {
-  const { session } = useSession();
+  const { workspace, getToken } = useWorkspace();
   const [campaigns, setCampaigns] = useState<Campaign[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!session) return;
-    const client = createApiClient(session.workspaceId, session.userId);
+    if (!workspace) return;
+    const client = createApiClient(workspace.workspaceId, getToken);
     client
       .listCampaigns()
       .then((res) => setCampaigns(res.campaigns))
@@ -25,7 +25,7 @@ function CampaignList() {
             : 'Could not load campaigns.',
         ),
       );
-  }, [session]);
+  }, [workspace, getToken]);
 
   return (
     <PageShell title="Campaigns">
@@ -65,8 +65,8 @@ function CampaignList() {
 
 export default function DashboardHomePage() {
   return (
-    <SessionGate>
+    <WorkspaceGate>
       <CampaignList />
-    </SessionGate>
+    </WorkspaceGate>
   );
 }

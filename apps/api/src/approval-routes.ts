@@ -19,6 +19,7 @@ import {
 } from '@combat/database';
 import { workflows } from '@combat/workflows';
 import type { ApprovalDatabase } from './approval-database';
+import { requirePrincipal } from './authentication';
 import { campaignProductionWorkflowId } from './campaign-workflow-id';
 
 export interface ApprovalRouteDeps {
@@ -26,19 +27,27 @@ export interface ApprovalRouteDeps {
   workflowClient: WorkflowClient;
 }
 
-const ConceptOrShotSelectionBodySchema = z.object({
-  userId: z.string().uuid(),
-  decision: ApprovalDecisionSchema,
-  comments: z.string().optional(),
-});
+/**
+ * AAMP-1 step 2: `userId` is gone from every schema in this file. The caller's
+ * identity is `request.principal.userId`, set by the authentication hook from a
+ * verified session token — a body field named `userId` is now simply an unknown
+ * key, and `.strict()` rejects it outright so an attempt to supply one is a 400
+ * rather than silently ignored.
+ */
+const ConceptOrShotSelectionBodySchema = z
+  .object({
+    decision: ApprovalDecisionSchema,
+    comments: z.string().optional(),
+  })
+  .strict();
 
 const FinalApprovalBodySchema = z
   .object({
-    userId: z.string().uuid(),
     decision: ApprovalDecisionSchema,
     comments: z.string().optional(),
     repairTarget: z.enum(FINAL_APPROVAL_REPAIR_TARGETS).optional(),
   })
+  .strict()
   .refine(
     (body) =>
       body.decision !== 'APPROVED'
@@ -84,18 +93,21 @@ const GATE_ROUTES: GateRouteConfig[] = [
 type FinalRepairTarget = (typeof FINAL_APPROVAL_REPAIR_TARGETS)[number];
 
 interface ApprovalRequestBody {
-  userId: string;
   decision: ApprovalDecision;
   comments?: string;
   repairTarget?: FinalRepairTarget;
 }
 
 /**
- * Registers the three human-approval-gate endpoints. Every route, in order:
- * 1. Resolves the caller's role from a persisted `Membership` row (there is
- *    no session/auth layer yet — see the limitation noted in the milestone
- *    report this change ships with) and checks it against
- *    `roleHasPermission` before doing anything else (CLAUDE.md security rule).
+ * Registers the human-approval-gate endpoints. Every route, in order:
+ * 0. Has already been authenticated by the instance-wide `onRequest` hook
+ *    (AAMP-1 step 2) — `requirePrincipal` returns the verified caller, whose
+ *    `userId` is a local `User.id` proven by a Clerk session token rather than
+ *    asserted in the request.
+ * 1. Resolves the caller's role from a persisted `Membership` row and checks it
+ *    against `roleHasPermission` before doing anything else (CLAUDE.md security
+ *    rule). Identity is now verified; *authorization* is unchanged and still
+ *    read from PostgreSQL.
  * 2. Looks up the campaign scoped to `workspaceId`; a wrong workspace or
  *    unknown campaign 404s rather than leaking existence.
  * 3. Persists the decision as an immutable `HumanApproval` row *before*
@@ -124,6 +136,7 @@ export function registerApprovalRoutes(
       route.path,
       async (request, reply) => {
         const { workspaceId, campaignId } = request.params;
+        const callerUserId = requirePrincipal(request).userId;
         const parsedBody = route.bodySchema.safeParse(request.body);
         if (!parsedBody.success) {
           return reply.status(400).send({ error: 'INVALID_BODY', issues: parsedBody.error.issues });
@@ -131,7 +144,7 @@ export function registerApprovalRoutes(
         const body = parsedBody.data as ApprovalRequestBody;
 
         const memberships = await listMembershipsForWorkspace(deps.db, workspaceId);
-        const membership = memberships.find((m) => m.userId === body.userId);
+        const membership = memberships.find((m) => m.userId === callerUserId);
         if (!membership) {
           return reply.status(403).send({
             error: 'FORBIDDEN',
@@ -155,7 +168,7 @@ export function registerApprovalRoutes(
         const isRetryOfLatest =
           latest !== undefined &&
           latest.stageAtDecision === campaign.currentStage &&
-          latest.decidedByUserId === body.userId &&
+          latest.decidedByUserId === callerUserId &&
           latest.decision === body.decision &&
           latest.repairTarget === body.repairTarget;
 
@@ -166,7 +179,7 @@ export function registerApprovalRoutes(
               gate: route.gate,
               decision: body.decision,
               stageAtDecision: campaign.currentStage,
-              decidedByUserId: body.userId,
+              decidedByUserId: callerUserId,
               comments: body.comments,
               repairTarget: body.repairTarget,
             });
@@ -179,7 +192,7 @@ export function registerApprovalRoutes(
             campaignId,
             gate: route.gate,
             decision: body.decision,
-            decidedByUserId: body.userId,
+            decidedByUserId: callerUserId,
             repairTarget: body.repairTarget,
           });
         } catch (error) {

@@ -18,7 +18,16 @@ export default defineConfig({
       url: 'http://127.0.0.1:3100',
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,
-      env: { NEXT_PUBLIC_API_BASE_URL: 'http://127.0.0.1:4100' },
+      env: {
+        NEXT_PUBLIC_API_BASE_URL: 'http://127.0.0.1:4100',
+        // AAMP-1 step 2: CI has no Clerk account, credentials or network
+        // access, so the browser presents a deterministic fixture token that
+        // only the in-memory dev-fake-server's fake verifier accepts. This is
+        // not an auth bypass — apps/api still verifies every request, and the
+        // mode is refused outright in production. See src/lib/auth-mode.ts.
+        NEXT_PUBLIC_DASHBOARD_AUTH_MODE: 'e2e-fake',
+        NEXT_PUBLIC_DEPLOY_ENV: 'test',
+      },
     },
     {
       // In-memory-backed apps/api instance (no Postgres/Temporal available in

@@ -2,7 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useEffect, useState, type FormEvent } from 'react';
-import { SessionGate } from '@/components/SessionGate';
+import { WorkspaceGate } from '@/components/WorkspaceGate';
 import { ErrorState, LoadingState, PageShell } from '@/components/PageShell';
 import {
   ApiError,
@@ -11,7 +11,7 @@ import {
   createApiClient,
 } from '@/lib/api-client';
 import { EMPTY_DRAFT, fromLoadedBrief, toContent, type DraftFields } from '@/lib/brief-form';
-import { useSession } from '@/lib/session';
+import { useWorkspace } from '@/lib/workspace';
 
 function textField(
   label: string,
@@ -44,7 +44,7 @@ function textField(
 }
 
 function BriefEditor({ campaignId }: { campaignId: string }) {
-  const { session } = useSession();
+  const { workspace, getToken } = useWorkspace();
   const router = useRouter();
   const [draft, setDraft] = useState<DraftFields>(EMPTY_DRAFT);
   const [loading, setLoading] = useState(true);
@@ -54,8 +54,8 @@ function BriefEditor({ campaignId }: { campaignId: string }) {
   const [status, setStatus] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!session) return;
-    const client = createApiClient(session.workspaceId, session.userId);
+    if (!workspace) return;
+    const client = createApiClient(workspace.workspaceId, getToken);
     client
       .getBrief(campaignId)
       .then((res) => {
@@ -66,7 +66,7 @@ function BriefEditor({ campaignId }: { campaignId: string }) {
       })
       .catch(() => setError('Could not load the existing brief.'))
       .finally(() => setLoading(false));
-  }, [session, campaignId]);
+  }, [workspace, getToken, campaignId]);
 
   function toggleMulti<T extends string>(key: keyof DraftFields, value: T) {
     const current = draft[key] as T[];
@@ -76,11 +76,11 @@ function BriefEditor({ campaignId }: { campaignId: string }) {
 
   async function handleSaveDraft(event: FormEvent) {
     event.preventDefault();
-    if (!session) return;
+    if (!workspace) return;
     setStatus('saving');
     setError(null);
     try {
-      const client = createApiClient(session.workspaceId, session.userId);
+      const client = createApiClient(workspace.workspaceId, getToken);
       await client.saveDraftBrief(campaignId, toContent(draft));
       setStatus('saved');
     } catch {
@@ -91,12 +91,12 @@ function BriefEditor({ campaignId }: { campaignId: string }) {
 
   async function handleSubmitBrief(event: FormEvent) {
     event.preventDefault();
-    if (!session) return;
+    if (!workspace) return;
     setStatus('submitting');
     setError(null);
     setValidationIssues([]);
     try {
-      const client = createApiClient(session.workspaceId, session.userId);
+      const client = createApiClient(workspace.workspaceId, getToken);
       await client.submitBrief(campaignId, toContent(draft));
       await client.startWorkflow(campaignId);
       setSubmitted(true);
@@ -232,10 +232,10 @@ function BriefEditor({ campaignId }: { campaignId: string }) {
 
 export default function BriefPage({ params }: { params: { campaignId: string } }) {
   return (
-    <SessionGate>
+    <WorkspaceGate>
       <PageShell title="Campaign brief">
         <BriefEditor campaignId={params.campaignId} />
       </PageShell>
-    </SessionGate>
+    </WorkspaceGate>
   );
 }

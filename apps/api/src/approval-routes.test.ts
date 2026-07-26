@@ -5,6 +5,8 @@ import type { WorkflowClient } from '@temporalio/client';
 import type { CampaignRecord, HumanApprovalRecord, MembershipRecord } from '@combat/database';
 import type { ApprovalDatabase } from './approval-database';
 import { registerApprovalRoutes } from './approval-routes';
+import { registerAuthentication } from './authentication';
+import { bearerFor, permissiveTestAuthentication } from './test-helpers/authenticated-caller';
 
 class InMemoryApprovalDatabase implements ApprovalDatabase {
   campaigns: CampaignRecord[] = [];
@@ -59,7 +61,9 @@ class InMemoryApprovalDatabase implements ApprovalDatabase {
       this.memberships.find((m) => m.id === where.id && m.workspaceId === where.workspaceId) ??
       null,
     findMany: async ({ where }) =>
-      this.memberships.filter((m) => m.workspaceId === where.workspaceId),
+      this.memberships.filter((m) =>
+        'workspaceId' in where ? m.workspaceId === where.workspaceId : m.userId === where.userId,
+      ),
     create: async ({ data }) => {
       const membership: MembershipRecord = { id: randomUUID(), createdAt: new Date(), ...data };
       this.memberships.push(membership);
@@ -104,6 +108,10 @@ function buildFakeWorkflowClient(): {
 
 function buildApp(db: InMemoryApprovalDatabase, workflowClient: WorkflowClient) {
   const app = Fastify();
+  // AAMP-1 step 2: these suites exercise authorization, so the caller arrives
+  // authenticated exactly as a production caller does — a verified bearer
+  // token, never a request field. See test-helpers/authenticated-caller.ts.
+  registerAuthentication(app, permissiveTestAuthentication().hookDeps);
   registerApprovalRoutes(app, { db, workflowClient });
   return app;
 }
@@ -120,7 +128,8 @@ describe('POST /workspaces/:workspaceId/campaigns/:campaignId/approvals/concept'
     const response = await app.inject({
       method: 'POST',
       url: `/workspaces/${campaign.workspaceId}/campaigns/${campaign.id}/approvals/concept`,
-      payload: { userId, decision: 'APPROVED' },
+      headers: bearerFor(userId),
+      payload: { decision: 'APPROVED' },
     });
 
     expect(response.statusCode).toBe(403);
@@ -137,7 +146,8 @@ describe('POST /workspaces/:workspaceId/campaigns/:campaignId/approvals/concept'
     const response = await app.inject({
       method: 'POST',
       url: `/workspaces/${campaign.workspaceId}/campaigns/${campaign.id}/approvals/concept`,
-      payload: { userId: randomUUID(), decision: 'APPROVED' },
+      headers: bearerFor(randomUUID()),
+      payload: { decision: 'APPROVED' },
     });
 
     expect(response.statusCode).toBe(403);
@@ -155,7 +165,8 @@ describe('POST /workspaces/:workspaceId/campaigns/:campaignId/approvals/concept'
     const response = await app.inject({
       method: 'POST',
       url: `/workspaces/${otherWorkspaceId}/campaigns/${campaign.id}/approvals/concept`,
-      payload: { userId, decision: 'APPROVED' },
+      headers: bearerFor(userId),
+      payload: { decision: 'APPROVED' },
     });
 
     expect(response.statusCode).toBe(404);
@@ -184,7 +195,8 @@ describe('POST /workspaces/:workspaceId/campaigns/:campaignId/approvals/concept'
     const response = await app.inject({
       method: 'POST',
       url: `/workspaces/${campaign.workspaceId}/campaigns/${campaign.id}/approvals/concept`,
-      payload: { userId, decision: 'APPROVED', comments: 'looks great' },
+      headers: bearerFor(userId),
+      payload: { decision: 'APPROVED', comments: 'looks great' },
     });
 
     expect(response.statusCode).toBe(202);
@@ -215,15 +227,17 @@ describe('POST /workspaces/:workspaceId/campaigns/:campaignId/approvals/concept'
     const { workflowClient, signal } = buildFakeWorkflowClient();
     const app = buildApp(db, workflowClient);
 
-    const payload = { userId, decision: 'APPROVED' as const };
+    const payload = { decision: 'APPROVED' as const };
     const first = await app.inject({
       method: 'POST',
       url: `/workspaces/${campaign.workspaceId}/campaigns/${campaign.id}/approvals/concept`,
+      headers: bearerFor(userId),
       payload,
     });
     const second = await app.inject({
       method: 'POST',
       url: `/workspaces/${campaign.workspaceId}/campaigns/${campaign.id}/approvals/concept`,
+      headers: bearerFor(userId),
       payload,
     });
 
@@ -247,7 +261,8 @@ describe('POST /workspaces/:workspaceId/campaigns/:campaignId/approvals/concept'
     const response = await app.inject({
       method: 'POST',
       url: `/workspaces/${campaign.workspaceId}/campaigns/${campaign.id}/approvals/concept`,
-      payload: { userId, decision: 'MAYBE' },
+      headers: bearerFor(userId),
+      payload: { decision: 'MAYBE' },
     });
 
     expect(response.statusCode).toBe(400);
@@ -266,7 +281,8 @@ describe('POST /workspaces/:workspaceId/campaigns/:campaignId/approvals/final', 
     const response = await app.inject({
       method: 'POST',
       url: `/workspaces/${campaign.workspaceId}/campaigns/${campaign.id}/approvals/final`,
-      payload: { userId, decision: 'REJECTED' },
+      headers: bearerFor(userId),
+      payload: { decision: 'REJECTED' },
     });
 
     expect(response.statusCode).toBe(400);
@@ -284,7 +300,8 @@ describe('POST /workspaces/:workspaceId/campaigns/:campaignId/approvals/final', 
     const response = await app.inject({
       method: 'POST',
       url: `/workspaces/${campaign.workspaceId}/campaigns/${campaign.id}/approvals/final`,
-      payload: { userId, decision: 'REJECTED', repairTarget: 'SOUND_DESIGN' },
+      headers: bearerFor(userId),
+      payload: { decision: 'REJECTED', repairTarget: 'SOUND_DESIGN' },
     });
 
     expect(response.statusCode).toBe(202);
@@ -306,7 +323,8 @@ describe('POST /workspaces/:workspaceId/campaigns/:campaignId/approvals/final', 
     const response = await app.inject({
       method: 'POST',
       url: `/workspaces/${campaign.workspaceId}/campaigns/${campaign.id}/approvals/final`,
-      payload: { userId, decision: 'APPROVED' },
+      headers: bearerFor(userId),
+      payload: { decision: 'APPROVED' },
     });
 
     expect(response.statusCode).toBe(403);
@@ -332,7 +350,8 @@ describe('workflow signal failure handling', () => {
     const response = await app.inject({
       method: 'POST',
       url: `/workspaces/${campaign.workspaceId}/campaigns/${campaign.id}/approvals/concept`,
-      payload: { userId, decision: 'APPROVED' },
+      headers: bearerFor(userId),
+      payload: { decision: 'APPROVED' },
     });
 
     expect(response.statusCode).toBe(502);

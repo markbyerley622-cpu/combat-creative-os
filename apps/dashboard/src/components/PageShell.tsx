@@ -2,11 +2,66 @@
 
 import Link from 'next/link';
 import type { ReactNode } from 'react';
-import { useSession } from '@/lib/session';
+import { Show, SignInButton, SignUpButton, UserButton } from '@clerk/nextjs';
+import { currentAuthMode } from '@/lib/auth-mode';
+import { useWorkspace } from '@/lib/workspace';
+
+const NAV_BUTTON: React.CSSProperties = {
+  fontSize: '0.85rem',
+  fontWeight: 500,
+  lineHeight: 1,
+  padding: '0.5rem 0.9rem',
+  borderRadius: 6,
+  border: '1px solid #ddd',
+  background: '#fff',
+  color: '#111',
+  cursor: 'pointer',
+};
+
+const NAV_BUTTON_PRIMARY: React.CSSProperties = {
+  ...NAV_BUTTON,
+  border: '1px solid #111',
+  background: '#111',
+  color: '#fff',
+};
+
+/**
+ * AAMP-1 step 2: the nav's right-hand side is Clerk's own session UI — sign
+ * in / sign up while signed out, the account menu while signed in. The old
+ * "Switch identity" button is gone with the identity picker it belonged to;
+ * signing out is now a real session operation, not clearing localStorage.
+ */
+function SessionControls() {
+  const { workspace } = useWorkspace();
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+      {workspace && (
+        <span style={{ fontSize: '0.8rem', color: '#666' }} data-testid="workspace-role">
+          {workspace.role}
+        </span>
+      )}
+      {/* `Show` is @clerk/nextjs v7's replacement for SignedIn/SignedOut. */}
+      <Show when="signed-out">
+        <SignInButton mode="modal">
+          <button type="button" style={NAV_BUTTON}>
+            Sign in
+          </button>
+        </SignInButton>
+        <SignUpButton mode="modal">
+          <button type="button" style={NAV_BUTTON_PRIMARY}>
+            Sign up
+          </button>
+        </SignUpButton>
+      </Show>
+      <Show when="signed-in">
+        <UserButton />
+      </Show>
+    </div>
+  );
+}
 
 export function PageShell({ title, children }: { title: string; children: ReactNode }) {
-  const { session, clearSession } = useSession();
-
   return (
     <main style={{ fontFamily: 'system-ui, sans-serif', padding: '2rem', maxWidth: 960 }}>
       <nav
@@ -22,21 +77,9 @@ export function PageShell({ title, children }: { title: string; children: ReactN
         <Link href="/" style={{ fontWeight: 600, textDecoration: 'none', color: 'inherit' }}>
           Combat Creative OS
         </Link>
-        {session && (
-          <button
-            type="button"
-            onClick={clearSession}
-            style={{
-              fontSize: '0.85rem',
-              color: '#666',
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-            }}
-          >
-            Switch identity
-          </button>
-        )}
+        {/* Clerk's session components need a ClerkProvider, which e2e-fake mode
+            deliberately omits (see lib/auth-mode.ts). */}
+        {currentAuthMode() === 'clerk' && <SessionControls />}
       </nav>
       <h1 style={{ marginTop: 0 }}>{title}</h1>
       {children}

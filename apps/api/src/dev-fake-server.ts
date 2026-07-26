@@ -22,6 +22,7 @@ import { createLogger } from '@combat/observability';
 import { MockReviewProvider, MockStorageProvider } from '@combat/providers';
 import type { WorkflowClient } from '@temporalio/client';
 import { buildServer } from './server';
+import { authenticatedCallers } from './test-helpers/authenticated-caller';
 
 /**
  * A Fastify server backed entirely by in-memory fakes (no Postgres, no
@@ -52,6 +53,14 @@ export const FIXTURES = {
   shotSelectionCampaignId: 'cccccccc-cccc-cccc-cccc-cccccccccccc',
   /** Post-M14 audit finding H-3: a campaign parked at the FINAL_APPROVAL gate, with an assessed FINAL_MASTER. */
   finalApprovalCampaignId: 'dddddddd-dddd-dddd-dddd-dddddddddddd',
+  /**
+   * AAMP-1 step 2: a real, verifiable user with **no Membership row anywhere**.
+   * Before authentication existed, "non-member" was simply an unknown uuid in a
+   * query string. Now the two failures are genuinely different — an unverifiable
+   * token is 401, and this user is 403 — and the browser suite needs a caller
+   * who authenticates successfully and is still refused.
+   */
+  strangerUserId: '99999999-9999-9999-9999-999999999999',
 };
 
 function buildFakeWorkflowClient(): WorkflowClient {
@@ -644,8 +653,22 @@ async function main() {
   await seedPerformance(store);
   await seedShotSelectionGate(store);
   await seedFinalApprovalGate(store);
+  // AAMP-1 step 2: the browser suite authenticates for real against this
+  // server — the hook, verifier, subject mapping and Membership lookup all run.
+  // Only the *identity provider* is faked, deterministically and offline, so
+  // Playwright needs no Clerk account, credentials or network access. See
+  // `@combat/auth/testing` for why this cannot be selected in a real process.
+  const auth = authenticatedCallers(store, [
+    FIXTURES.ownerUserId,
+    FIXTURES.reviewerUserId,
+    FIXTURES.strangerUserId,
+  ]);
+
   const app = buildServer({
     logger: createLogger({ serviceName: 'api-fake', level: 'silent' }),
+    tokenVerifier: auth.tokenVerifier,
+    profileDirectory: auth.profileDirectory,
+    userDb: auth.userDb,
     approvalDb: store,
     campaignDb: store,
     assetDb: store,

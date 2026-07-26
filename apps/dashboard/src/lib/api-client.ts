@@ -21,20 +21,52 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * AAMP-1 step 2: mints a session token per request and presents it as a bearer
+ * credential. The dashboard never holds, sends or even learns a user id — the
+ * `userId` field every call used to carry is gone, and `apps/api` derives the
+ * caller from this token alone.
+ *
+ * `getToken` is a function, not a value, so each request carries a fresh
+ * short-lived token rather than one captured when the client was built.
+ */
+export type TokenGetter = () => Promise<string | null>;
+
 async function request<T>(
   path: string,
-  init?: RequestInit,
-  baseUrl: string = API_BASE_URL,
+  init: RequestInit | undefined,
+  baseUrl: string,
+  getToken: TokenGetter,
 ): Promise<T> {
+  const token = await getToken();
   const response = await fetch(`${baseUrl}${path}`, {
     ...init,
-    headers: { 'Content-Type': 'application/json', ...init?.headers },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...init?.headers,
+    },
   });
   const body = await response.json().catch(() => undefined);
   if (!response.ok) {
     throw new ApiError(response.status, body);
   }
   return body as T;
+}
+
+export interface Me {
+  readonly userId: string;
+  readonly email: string;
+  readonly workspaces: readonly { readonly workspaceId: string; readonly role: string }[];
+}
+
+/**
+ * The verified caller and the workspaces they are actually a member of.
+ * This is what replaced the workspace id a human used to type into the
+ * development identity picker.
+ */
+export async function fetchMe(getToken: TokenGetter, baseUrl: string = API_BASE_URL): Promise<Me> {
+  return request<Me>('/me', undefined, baseUrl, getToken);
 }
 
 export interface Campaign {
@@ -598,94 +630,70 @@ export interface ApiClientOptions {
 
 export function createApiClient(
   workspaceId: string,
-  userId: string,
+  getToken: TokenGetter,
   options: ApiClientOptions = {},
 ) {
   const baseUrl = options.baseUrl ?? API_BASE_URL;
+  const call = <T>(path: string, init?: RequestInit) => request<T>(path, init, baseUrl, getToken);
 
   return {
-    listCampaigns: () =>
-      request<{ campaigns: Campaign[] }>(
-        `/workspaces/${workspaceId}/campaigns?userId=${userId}`,
-        undefined,
-        baseUrl,
-      ),
+    listCampaigns: () => call<{ campaigns: Campaign[] }>(`/workspaces/${workspaceId}/campaigns`),
 
     createCampaign: (name: string, idempotencyKey?: string) =>
-      request<{ campaign: Campaign }>(
-        `/workspaces/${workspaceId}/campaigns`,
-        { method: 'POST', body: JSON.stringify({ userId, name, idempotencyKey }) },
-        baseUrl,
-      ),
+      call<{ campaign: Campaign }>(`/workspaces/${workspaceId}/campaigns`, {
+        method: 'POST',
+        body: JSON.stringify({ name, idempotencyKey }),
+      }),
 
     getCampaignStatus: (campaignId: string) =>
-      request<CampaignStatus>(
-        `/workspaces/${workspaceId}/campaigns/${campaignId}/status?userId=${userId}`,
-        undefined,
-        baseUrl,
-      ),
+      call<CampaignStatus>(`/workspaces/${workspaceId}/campaigns/${campaignId}/status`),
 
     getBrief: (campaignId: string) =>
-      request<{ brief: CampaignBrief | null }>(
-        `/workspaces/${workspaceId}/campaigns/${campaignId}/brief?userId=${userId}`,
-        undefined,
-        baseUrl,
+      call<{ brief: CampaignBrief | null }>(
+        `/workspaces/${workspaceId}/campaigns/${campaignId}/brief`,
       ),
 
     saveDraftBrief: (campaignId: string, content: Partial<CampaignBriefContent>) =>
-      request<{ brief: CampaignBrief }>(
+      call<{ brief: CampaignBrief }>(
         `/workspaces/${workspaceId}/campaigns/${campaignId}/brief/draft`,
-        { method: 'POST', body: JSON.stringify({ userId, content }) },
-        baseUrl,
+        { method: 'POST', body: JSON.stringify({ content }) },
       ),
 
     submitBrief: (campaignId: string, content: CampaignBriefContent) =>
-      request<{ brief: CampaignBrief }>(
+      call<{ brief: CampaignBrief }>(
         `/workspaces/${workspaceId}/campaigns/${campaignId}/brief/submit`,
-        { method: 'POST', body: JSON.stringify({ userId, content }) },
-        baseUrl,
+        { method: 'POST', body: JSON.stringify({ content }) },
       ),
 
     startWorkflow: (campaignId: string) =>
-      request<{ workflowId: string; alreadyRunning: boolean }>(
+      call<{ workflowId: string; alreadyRunning: boolean }>(
         `/workspaces/${workspaceId}/campaigns/${campaignId}/workflow/start`,
-        { method: 'POST', body: JSON.stringify({ userId }) },
-        baseUrl,
+        { method: 'POST', body: JSON.stringify({}) },
       ),
 
     getStrategy: (campaignId: string) =>
-      request<{ strategy: Strategy | null }>(
-        `/workspaces/${workspaceId}/campaigns/${campaignId}/strategy?userId=${userId}`,
-        undefined,
-        baseUrl,
+      call<{ strategy: Strategy | null }>(
+        `/workspaces/${workspaceId}/campaigns/${campaignId}/strategy`,
       ),
 
     getConcept: (campaignId: string) =>
-      request<{ concept: CreativeConcept | null }>(
-        `/workspaces/${workspaceId}/campaigns/${campaignId}/concept?userId=${userId}`,
-        undefined,
-        baseUrl,
+      call<{ concept: CreativeConcept | null }>(
+        `/workspaces/${workspaceId}/campaigns/${campaignId}/concept`,
       ),
 
     getScript: (campaignId: string) =>
-      request<{ script: Script | null; shots: Shot[] }>(
-        `/workspaces/${workspaceId}/campaigns/${campaignId}/script?userId=${userId}`,
-        undefined,
-        baseUrl,
+      call<{ script: Script | null; shots: Shot[] }>(
+        `/workspaces/${workspaceId}/campaigns/${campaignId}/script`,
       ),
 
     getShotGeneration: (campaignId: string) =>
-      request<ShotGenerationView>(
-        `/workspaces/${workspaceId}/campaigns/${campaignId}/shot-generation?userId=${userId}`,
-        undefined,
-        baseUrl,
+      call<ShotGenerationView>(
+        `/workspaces/${workspaceId}/campaigns/${campaignId}/shot-generation`,
       ),
 
     getConceptApprovalState: (campaignId: string) =>
-      request<ConceptApprovalState>(
-        `/workspaces/${workspaceId}/campaigns/${campaignId}/approvals/concept/state?userId=${userId}`,
-        undefined,
-        baseUrl,
+      call<ConceptApprovalState>(
+        `/workspaces/${workspaceId}/campaigns/${campaignId}/approvals/concept/state`,
       ),
 
     decideConceptApproval: (
@@ -693,24 +701,18 @@ export function createApiClient(
       decision: 'APPROVED' | 'CHANGES_REQUESTED' | 'REJECTED',
       comments?: string,
     ) =>
-      request<{ approvalId: string; replayed: boolean }>(
+      call<{ approvalId: string; replayed: boolean }>(
         `/workspaces/${workspaceId}/campaigns/${campaignId}/approvals/concept`,
-        { method: 'POST', body: JSON.stringify({ userId, decision, comments }) },
-        baseUrl,
+        { method: 'POST', body: JSON.stringify({ decision, comments }) },
       ),
 
     getShotReview: (campaignId: string) =>
-      request<ShotReviewView>(
-        `/workspaces/${workspaceId}/campaigns/${campaignId}/shot-review?userId=${userId}`,
-        undefined,
-        baseUrl,
-      ),
+      call<ShotReviewView>(`/workspaces/${workspaceId}/campaigns/${campaignId}/shot-review`),
 
     createShotSelectionDraft: (campaignId: string) =>
-      request<{ set: ShotSelectionSetView; selections: ShotReviewSelectionEntry[] }>(
+      call<{ set: ShotSelectionSetView; selections: ShotReviewSelectionEntry[] }>(
         `/workspaces/${workspaceId}/campaigns/${campaignId}/shot-review/draft`,
-        { method: 'POST', body: JSON.stringify({ userId }) },
-        baseUrl,
+        { method: 'POST', body: JSON.stringify({}) },
       ),
 
     selectShotCandidate: (
@@ -723,10 +725,9 @@ export function createApiClient(
         rationale?: string;
       },
     ) =>
-      request<{ set: ShotSelectionSetView }>(
+      call<{ set: ShotSelectionSetView }>(
         `/workspaces/${workspaceId}/campaigns/${campaignId}/shot-review/select`,
-        { method: 'POST', body: JSON.stringify({ userId, ...input }) },
-        baseUrl,
+        { method: 'POST', body: JSON.stringify({ ...input }) },
       ),
 
     rejectShotCandidate: (
@@ -738,55 +739,39 @@ export function createApiClient(
         expectedRevision: number;
       },
     ) =>
-      request<{ set: ShotSelectionSetView }>(
+      call<{ set: ShotSelectionSetView }>(
         `/workspaces/${workspaceId}/campaigns/${campaignId}/shot-review/reject-shot`,
-        { method: 'POST', body: JSON.stringify({ userId, ...input }) },
-        baseUrl,
+        { method: 'POST', body: JSON.stringify({ ...input }) },
       ),
 
     approveShotSelection: (
       campaignId: string,
       input: { setId: string; expectedRevision: number },
     ) =>
-      request<{ approvalId: string; replayed: boolean; set: ShotSelectionSetView }>(
+      call<{ approvalId: string; replayed: boolean; set: ShotSelectionSetView }>(
         `/workspaces/${workspaceId}/campaigns/${campaignId}/shot-review/approve`,
-        { method: 'POST', body: JSON.stringify({ userId, ...input }) },
-        baseUrl,
+        { method: 'POST', body: JSON.stringify({ ...input }) },
       ),
 
     requestShotRegeneration: (campaignId: string, input: { setId: string; comments?: string }) =>
-      request<{ approvalId: string; replayed: boolean }>(
+      call<{ approvalId: string; replayed: boolean }>(
         `/workspaces/${workspaceId}/campaigns/${campaignId}/shot-review/request-regeneration`,
-        { method: 'POST', body: JSON.stringify({ userId, ...input }) },
-        baseUrl,
+        { method: 'POST', body: JSON.stringify({ ...input }) },
       ),
 
     getCompositing: (campaignId: string) =>
-      request<CompositingView>(
-        `/workspaces/${workspaceId}/campaigns/${campaignId}/compositing?userId=${userId}`,
-        undefined,
-        baseUrl,
-      ),
+      call<CompositingView>(`/workspaces/${workspaceId}/campaigns/${campaignId}/compositing`),
 
     cancelCompositing: (campaignId: string) =>
-      request<{ cancelRequested: boolean }>(
+      call<{ cancelRequested: boolean }>(
         `/workspaces/${workspaceId}/campaigns/${campaignId}/compositing/cancel`,
-        { method: 'POST', body: JSON.stringify({ userId }) },
-        baseUrl,
+        { method: 'POST', body: JSON.stringify({}) },
       ),
 
     getSoundDesign: (campaignId: string) =>
-      request<SoundDesignView>(
-        `/workspaces/${workspaceId}/campaigns/${campaignId}/sound-design?userId=${userId}`,
-        undefined,
-        baseUrl,
-      ),
+      call<SoundDesignView>(`/workspaces/${workspaceId}/campaigns/${campaignId}/sound-design`),
     getFinalQa: (campaignId: string) =>
-      request<FinalQaView>(
-        `/workspaces/${workspaceId}/campaigns/${campaignId}/final-qa?userId=${userId}`,
-        undefined,
-        baseUrl,
-      ),
+      call<FinalQaView>(`/workspaces/${workspaceId}/campaigns/${campaignId}/final-qa`),
 
     /**
      * The FINAL human gate. Dispatched only from apps/api's
@@ -803,37 +788,27 @@ export function createApiClient(
             comments?: string;
           },
     ) =>
-      request<{ approvalId: string; replayed: boolean }>(
+      call<{ approvalId: string; replayed: boolean }>(
         `/workspaces/${workspaceId}/campaigns/${campaignId}/approvals/final`,
-        { method: 'POST', body: JSON.stringify({ userId, ...input }) },
-        baseUrl,
+        { method: 'POST', body: JSON.stringify({ ...input }) },
       ),
     getVariants: (campaignId: string) =>
-      request<VariantsView>(
-        `/workspaces/${workspaceId}/campaigns/${campaignId}/variants?userId=${userId}`,
-        undefined,
-        baseUrl,
-      ),
+      call<VariantsView>(`/workspaces/${workspaceId}/campaigns/${campaignId}/variants`),
 
     /** Signed, time-limited preview URL — null while the mock renderer produces no bytes. */
     getVariantPreview: (campaignId: string, assetId: string) =>
-      request<{ hasMedia: boolean; url: string | null }>(
-        `/workspaces/${workspaceId}/campaigns/${campaignId}/variants/${assetId}/preview?userId=${userId}`,
-        undefined,
-        baseUrl,
+      call<{ hasMedia: boolean; url: string | null }>(
+        `/workspaces/${workspaceId}/campaigns/${campaignId}/variants/${assetId}/preview`,
       ),
 
     cancelVariants: (campaignId: string) =>
-      request<{ cancelRequested: boolean }>(
+      call<{ cancelRequested: boolean }>(
         `/workspaces/${workspaceId}/campaigns/${campaignId}/variants/cancel`,
-        { method: 'POST', body: JSON.stringify({ userId }) },
-        baseUrl,
+        { method: 'POST', body: JSON.stringify({}) },
       ),
     getCampaignPerformance: (campaignId: string) =>
-      request<CampaignPerformanceView>(
-        `/workspaces/${workspaceId}/campaigns/${campaignId}/performance?userId=${userId}`,
-        undefined,
-        baseUrl,
+      call<CampaignPerformanceView>(
+        `/workspaces/${workspaceId}/campaigns/${campaignId}/performance`,
       ),
 
     /**
@@ -848,28 +823,21 @@ export function createApiClient(
         observations: PerformanceObservationEntry[];
       },
     ) =>
-      request<{
+      call<{
         ingested: number;
         deduplicated: number;
         observations: { observationId: string; externalPostId: string; alreadyExisted: boolean }[];
-      }>(
-        `/workspaces/${workspaceId}/campaigns/${campaignId}/performance/observations`,
-        { method: 'POST', body: JSON.stringify({ userId, ...input }) },
-        baseUrl,
-      ),
+      }>(`/workspaces/${workspaceId}/campaigns/${campaignId}/performance/observations`, {
+        method: 'POST',
+        body: JSON.stringify({ ...input }),
+      }),
 
-    getLearnings: () =>
-      request<LearningsView>(
-        `/workspaces/${workspaceId}/learnings?userId=${userId}`,
-        undefined,
-        baseUrl,
-      ),
+    getLearnings: () => call<LearningsView>(`/workspaces/${workspaceId}/learnings`),
 
     reviewLearning: (learningId: string, decision: 'APPROVED' | 'REJECTED') =>
-      request<{ id: string; status: string; version: number }>(
+      call<{ id: string; status: string; version: number }>(
         `/workspaces/${workspaceId}/learnings/${learningId}/review`,
-        { method: 'POST', body: JSON.stringify({ userId, decision }) },
-        baseUrl,
+        { method: 'POST', body: JSON.stringify({ decision }) },
       ),
   };
 }

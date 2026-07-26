@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { bearer, signIn } from './auth';
 
 /**
  * M13 — the performance and learning screens, against the DISTRIBUTED campaign
@@ -15,15 +16,10 @@ const FIXTURES = {
   ownerUserId: '22222222-2222-2222-2222-222222222222',
   reviewerUserId: '33333333-3333-3333-3333-333333333333',
   performanceCampaignId: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+  /** A verified user with no Membership row — authenticates, then is refused. */
+  strangerUserId: '99999999-9999-9999-9999-999999999999',
 };
 const API_BASE_URL = 'http://127.0.0.1:4100';
-
-async function signIn(page: import('@playwright/test').Page, userId: string) {
-  await page.goto('/');
-  await page.getByLabel('Workspace ID').fill(FIXTURES.workspaceId);
-  await page.getByLabel('User ID (membership)').fill(userId);
-  await page.getByRole('button', { name: 'Continue' }).click();
-}
 
 test.describe('Campaign performance screen', () => {
   test('shows closed-window observations with derived rates and their source', async ({ page }) => {
@@ -105,8 +101,8 @@ test.describe('Forged request bypassing the dashboard UI', () => {
     const response = await request.post(
       `${API_BASE_URL}/workspaces/${FIXTURES.workspaceId}/campaigns/${FIXTURES.performanceCampaignId}/performance/observations`,
       {
+        headers: bearer(FIXTURES.reviewerUserId),
         data: {
-          userId: FIXTURES.reviewerUserId,
           source: 'FIXTURE',
           observations: [
             {
@@ -126,9 +122,9 @@ test.describe('Forged request bypassing the dashboard UI', () => {
   });
 
   test('a REVIEWER is refused a learning approval server-side', async ({ request }) => {
-    const list = await request.get(
-      `${API_BASE_URL}/workspaces/${FIXTURES.workspaceId}/learnings?userId=${FIXTURES.reviewerUserId}`,
-    );
+    const list = await request.get(`${API_BASE_URL}/workspaces/${FIXTURES.workspaceId}/learnings`, {
+      headers: bearer(FIXTURES.reviewerUserId),
+    });
     const proposed = (await list.json()).learnings.find(
       (l: { status: string }) => l.status === 'PROPOSED',
     );
@@ -136,25 +132,39 @@ test.describe('Forged request bypassing the dashboard UI', () => {
 
     const response = await request.post(
       `${API_BASE_URL}/workspaces/${FIXTURES.workspaceId}/learnings/${proposed.id}/review`,
-      { data: { userId: FIXTURES.reviewerUserId, decision: 'APPROVED' } },
+      { headers: bearer(FIXTURES.reviewerUserId), data: { decision: 'APPROVED' } },
     );
 
     expect(response.status()).toBe(403);
   });
 
-  test('a non-member cannot read learnings at all', async ({ request }) => {
+  test('a verified non-member cannot read learnings at all', async ({ request }) => {
     const response = await request.get(
-      `${API_BASE_URL}/workspaces/${FIXTURES.workspaceId}/learnings?userId=99999999-9999-9999-9999-999999999999`,
+      `${API_BASE_URL}/workspaces/${FIXTURES.workspaceId}/learnings`,
+      { headers: bearer(FIXTURES.strangerUserId) },
     );
 
+    // 403, not 401: this caller is who they say they are, and still has no
+    // membership. Authorization is read from PostgreSQL, not from the token.
     expect(response.status()).toBe(403);
+  });
+
+  test('an unauthenticated request is refused before authorization is even considered', async ({
+    request,
+  }) => {
+    const response = await request.get(
+      `${API_BASE_URL}/workspaces/${FIXTURES.workspaceId}/learnings`,
+    );
+
+    expect(response.status()).toBe(401);
+    expect(await response.json()).toMatchObject({ error: 'UNAUTHENTICATED' });
   });
 
   test('there is no endpoint to connect an advertising platform', async ({ request }) => {
     for (const path of ['connect', 'oauth', 'sync']) {
       const response = await request.post(
         `${API_BASE_URL}/workspaces/${FIXTURES.workspaceId}/campaigns/${FIXTURES.performanceCampaignId}/performance/${path}`,
-        { data: { userId: FIXTURES.ownerUserId } },
+        { headers: bearer(FIXTURES.ownerUserId), data: {} },
       );
       expect(response.status()).toBe(404);
     }

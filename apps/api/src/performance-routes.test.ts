@@ -9,6 +9,8 @@ import {
 } from '@combat/database';
 import type { RoleName } from '@combat/domain';
 import { registerPerformanceRoutes } from './performance-routes';
+import { registerAuthentication } from './authentication';
+import { bearerFor, permissiveTestAuthentication } from './test-helpers/authenticated-caller';
 
 /** A closed window relative to any realistic test clock. */
 const WINDOW = {
@@ -64,6 +66,10 @@ async function seed(store: InMemoryCampaignStore, role: RoleName = 'OWNER_ADMIN'
 
 function buildApp(store: InMemoryCampaignStore) {
   const app = Fastify();
+  // AAMP-1 step 2: these suites exercise authorization, so the caller arrives
+  // authenticated exactly as a production caller does — a verified bearer
+  // token, never a request field. See test-helpers/authenticated-caller.ts.
+  registerAuthentication(app, permissiveTestAuthentication().hookDeps);
   registerPerformanceRoutes(app, { db: store });
   return app;
 }
@@ -71,8 +77,8 @@ function buildApp(store: InMemoryCampaignStore) {
 function ingestUrl(s: { workspaceId: string; campaignId: string }) {
   return `/workspaces/${s.workspaceId}/campaigns/${s.campaignId}/performance/observations`;
 }
-function historyUrl(s: { workspaceId: string; campaignId: string }, userId: string) {
-  return `/workspaces/${s.workspaceId}/campaigns/${s.campaignId}/performance?userId=${userId}`;
+function historyUrl(s: { workspaceId: string; campaignId: string }) {
+  return `/workspaces/${s.workspaceId}/campaigns/${s.campaignId}/performance`;
 }
 
 describe('performance routes — fixture/manual ingestion', () => {
@@ -84,8 +90,8 @@ describe('performance routes — fixture/manual ingestion', () => {
     const res = await app.inject({
       method: 'POST',
       url: ingestUrl(s),
+      headers: bearerFor(s.memberId),
       payload: {
-        userId: s.memberId,
         source: 'FIXTURE',
         fixtureRef: 'fixtures/tiktok-week-30.json',
         observations: [observation(), observation({ externalPostId: 'post-2' })],
@@ -103,13 +109,18 @@ describe('performance routes — fixture/manual ingestion', () => {
     const s = await seed(store);
     const app = buildApp(store);
     const payload = {
-      userId: s.memberId,
       source: 'MANUAL_ENTRY',
       observations: [observation()],
     };
 
-    await app.inject({ method: 'POST', url: ingestUrl(s), payload });
-    const second = await app.inject({ method: 'POST', url: ingestUrl(s), payload });
+    const inject = {
+      method: 'POST' as const,
+      url: ingestUrl(s),
+      headers: bearerFor(s.memberId),
+      payload,
+    };
+    await app.inject(inject);
+    const second = await app.inject(inject);
 
     expect(second.json()).toMatchObject({ ingested: 0, deduplicated: 1 });
     expect(store.performanceObservationRecords).toHaveLength(1);
@@ -123,8 +134,8 @@ describe('performance routes — fixture/manual ingestion', () => {
     const res = await app.inject({
       method: 'POST',
       url: ingestUrl(s),
+      headers: bearerFor(s.memberId),
       payload: {
-        userId: s.memberId,
         source: 'MANUAL_ENTRY',
         observations: [
           observation({ raw: { impressions: 100, clicks: 9_999, conversions: 0, spendCents: 0 } }),
@@ -145,8 +156,8 @@ describe('performance routes — fixture/manual ingestion', () => {
     const res = await app.inject({
       method: 'POST',
       url: ingestUrl(s),
+      headers: bearerFor(s.memberId),
       payload: {
-        userId: s.memberId,
         source: 'MANUAL_ENTRY',
         observations: [
           observation({
@@ -169,8 +180,8 @@ describe('performance routes — fixture/manual ingestion', () => {
     const res = await app.inject({
       method: 'POST',
       url: ingestUrl(s),
+      headers: bearerFor(s.memberId),
       payload: {
-        userId: s.memberId,
         source: 'TIKTOK_ADS_API',
         observations: [observation()],
       },
@@ -195,7 +206,8 @@ describe('performance routes — RBAC and cross-workspace rejection', () => {
     const res = await app.inject({
       method: 'POST',
       url: ingestUrl(s),
-      payload: { userId: s.memberId, source: 'FIXTURE', observations: [observation()] },
+      headers: bearerFor(s.memberId),
+      payload: { source: 'FIXTURE', observations: [observation()] },
     });
 
     expect(res.statusCode).toBe(expected);
@@ -214,7 +226,11 @@ describe('performance routes — RBAC and cross-workspace rejection', () => {
     const s = await seed(store, role);
     const app = buildApp(store);
 
-    const res = await app.inject({ method: 'GET', url: historyUrl(s, s.memberId) });
+    const res = await app.inject({
+      method: 'GET',
+      url: historyUrl(s),
+      headers: bearerFor(s.memberId),
+    });
 
     expect(res.statusCode).toBe(expected);
   });
@@ -225,15 +241,17 @@ describe('performance routes — RBAC and cross-workspace rejection', () => {
     const app = buildApp(store);
     const stranger = randomUUID();
 
-    expect((await app.inject({ method: 'GET', url: historyUrl(s, stranger) })).statusCode).toBe(
-      403,
-    );
+    expect(
+      (await app.inject({ method: 'GET', url: historyUrl(s), headers: bearerFor(stranger) }))
+        .statusCode,
+    ).toBe(403);
     expect(
       (
         await app.inject({
           method: 'POST',
           url: ingestUrl(s),
-          payload: { userId: stranger, source: 'FIXTURE', observations: [observation()] },
+          headers: bearerFor(stranger),
+          payload: { source: 'FIXTURE', observations: [observation()] },
         })
       ).statusCode,
     ).toBe(403);
@@ -241,7 +259,8 @@ describe('performance routes — RBAC and cross-workspace rejection', () => {
       (
         await app.inject({
           method: 'GET',
-          url: `/workspaces/${s.workspaceId}/learnings?userId=${stranger}`,
+          url: `/workspaces/${s.workspaceId}/learnings`,
+          headers: bearerFor(stranger),
         })
       ).statusCode,
     ).toBe(403);
@@ -254,7 +273,8 @@ describe('performance routes — RBAC and cross-workspace rejection', () => {
 
     const res = await app.inject({
       method: 'GET',
-      url: `/workspaces/${randomUUID()}/campaigns/${s.campaignId}/performance?userId=${s.memberId}`,
+      url: `/workspaces/${randomUUID()}/campaigns/${s.campaignId}/performance`,
+      headers: bearerFor(s.memberId),
     });
 
     expect(res.statusCode).toBe(403);
@@ -269,10 +289,15 @@ describe('performance routes — RBAC and cross-workspace rejection', () => {
     await app.inject({
       method: 'POST',
       url: ingestUrl(a),
-      payload: { userId: a.memberId, source: 'FIXTURE', observations: [observation()] },
+      headers: bearerFor(a.memberId),
+      payload: { source: 'FIXTURE', observations: [observation()] },
     });
 
-    const res = await app.inject({ method: 'GET', url: historyUrl(b, b.memberId) });
+    const res = await app.inject({
+      method: 'GET',
+      url: historyUrl(b),
+      headers: bearerFor(b.memberId),
+    });
     expect(res.statusCode).toBe(200);
     expect(res.json().observations).toHaveLength(0);
   });
@@ -287,7 +312,8 @@ describe('performance routes — learning records', () => {
 
     const res = await app.inject({
       method: 'GET',
-      url: `/workspaces/${s.workspaceId}/learnings?userId=${s.memberId}`,
+      url: `/workspaces/${s.workspaceId}/learnings`,
+      headers: bearerFor(s.memberId),
     });
 
     expect(res.statusCode).toBe(200);
@@ -317,7 +343,8 @@ describe('performance routes — learning records', () => {
 
     const res = await app.inject({
       method: 'GET',
-      url: `/workspaces/${b.workspaceId}/learnings?userId=${b.memberId}`,
+      url: `/workspaces/${b.workspaceId}/learnings`,
+      headers: bearerFor(b.memberId),
     });
 
     expect(res.json().learnings).toHaveLength(0);
@@ -341,7 +368,8 @@ describe('performance routes — learning records', () => {
     const res = await app.inject({
       method: 'POST',
       url: `/workspaces/${s.workspaceId}/learnings/${record.id}/review`,
-      payload: { userId: s.memberId, decision: 'APPROVED' },
+      headers: bearerFor(s.memberId),
+      payload: { decision: 'APPROVED' },
     });
 
     expect(res.statusCode).toBe(expected);
@@ -363,7 +391,8 @@ describe('performance routes — learning records', () => {
     const res = await app.inject({
       method: 'POST',
       url: `/workspaces/${b.workspaceId}/learnings/${record.id}/review`,
-      payload: { userId: b.memberId, decision: 'APPROVED' },
+      headers: bearerFor(b.memberId),
+      payload: { decision: 'APPROVED' },
     });
 
     expect(res.statusCode).toBe(404);
@@ -382,7 +411,8 @@ describe('performance routes — no production-state surface (M13 scope)', () =>
       const res = await app.inject({
         method: 'POST',
         url: `/workspaces/${s.workspaceId}/campaigns/${s.campaignId}/performance/${path}`,
-        payload: { userId: s.memberId },
+        headers: bearerFor(s.memberId),
+        payload: {},
       });
       expect(res.statusCode).toBe(404);
     }
@@ -397,7 +427,8 @@ describe('performance routes — no production-state surface (M13 scope)', () =>
     await app.inject({
       method: 'POST',
       url: ingestUrl(s),
-      payload: { userId: s.memberId, source: 'FIXTURE', observations: [observation()] },
+      headers: bearerFor(s.memberId),
+      payload: { source: 'FIXTURE', observations: [observation()] },
     });
 
     expect(store.campaigns[0]!.currentStage).toBe(before.currentStage);

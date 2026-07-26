@@ -10,10 +10,16 @@ import {
   InMemoryCampaignStore,
 } from '@combat/database';
 import { registerShotGenerationRoutes } from './shot-generation-routes';
+import { registerAuthentication } from './authentication';
+import { bearerFor, permissiveTestAuthentication } from './test-helpers/authenticated-caller';
 
 function buildApp() {
   const store = new InMemoryCampaignStore();
   const app = Fastify();
+  // AAMP-1 step 2: these suites exercise authorization, so the caller arrives
+  // authenticated exactly as a production caller does — a verified bearer
+  // token, never a request field. See test-helpers/authenticated-caller.ts.
+  registerAuthentication(app, permissiveTestAuthentication().hookDeps);
   registerShotGenerationRoutes(app, { db: store });
   return { app, store };
 }
@@ -92,7 +98,8 @@ describe('GET /workspaces/:workspaceId/campaigns/:campaignId/shot-generation', (
 
     const response = await app.inject({
       method: 'GET',
-      url: `/workspaces/${workspaceId}/campaigns/${campaignId}/shot-generation?userId=${randomUUID()}`,
+      url: `/workspaces/${workspaceId}/campaigns/${campaignId}/shot-generation`,
+      headers: bearerFor(randomUUID()),
     });
 
     expect(response.statusCode).toBe(403);
@@ -107,7 +114,8 @@ describe('GET /workspaces/:workspaceId/campaigns/:campaignId/shot-generation', (
 
     const response = await app.inject({
       method: 'GET',
-      url: `/workspaces/${workspaceId}/campaigns/${campaignId}/shot-generation?userId=${userId}`,
+      url: `/workspaces/${workspaceId}/campaigns/${campaignId}/shot-generation`,
+      headers: bearerFor(userId),
     });
 
     expect(response.statusCode).toBe(200);
@@ -159,7 +167,8 @@ describe('GET /workspaces/:workspaceId/campaigns/:campaignId/shot-generation', (
 
     const response = await app.inject({
       method: 'GET',
-      url: `/workspaces/${workspaceId}/campaigns/${campaignId}/shot-generation?userId=${userId}`,
+      url: `/workspaces/${workspaceId}/campaigns/${campaignId}/shot-generation`,
+      headers: bearerFor(userId),
     });
 
     expect(response.statusCode).toBe(200);
@@ -201,7 +210,8 @@ describe('GET /workspaces/:workspaceId/campaigns/:campaignId/shot-generation', (
 
     const response = await app.inject({
       method: 'GET',
-      url: `/workspaces/${workspaceId}/campaigns/${campaignId}/shot-generation?userId=${userId}`,
+      url: `/workspaces/${workspaceId}/campaigns/${campaignId}/shot-generation`,
+      headers: bearerFor(userId),
     });
 
     expect(response.statusCode).toBe(200);
@@ -238,7 +248,8 @@ describe('GET /workspaces/:workspaceId/campaigns/:campaignId/shot-generation', (
 
     const response = await app.inject({
       method: 'GET',
-      url: `/workspaces/${workspaceId}/campaigns/${campaignId}/shot-generation?userId=${userId}`,
+      url: `/workspaces/${workspaceId}/campaigns/${campaignId}/shot-generation`,
+      headers: bearerFor(userId),
     });
 
     expect(response.statusCode).toBe(200);

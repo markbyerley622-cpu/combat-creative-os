@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { SessionGate } from '@/components/SessionGate';
+import { WorkspaceGate } from '@/components/WorkspaceGate';
 import { EmptyState, ErrorState, LoadingState, PageShell } from '@/components/PageShell';
 import {
   ApiError,
@@ -12,7 +12,7 @@ import {
   type Shot,
   type Strategy,
 } from '@/lib/api-client';
-import { useSession } from '@/lib/session';
+import { useWorkspace } from '@/lib/workspace';
 
 type Decision = 'APPROVED' | 'CHANGES_REQUESTED' | 'REJECTED';
 
@@ -25,7 +25,7 @@ interface LoadedData {
 }
 
 function ConceptReview({ campaignId }: { campaignId: string }) {
-  const { session } = useSession();
+  const { workspace, getToken } = useWorkspace();
   const [data, setData] = useState<LoadedData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [comments, setComments] = useState('');
@@ -34,8 +34,8 @@ function ConceptReview({ campaignId }: { campaignId: string }) {
   const [decided, setDecided] = useState<Decision | null>(null);
 
   async function load() {
-    if (!session) return;
-    const client = createApiClient(session.workspaceId, session.userId);
+    if (!workspace) return;
+    const client = createApiClient(workspace.workspaceId, getToken);
     try {
       const [strategyRes, conceptRes, scriptRes, approvalState] = await Promise.all([
         client.getStrategy(campaignId),
@@ -59,10 +59,10 @@ function ConceptReview({ campaignId }: { campaignId: string }) {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session, campaignId]);
+  }, [workspace, getToken, campaignId]);
 
   async function handleDecision(decision: Decision) {
-    if (!session) return;
+    if (!workspace) return;
     if (decision !== 'APPROVED' && comments.trim().length === 0) {
       setDecisionError(
         'Revision instructions are required for changes-requested or rejected decisions.',
@@ -72,7 +72,7 @@ function ConceptReview({ campaignId }: { campaignId: string }) {
     setDecisionError(null);
     setSubmittingDecision(decision);
     try {
-      const client = createApiClient(session.workspaceId, session.userId);
+      const client = createApiClient(workspace.workspaceId, getToken);
       await client.decideConceptApproval(campaignId, decision, comments.trim() || undefined);
       setDecided(decision);
       await load();
@@ -212,10 +212,10 @@ function ConceptReview({ campaignId }: { campaignId: string }) {
 
 export default function ConceptReviewPage({ params }: { params: { campaignId: string } }) {
   return (
-    <SessionGate>
+    <WorkspaceGate>
       <PageShell title="Concept review">
         <ConceptReview campaignId={params.campaignId} />
       </PageShell>
-    </SessionGate>
+    </WorkspaceGate>
   );
 }

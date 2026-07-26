@@ -16,6 +16,8 @@ import {
   type GenerationCandidateRecord,
 } from '@combat/database';
 import { registerShotReviewRoutes } from './shot-review-routes';
+import { registerAuthentication } from './authentication';
+import { bearerFor, permissiveTestAuthentication } from './test-helpers/authenticated-caller';
 
 type SpecInput = Parameters<typeof createShotSpecification>[2];
 function specInput(
@@ -212,6 +214,10 @@ function buildApp(
   reviewProvider = new MockReviewProvider(),
 ) {
   const app = Fastify();
+  // AAMP-1 step 2: these suites exercise authorization, so the caller arrives
+  // authenticated exactly as a production caller does — a verified bearer
+  // token, never a request field. See test-helpers/authenticated-caller.ts.
+  registerAuthentication(app, permissiveTestAuthentication().hookDeps);
   registerShotReviewRoutes(app, {
     db: store,
     storageProvider: new MockStorageProvider(),
@@ -251,7 +257,8 @@ describe('shot-review routes', () => {
 
     const res = await app.inject({
       method: 'GET',
-      url: `/workspaces/${s.workspaceId}/campaigns/${s.campaignId}/shot-review?userId=${s.analystId}`,
+      url: `/workspaces/${s.workspaceId}/campaigns/${s.campaignId}/shot-review`,
+      headers: bearerFor(s.analystId),
     });
     expect(res.statusCode).toBe(200);
     const body = res.json();
@@ -272,7 +279,8 @@ describe('shot-review routes', () => {
     const res = await app.inject({
       method: 'POST',
       url: `/workspaces/${s.workspaceId}/campaigns/${s.campaignId}/shot-review/draft`,
-      payload: { userId: s.reviewerId },
+      headers: bearerFor(s.reviewerId),
+      payload: {},
     });
     expect(res.statusCode).toBe(201);
     expect(res.json().selections).toHaveLength(2);
@@ -291,8 +299,8 @@ describe('shot-review routes', () => {
     const res = await app.inject({
       method: 'POST',
       url: `/workspaces/${s.workspaceId}/campaigns/${s.campaignId}/shot-review/select`,
+      headers: bearerFor(s.analystId),
       payload: {
-        userId: s.analystId,
         setId: set.id,
         shotId: s.shots[0]!.id,
         candidateId: s.candidatesByShot.get(s.shots[0]!.id)!.id,
@@ -312,8 +320,8 @@ describe('shot-review routes', () => {
     const res = await app.inject({
       method: 'POST',
       url: `/workspaces/${s.workspaceId}/campaigns/${s.campaignId}/shot-review/select`,
+      headers: bearerFor(s.reviewerId),
       payload: {
-        userId: s.reviewerId,
         setId: set.id,
         shotId: s.shots[0]!.id,
         candidateId: s.candidatesByShot.get(s.shots[0]!.id)!.id,
@@ -339,8 +347,8 @@ describe('shot-review routes', () => {
       const r = await app.inject({
         method: 'POST',
         url: `/workspaces/${s.workspaceId}/campaigns/${s.campaignId}/shot-review/select`,
+        headers: bearerFor(s.reviewerId),
         payload: {
-          userId: s.reviewerId,
           setId: set.id,
           shotId: shot.id,
           candidateId: s.candidatesByShot.get(shot.id)!.id,
@@ -359,7 +367,8 @@ describe('shot-review routes', () => {
     const approve = await app.inject({
       method: 'POST',
       url: `/workspaces/${s.workspaceId}/campaigns/${s.campaignId}/shot-review/approve`,
-      payload: { userId: s.reviewerId, setId: set.id, expectedRevision: revision },
+      headers: bearerFor(s.reviewerId),
+      payload: { setId: set.id, expectedRevision: revision },
     });
     expect(approve.statusCode).toBe(202);
     expect(signal).toHaveBeenCalledTimes(1);
@@ -370,7 +379,8 @@ describe('shot-review routes', () => {
     const retry = await app.inject({
       method: 'POST',
       url: `/workspaces/${s.workspaceId}/campaigns/${s.campaignId}/shot-review/approve`,
-      payload: { userId: s.reviewerId, setId: set.id, expectedRevision: revision },
+      headers: bearerFor(s.reviewerId),
+      payload: { setId: set.id, expectedRevision: revision },
     });
     // The set is already APPROVED, so a re-approve is refused as NOT_DRAFT — the
     // gate cannot be crossed twice off one draft.
@@ -388,8 +398,8 @@ describe('shot-review routes', () => {
     await app.inject({
       method: 'POST',
       url: `/workspaces/${s.workspaceId}/campaigns/${s.campaignId}/shot-review/select`,
+      headers: bearerFor(s.reviewerId),
       payload: {
-        userId: s.reviewerId,
         setId: set.id,
         shotId: s.shots[0]!.id,
         candidateId: s.candidatesByShot.get(s.shots[0]!.id)!.id,
@@ -400,7 +410,8 @@ describe('shot-review routes', () => {
     const approve = await app.inject({
       method: 'POST',
       url: `/workspaces/${s.workspaceId}/campaigns/${s.campaignId}/shot-review/approve`,
-      payload: { userId: s.reviewerId, setId: set.id, expectedRevision: 1 },
+      headers: bearerFor(s.reviewerId),
+      payload: { setId: set.id, expectedRevision: 1 },
     });
     expect(approve.statusCode).toBe(409);
     expect(approve.json().error).toBe('INCOMPLETE');
@@ -418,8 +429,8 @@ describe('shot-review routes', () => {
     const reject = await app.inject({
       method: 'POST',
       url: `/workspaces/${s.workspaceId}/campaigns/${s.campaignId}/shot-review/reject-shot`,
+      headers: bearerFor(s.reviewerId),
       payload: {
-        userId: s.reviewerId,
         setId: set.id,
         shotId: s.shots[0]!.id,
         regenerationFeedback: 'Too dark, brighten the key light.',
@@ -431,7 +442,8 @@ describe('shot-review routes', () => {
     const regen = await app.inject({
       method: 'POST',
       url: `/workspaces/${s.workspaceId}/campaigns/${s.campaignId}/shot-review/request-regeneration`,
-      payload: { userId: s.reviewerId, setId: set.id },
+      headers: bearerFor(s.reviewerId),
+      payload: { setId: set.id },
     });
     expect(regen.statusCode).toBe(202);
     expect(store.approvals[0]?.decision).toBe('CHANGES_REQUESTED');
@@ -448,7 +460,8 @@ describe('shot-review routes', () => {
     const regen = await app.inject({
       method: 'POST',
       url: `/workspaces/${s.workspaceId}/campaigns/${s.campaignId}/shot-review/request-regeneration`,
-      payload: { userId: s.reviewerId, setId: set.id },
+      headers: bearerFor(s.reviewerId),
+      payload: { setId: set.id },
     });
     expect(regen.statusCode).toBe(409);
     expect(regen.json().error).toBe('NO_REJECTED_SHOTS');
@@ -464,8 +477,8 @@ describe('shot-review routes', () => {
     await app.inject({
       method: 'POST',
       url: `/workspaces/${s.workspaceId}/campaigns/${s.campaignId}/shot-review/select`,
+      headers: bearerFor(s.reviewerId),
       payload: {
-        userId: s.reviewerId,
         setId: set.id,
         shotId: s.shots[0]!.id,
         candidateId: s.candidatesByShot.get(s.shots[0]!.id)!.id,
@@ -475,8 +488,8 @@ describe('shot-review routes', () => {
     const stale = await app.inject({
       method: 'POST',
       url: `/workspaces/${s.workspaceId}/campaigns/${s.campaignId}/shot-review/select`,
+      headers: bearerFor(s.reviewerId),
       payload: {
-        userId: s.reviewerId,
         setId: set.id,
         shotId: s.shots[1]!.id,
         candidateId: s.candidatesByShot.get(s.shots[1]!.id)!.id,
@@ -495,7 +508,8 @@ describe('shot-review routes', () => {
     // The reviewer is a member of s.workspaceId, but asks about it under a different workspace id.
     const res = await app.inject({
       method: 'GET',
-      url: `/workspaces/${randomUUID()}/campaigns/${s.campaignId}/shot-review?userId=${s.reviewerId}`,
+      url: `/workspaces/${randomUUID()}/campaigns/${s.campaignId}/shot-review`,
+      headers: bearerFor(s.reviewerId),
     });
     expect(res.statusCode).toBe(403);
   });
@@ -508,8 +522,8 @@ describe('shot-review routes', () => {
     const res = await app.inject({
       method: 'POST',
       url: `/workspaces/${s.workspaceId}/campaigns/${s.campaignId}/shot-review/comment`,
+      headers: bearerFor(s.reviewerId),
       payload: {
-        userId: s.reviewerId,
         shotId: s.shots[0]!.id,
         candidateId: s.candidatesByShot.get(s.shots[0]!.id)!.id,
         body: 'Fix framing at 1.5s',

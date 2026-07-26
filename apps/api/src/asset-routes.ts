@@ -11,6 +11,7 @@ import {
 import { activities } from '@combat/workflows';
 import type { StorageProvider } from '@combat/providers';
 import type { AssetDatabase } from './asset-database';
+import { requirePrincipal } from './authentication';
 
 /**
  * Declared-value MIME allowlist for M5's upload path — brand assets and
@@ -49,19 +50,23 @@ const LicensingBodySchema = z.object({
   expiresAt: z.coerce.date().optional(),
 });
 
-const RequestUploadBodySchema = z.object({
-  userId: z.string().uuid(),
-  originalFilename: z.string().min(1),
-  mimeType: z.string().min(1),
-  sizeBytes: z.number().int().positive(),
-  licensing: LicensingBodySchema,
-});
+/**
+ * AAMP-1 step 2: no `userId` field, and `.strict()` so supplying one is a 400.
+ * The uploader recorded on the asset is `request.principal.userId` — a verified
+ * identity, not a claimed one.
+ */
+const RequestUploadBodySchema = z
+  .object({
+    originalFilename: z.string().min(1),
+    mimeType: z.string().min(1),
+    sizeBytes: z.number().int().positive(),
+    licensing: LicensingBodySchema,
+  })
+  .strict();
 
 const ConfirmUploadBodySchema = RequestUploadBodySchema.extend({
   uploadId: z.string().min(1),
 });
-
-const UserIdQuerySchema = z.object({ userId: z.string().uuid() });
 
 interface AssetView {
   id: string;
@@ -158,7 +163,12 @@ export function registerAssetRoutes(
       if (!parsed.success) {
         return reply.status(400).send({ error: 'INVALID_BODY', issues: parsed.error.issues });
       }
-      const auth = await authorize(deps.db, workspaceId, parsed.data.userId, 'MANAGE_ASSETS');
+      const auth = await authorize(
+        deps.db,
+        workspaceId,
+        requirePrincipal(request).userId,
+        'MANAGE_ASSETS',
+      );
       if (!auth.ok) return reply.status(auth.status).send(auth.body);
 
       const campaign = await getCampaign(deps.db, workspaceId, campaignId);
@@ -207,7 +217,12 @@ export function registerAssetRoutes(
       if (!parsed.success) {
         return reply.status(400).send({ error: 'INVALID_BODY', issues: parsed.error.issues });
       }
-      const auth = await authorize(deps.db, workspaceId, parsed.data.userId, 'MANAGE_ASSETS');
+      const auth = await authorize(
+        deps.db,
+        workspaceId,
+        requirePrincipal(request).userId,
+        'MANAGE_ASSETS',
+      );
       if (!auth.ok) return reply.status(auth.status).send(auth.body);
 
       const campaign = await getCampaign(deps.db, workspaceId, campaignId);
@@ -222,7 +237,7 @@ export function registerAssetRoutes(
         originalFilename: parsed.data.originalFilename,
         declaredMimeType: parsed.data.mimeType,
         declaredSizeBytes: parsed.data.sizeBytes,
-        uploadedByUserId: parsed.data.userId,
+        uploadedByUserId: requirePrincipal(request).userId,
         licensing: parsed.data.licensing,
       });
 
@@ -241,11 +256,7 @@ export function registerAssetRoutes(
     Querystring: unknown;
   }>('/workspaces/:workspaceId/campaigns/:campaignId/assets/:assetId', async (request, reply) => {
     const { workspaceId, campaignId, assetId } = request.params;
-    const parsedQuery = UserIdQuerySchema.safeParse(request.query);
-    if (!parsedQuery.success) {
-      return reply.status(400).send({ error: 'INVALID_QUERY', issues: parsedQuery.error.issues });
-    }
-    const auth = await authorize(deps.db, workspaceId, parsedQuery.data.userId, null);
+    const auth = await authorize(deps.db, workspaceId, requirePrincipal(request).userId, null);
     if (!auth.ok) return reply.status(auth.status).send(auth.body);
 
     const asset = await getAsset(deps.db, workspaceId, assetId);
@@ -265,11 +276,7 @@ export function registerAssetRoutes(
     '/workspaces/:workspaceId/campaigns/:campaignId/assets/:assetId/download-url',
     async (request, reply) => {
       const { workspaceId, campaignId, assetId } = request.params;
-      const parsedQuery = UserIdQuerySchema.safeParse(request.query);
-      if (!parsedQuery.success) {
-        return reply.status(400).send({ error: 'INVALID_QUERY', issues: parsedQuery.error.issues });
-      }
-      const auth = await authorize(deps.db, workspaceId, parsedQuery.data.userId, null);
+      const auth = await authorize(deps.db, workspaceId, requirePrincipal(request).userId, null);
       if (!auth.ok) return reply.status(auth.status).send(auth.body);
 
       const asset = await getAsset(deps.db, workspaceId, assetId);

@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { bearer, signIn } from './auth';
 
 /**
  * Fixture ids seeded by apps/api/src/dev-fake-server.ts — the two suites
@@ -15,13 +16,6 @@ const FIXTURES = {
   campaignId: '44444444-4444-4444-4444-444444444444',
 };
 const API_BASE_URL = 'http://127.0.0.1:4100';
-
-async function signIn(page: import('@playwright/test').Page, userId: string) {
-  await page.goto('/');
-  await page.getByLabel('Workspace ID').fill(FIXTURES.workspaceId);
-  await page.getByLabel('User ID (membership)').fill(userId);
-  await page.getByRole('button', { name: 'Continue' }).click();
-}
 
 test.describe('Concept review screen', () => {
   test('an authorized owner sees strategy, concept, and script, and can approve', async ({
@@ -62,7 +56,9 @@ test.describe('Forged request bypassing the dashboard UI', () => {
   }) => {
     const response = await request.post(
       `${API_BASE_URL}/workspaces/${FIXTURES.workspaceId}/campaigns/${FIXTURES.campaignId}/approvals/concept`,
-      { data: { userId: FIXTURES.reviewerUserId, decision: 'APPROVED' } },
+      // A REVIEWER's own verified token: the refusal is about permission,
+      // not about who the caller is.
+      { headers: bearer(FIXTURES.reviewerUserId), data: { decision: 'APPROVED' } },
     );
     expect(response.status()).toBe(403);
     const body = await response.json();

@@ -33,6 +33,7 @@ import { workflows } from '@combat/workflows';
 import { campaignProductionWorkflowId } from './campaign-workflow-id';
 import { assertBelongsToCampaign } from './route-authorization';
 import type { ShotReviewDatabase } from './shot-review-database';
+import { requirePrincipal } from './authentication';
 
 export interface ShotReviewRouteDeps {
   readonly db: ShotReviewDatabase;
@@ -44,8 +45,6 @@ export interface ShotReviewRouteDeps {
 }
 
 const BASE = '/workspaces/:workspaceId/campaigns/:campaignId/shot-review';
-const UserIdQuerySchema = z.object({ userId: z.string().uuid() });
-
 type AuthResult =
   | { ok: true; role: RoleName }
   | { ok: false; status: number; body: { error: string; message: string } };
@@ -115,11 +114,7 @@ export function registerShotReviewRoutes(
     BASE,
     async (request, reply) => {
       const { workspaceId, campaignId } = request.params;
-      const parsed = UserIdQuerySchema.safeParse(request.query);
-      if (!parsed.success) {
-        return reply.status(400).send({ error: 'INVALID_QUERY', issues: parsed.error.issues });
-      }
-      const auth = await authorize(deps.db, workspaceId, parsed.data.userId, null);
+      const auth = await authorize(deps.db, workspaceId, requirePrincipal(request).userId, null);
       if (!auth.ok) return reply.status(auth.status).send(auth.body);
 
       const campaign = await getCampaign(deps.db, workspaceId, campaignId);
@@ -275,11 +270,7 @@ export function registerShotReviewRoutes(
     Querystring: unknown;
   }>(`${BASE}/candidates/:candidateId/preview`, async (request, reply) => {
     const { workspaceId, campaignId, candidateId } = request.params;
-    const parsed = UserIdQuerySchema.safeParse(request.query);
-    if (!parsed.success) {
-      return reply.status(400).send({ error: 'INVALID_QUERY', issues: parsed.error.issues });
-    }
-    const auth = await authorize(deps.db, workspaceId, parsed.data.userId, null);
+    const auth = await authorize(deps.db, workspaceId, requirePrincipal(request).userId, null);
     if (!auth.ok) return reply.status(auth.status).send(auth.body);
     const campaign = await getCampaign(deps.db, workspaceId, campaignId);
     if (!campaign) {
@@ -303,11 +294,16 @@ export function registerShotReviewRoutes(
     `${BASE}/draft`,
     async (request, reply) => {
       const { workspaceId, campaignId } = request.params;
-      const body = z.object({ userId: z.string().uuid() }).safeParse(request.body);
+      const body = z.object({}).strict().safeParse(request.body);
       if (!body.success) {
         return reply.status(400).send({ error: 'INVALID_BODY', issues: body.error.issues });
       }
-      const auth = await authorize(deps.db, workspaceId, body.data.userId, 'SELECT_SHOTS');
+      const auth = await authorize(
+        deps.db,
+        workspaceId,
+        requirePrincipal(request).userId,
+        'SELECT_SHOTS',
+      );
       if (!auth.ok) return reply.status(auth.status).send(auth.body);
       const campaign = await getCampaign(deps.db, workspaceId, campaignId);
       if (!campaign) {
@@ -356,7 +352,7 @@ export function registerShotReviewRoutes(
         creativeConceptId: concept.id,
         creativeConceptVersion: concept.version,
         version: (existing?.version ?? 0) + 1,
-        createdByUserId: body.data.userId,
+        createdByUserId: requirePrincipal(request).userId,
         requiredShots,
       });
       const selections = await listShotSelections(deps.db, set.id);
@@ -373,18 +369,23 @@ export function registerShotReviewRoutes(
       const { workspaceId, campaignId } = request.params;
       const body = z
         .object({
-          userId: z.string().uuid(),
           setId: z.string().uuid(),
           shotId: z.string().uuid(),
           candidateId: z.string().uuid(),
           expectedRevision: z.number().int().nonnegative(),
           rationale: z.string().optional(),
         })
+        .strict()
         .safeParse(request.body);
       if (!body.success) {
         return reply.status(400).send({ error: 'INVALID_BODY', issues: body.error.issues });
       }
-      const auth = await authorize(deps.db, workspaceId, body.data.userId, 'SELECT_SHOTS');
+      const auth = await authorize(
+        deps.db,
+        workspaceId,
+        requirePrincipal(request).userId,
+        'SELECT_SHOTS',
+      );
       if (!auth.ok) return reply.status(auth.status).send(auth.body);
       const campaign = await getCampaign(deps.db, workspaceId, campaignId);
       if (!campaign) {
@@ -423,7 +424,7 @@ export function registerShotReviewRoutes(
         shotId: body.data.shotId,
         candidateId: body.data.candidateId,
         expectedRevision: body.data.expectedRevision,
-        userId: body.data.userId,
+        userId: requirePrincipal(request).userId,
         rationale: body.data.rationale,
         visualQaAssessmentId: eligibility.visualQaAssessmentId,
         continuityQaAssessmentId: eligibility.continuityQaAssessmentId,
@@ -442,17 +443,22 @@ export function registerShotReviewRoutes(
       const { workspaceId, campaignId } = request.params;
       const body = z
         .object({
-          userId: z.string().uuid(),
           setId: z.string().uuid(),
           shotId: z.string().uuid(),
           regenerationFeedback: z.string().min(1),
           expectedRevision: z.number().int().nonnegative(),
         })
+        .strict()
         .safeParse(request.body);
       if (!body.success) {
         return reply.status(400).send({ error: 'INVALID_BODY', issues: body.error.issues });
       }
-      const auth = await authorize(deps.db, workspaceId, body.data.userId, 'SELECT_SHOTS');
+      const auth = await authorize(
+        deps.db,
+        workspaceId,
+        requirePrincipal(request).userId,
+        'SELECT_SHOTS',
+      );
       if (!auth.ok) return reply.status(auth.status).send(auth.body);
       const campaign = await getCampaign(deps.db, workspaceId, campaignId);
       if (!campaign) {
@@ -471,7 +477,7 @@ export function registerShotReviewRoutes(
         shotId: body.data.shotId,
         regenerationFeedback: body.data.regenerationFeedback,
         expectedRevision: body.data.expectedRevision,
-        userId: body.data.userId,
+        userId: requirePrincipal(request).userId,
       });
       if (!result.ok) return reply.status(409).send({ error: result.reason });
       return reply.status(200).send({ set: serializeSet(result.set) });
@@ -485,12 +491,12 @@ export function registerShotReviewRoutes(
       const { workspaceId, campaignId } = request.params;
       const body = z
         .object({
-          userId: z.string().uuid(),
           shotId: z.string().uuid().optional(),
           candidateId: z.string().uuid().optional(),
           body: z.string().min(1),
           timecodeSeconds: z.number().nonnegative().optional(),
         })
+        .strict()
         .safeParse(request.body);
       if (!body.success) {
         return reply.status(400).send({ error: 'INVALID_BODY', issues: body.error.issues });
@@ -498,7 +504,7 @@ export function registerShotReviewRoutes(
       const auth = await authorize(
         deps.db,
         workspaceId,
-        body.data.userId,
+        requirePrincipal(request).userId,
         'PROVIDE_CANDIDATE_FEEDBACK',
       );
       if (!auth.ok) return reply.status(auth.status).send(auth.body);
@@ -522,10 +528,10 @@ export function registerShotReviewRoutes(
         versionId = version.id;
       }
       const comment = await deps.reviewProvider.postComment({
-        idempotencyKey: `campaign:${campaignId}:comment:${body.data.userId}:${body.data.body}:${body.data.timecodeSeconds ?? 'na'}`,
+        idempotencyKey: `campaign:${campaignId}:comment:${requirePrincipal(request).userId}:${body.data.body}:${body.data.timecodeSeconds ?? 'na'}`,
         sessionId: session.id,
         versionId,
-        authorId: body.data.userId,
+        authorId: requirePrincipal(request).userId,
         body: body.data.body,
         timecodeSeconds: body.data.timecodeSeconds,
       });
@@ -547,15 +553,20 @@ export function registerShotReviewRoutes(
       const { workspaceId, campaignId } = request.params;
       const body = z
         .object({
-          userId: z.string().uuid(),
           setId: z.string().uuid(),
           expectedRevision: z.number().int().nonnegative(),
         })
+        .strict()
         .safeParse(request.body);
       if (!body.success) {
         return reply.status(400).send({ error: 'INVALID_BODY', issues: body.error.issues });
       }
-      const auth = await authorize(deps.db, workspaceId, body.data.userId, 'SELECT_SHOTS');
+      const auth = await authorize(
+        deps.db,
+        workspaceId,
+        requirePrincipal(request).userId,
+        'SELECT_SHOTS',
+      );
       if (!auth.ok) return reply.status(auth.status).send(auth.body);
       const campaign = await getCampaign(deps.db, workspaceId, campaignId);
       if (!campaign) {
@@ -590,7 +601,7 @@ export function registerShotReviewRoutes(
       // refused here, so no HumanApproval is recorded and no signal fires.
       const approved = await approveShotSelectionSet(deps.db, workspaceId, {
         setId: set.id,
-        reviewerUserId: body.data.userId,
+        reviewerUserId: requirePrincipal(request).userId,
         expectedRevision: body.data.expectedRevision,
         eligibleCandidateIds: eligible,
         approvedAt: new Date(),
@@ -605,7 +616,7 @@ export function registerShotReviewRoutes(
       const isRetry =
         latest !== undefined &&
         latest.stageAtDecision === campaign.currentStage &&
-        latest.decidedByUserId === body.data.userId &&
+        latest.decidedByUserId === requirePrincipal(request).userId &&
         latest.decision === 'APPROVED';
       const approval = isRetry
         ? latest
@@ -614,7 +625,7 @@ export function registerShotReviewRoutes(
             gate: 'SHOT_SELECTION',
             decision: 'APPROVED',
             stageAtDecision: campaign.currentStage,
-            decidedByUserId: body.data.userId,
+            decidedByUserId: requirePrincipal(request).userId,
           });
 
       try {
@@ -625,7 +636,7 @@ export function registerShotReviewRoutes(
           campaignId,
           gate: 'SHOT_SELECTION',
           decision: 'APPROVED',
-          decidedByUserId: body.data.userId,
+          decidedByUserId: requirePrincipal(request).userId,
         });
       } catch (error) {
         request.log.error({ err: error, campaignId }, 'failed to signal campaign workflow');
@@ -648,15 +659,20 @@ export function registerShotReviewRoutes(
       const { workspaceId, campaignId } = request.params;
       const body = z
         .object({
-          userId: z.string().uuid(),
           setId: z.string().uuid(),
           comments: z.string().optional(),
         })
+        .strict()
         .safeParse(request.body);
       if (!body.success) {
         return reply.status(400).send({ error: 'INVALID_BODY', issues: body.error.issues });
       }
-      const auth = await authorize(deps.db, workspaceId, body.data.userId, 'SELECT_SHOTS');
+      const auth = await authorize(
+        deps.db,
+        workspaceId,
+        requirePrincipal(request).userId,
+        'SELECT_SHOTS',
+      );
       if (!auth.ok) return reply.status(auth.status).send(auth.body);
       const campaign = await getCampaign(deps.db, workspaceId, campaignId);
       if (!campaign) {
@@ -688,7 +704,7 @@ export function registerShotReviewRoutes(
       const isRetry =
         latest !== undefined &&
         latest.stageAtDecision === campaign.currentStage &&
-        latest.decidedByUserId === body.data.userId &&
+        latest.decidedByUserId === requirePrincipal(request).userId &&
         latest.decision === 'CHANGES_REQUESTED';
       const approval = isRetry
         ? latest
@@ -697,7 +713,7 @@ export function registerShotReviewRoutes(
             gate: 'SHOT_SELECTION',
             decision: 'CHANGES_REQUESTED',
             stageAtDecision: campaign.currentStage,
-            decidedByUserId: body.data.userId,
+            decidedByUserId: requirePrincipal(request).userId,
             comments: body.data.comments,
           });
 
@@ -709,7 +725,7 @@ export function registerShotReviewRoutes(
           campaignId,
           gate: 'SHOT_SELECTION',
           decision: 'CHANGES_REQUESTED',
-          decidedByUserId: body.data.userId,
+          decidedByUserId: requirePrincipal(request).userId,
         });
       } catch (error) {
         request.log.error({ err: error, campaignId }, 'failed to signal campaign workflow');
@@ -728,11 +744,7 @@ export function registerShotReviewRoutes(
     `${BASE}/history`,
     async (request, reply) => {
       const { workspaceId, campaignId } = request.params;
-      const parsed = UserIdQuerySchema.safeParse(request.query);
-      if (!parsed.success) {
-        return reply.status(400).send({ error: 'INVALID_QUERY', issues: parsed.error.issues });
-      }
-      const auth = await authorize(deps.db, workspaceId, parsed.data.userId, null);
+      const auth = await authorize(deps.db, workspaceId, requirePrincipal(request).userId, null);
       if (!auth.ok) return reply.status(auth.status).send(auth.body);
       const campaign = await getCampaign(deps.db, workspaceId, campaignId);
       if (!campaign) {

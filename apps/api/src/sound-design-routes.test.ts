@@ -9,6 +9,8 @@ import {
   InMemoryCampaignStore,
 } from '@combat/database';
 import { registerSoundDesignRoutes } from './sound-design-routes';
+import { registerAuthentication } from './authentication';
+import { bearerFor, permissiveTestAuthentication } from './test-helpers/authenticated-caller';
 
 async function seed(store: InMemoryCampaignStore, opts: { withPlan?: boolean } = {}) {
   const workspaceId = randomUUID();
@@ -52,6 +54,10 @@ async function seed(store: InMemoryCampaignStore, opts: { withPlan?: boolean } =
 
 function buildApp(store: InMemoryCampaignStore) {
   const app = Fastify();
+  // AAMP-1 step 2: these suites exercise authorization, so the caller arrives
+  // authenticated exactly as a production caller does — a verified bearer
+  // token, never a request field. See test-helpers/authenticated-caller.ts.
+  registerAuthentication(app, permissiveTestAuthentication().hookDeps);
   registerSoundDesignRoutes(app, { db: store });
   return app;
 }
@@ -63,7 +69,8 @@ describe('sound-design routes', () => {
     const app = buildApp(store);
     const res = await app.inject({
       method: 'GET',
-      url: `/workspaces/${s.workspaceId}/campaigns/${s.campaignId}/sound-design?userId=${s.memberId}`,
+      url: `/workspaces/${s.workspaceId}/campaigns/${s.campaignId}/sound-design`,
+      headers: bearerFor(s.memberId),
     });
     expect(res.statusCode).toBe(200);
     const body = res.json();
@@ -80,7 +87,8 @@ describe('sound-design routes', () => {
     const app = buildApp(store);
     const res = await app.inject({
       method: 'GET',
-      url: `/workspaces/${s.workspaceId}/campaigns/${s.campaignId}/sound-design?userId=${s.memberId}`,
+      url: `/workspaces/${s.workspaceId}/campaigns/${s.campaignId}/sound-design`,
+      headers: bearerFor(s.memberId),
     });
     expect(res.statusCode).toBe(200);
     expect(res.json().plan).toBeNull();
@@ -93,7 +101,8 @@ describe('sound-design routes', () => {
     const app = buildApp(store);
     const res = await app.inject({
       method: 'GET',
-      url: `/workspaces/${s.workspaceId}/campaigns/${s.campaignId}/sound-design?userId=${randomUUID()}`,
+      url: `/workspaces/${s.workspaceId}/campaigns/${s.campaignId}/sound-design`,
+      headers: bearerFor(randomUUID()),
     });
     expect(res.statusCode).toBe(403);
   });
@@ -104,7 +113,8 @@ describe('sound-design routes', () => {
     const app = buildApp(store);
     const res = await app.inject({
       method: 'GET',
-      url: `/workspaces/${randomUUID()}/campaigns/${s.campaignId}/sound-design?userId=${s.memberId}`,
+      url: `/workspaces/${randomUUID()}/campaigns/${s.campaignId}/sound-design`,
+      headers: bearerFor(s.memberId),
     });
     expect(res.statusCode).toBe(403);
   });

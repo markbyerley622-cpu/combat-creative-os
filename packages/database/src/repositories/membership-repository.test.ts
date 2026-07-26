@@ -4,6 +4,7 @@ import {
   addMembership,
   getMembership,
   listMembershipsForWorkspace,
+  listWorkspacesForUser,
   type MembershipDataSource,
   type MembershipRecord,
 } from './membership-repository';
@@ -22,7 +23,12 @@ function createFakeDataSource(seed: MembershipRecord[] = []): MembershipDataSour
         return rows.find((r) => r.id === where.id && r.workspaceId === where.workspaceId) ?? null;
       },
       async findMany({ where }) {
-        return rows.filter((r) => r.workspaceId === where.workspaceId);
+        // Two disjoint scopings, matching the data source's union: by workspace
+        // (every membership-based authorization check) and by user (tenancy
+        // discovery for the verified caller — see `listWorkspacesForUser`).
+        return 'workspaceId' in where
+          ? rows.filter((r) => r.workspaceId === where.workspaceId)
+          : rows.filter((r) => r.userId === where.userId);
       },
       async create({ data }) {
         const record: MembershipRecord = { id: randomUUID(), createdAt: new Date(), ...data };
@@ -88,6 +94,46 @@ describe('membership repository — workspace isolation', () => {
     const resultsForA = await listMembershipsForWorkspace(db, workspaceA);
     expect(resultsForA).toHaveLength(1);
     expect(resultsForA.every((r) => r.workspaceId === workspaceA)).toBe(true);
+  });
+
+  it('lists only the requesting user’s own workspaces', async () => {
+    const caller = randomUUID();
+    const other = randomUUID();
+    const workspaceA = randomUUID();
+    const workspaceB = randomUUID();
+    const foreign = randomUUID();
+    const db = createFakeDataSource([
+      {
+        id: randomUUID(),
+        workspaceId: workspaceA,
+        userId: caller,
+        role: 'OWNER_ADMIN',
+        createdAt: new Date(),
+      },
+      {
+        id: randomUUID(),
+        workspaceId: workspaceB,
+        userId: caller,
+        role: 'ANALYST',
+        createdAt: new Date(),
+      },
+      {
+        id: randomUUID(),
+        workspaceId: foreign,
+        userId: other,
+        role: 'OWNER_ADMIN',
+        createdAt: new Date(),
+      },
+    ]);
+
+    const result = await listWorkspacesForUser(db, caller);
+
+    expect(result).toEqual([
+      { workspaceId: workspaceA, role: 'OWNER_ADMIN' },
+      { workspaceId: workspaceB, role: 'ANALYST' },
+    ]);
+    // The workspace the caller is not a member of is not disclosed at all.
+    expect(result.some((r) => r.workspaceId === foreign)).toBe(false);
   });
 
   it('addMembership always writes the workspaceId passed by the caller, not one embedded in input', async () => {

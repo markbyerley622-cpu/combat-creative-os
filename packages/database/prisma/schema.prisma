@@ -60,6 +60,17 @@ model User {
   id          String       @id @default(uuid())
   email       String       @unique
   displayName String
+  // AAMP-1 step 2: the verified Clerk subject (`sub`) this local user is the
+  // authorization identity for. Clerk proves *who* the caller is; every
+  // permission decision still reads Membership/RoleName below, so this column
+  // is a mapping key and nothing else — no role, workspace or entitlement is
+  // ever derived from it (docs/adr/0006).
+  //
+  // Nullable because a User may exist before it has ever signed in (seeded
+  // fixtures, invited members). Unique so one Clerk subject can never resolve
+  // to two local users, which is what makes first-login provisioning safely
+  // idempotent under concurrency.
+  clerkUserId String?      @unique
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
   memberships Membership[]

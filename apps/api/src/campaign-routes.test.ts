@@ -6,6 +6,8 @@ import { WorkflowExecutionAlreadyStartedError } from '@temporalio/client';
 import { InMemoryCampaignStore, addMembership } from '@combat/database';
 import { registerCampaignRoutes } from './campaign-routes';
 import { campaignProductionWorkflowId } from './campaign-workflow-id';
+import { registerAuthentication } from './authentication';
+import { bearerFor, permissiveTestAuthentication } from './test-helpers/authenticated-caller';
 
 function briefContent(overrides: Record<string, unknown> = {}) {
   return {
@@ -54,6 +56,10 @@ async function buildApp(
   const { workflowClient, start, query, getHandle } =
     buildFakeWorkflowClient(workflowClientOverrides);
   const app = Fastify();
+  // AAMP-1 step 2: these suites exercise authorization, so the caller arrives
+  // authenticated exactly as a production caller does — a verified bearer
+  // token, never a request field. See test-helpers/authenticated-caller.ts.
+  registerAuthentication(app, permissiveTestAuthentication().hookDeps);
   registerCampaignRoutes(app, { db: store, workflowClient });
   return { app, store, start, query, getHandle };
 }
@@ -73,7 +79,8 @@ describe('POST /workspaces/:workspaceId/campaigns', () => {
     const response = await app.inject({
       method: 'POST',
       url: `/workspaces/${workspaceId}/campaigns`,
-      payload: { userId, name: 'Q3 Launch' },
+      headers: bearerFor(userId),
+      payload: { name: 'Q3 Launch' },
     });
 
     expect(response.statusCode).toBe(201);
@@ -89,7 +96,8 @@ describe('POST /workspaces/:workspaceId/campaigns', () => {
     const response = await app.inject({
       method: 'POST',
       url: `/workspaces/${workspaceId}/campaigns`,
-      payload: { userId, name: 'Q3 Launch' },
+      headers: bearerFor(userId),
+      payload: { name: 'Q3 Launch' },
     });
 
     expect(response.statusCode).toBe(403);
@@ -104,12 +112,14 @@ describe('POST /workspaces/:workspaceId/campaigns', () => {
     const first = await app.inject({
       method: 'POST',
       url: `/workspaces/${workspaceId}/campaigns`,
-      payload: { userId, name: 'Q3 Launch', idempotencyKey },
+      headers: bearerFor(userId),
+      payload: { name: 'Q3 Launch', idempotencyKey },
     });
     const second = await app.inject({
       method: 'POST',
       url: `/workspaces/${workspaceId}/campaigns`,
-      payload: { userId, name: 'Q3 Launch (retry)', idempotencyKey },
+      headers: bearerFor(userId),
+      payload: { name: 'Q3 Launch (retry)', idempotencyKey },
     });
 
     expect(first.json().campaign.id).toBe(second.json().campaign.id);
@@ -124,7 +134,8 @@ describe('POST /workspaces/:workspaceId/campaigns', () => {
     const response = await app.inject({
       method: 'POST',
       url: `/workspaces/${workspaceId}/campaigns`,
-      payload: { userId, name: '' },
+      headers: bearerFor(userId),
+      payload: { name: '' },
     });
     expect(response.statusCode).toBe(400);
   });
@@ -140,7 +151,8 @@ describe('brief draft/submit', () => {
     const draft = await app.inject({
       method: 'POST',
       url: `/workspaces/${workspaceId}/campaigns/${campaign.id}/brief/draft`,
-      payload: { userId, content: { campaignName: 'Launch Q3' } },
+      headers: bearerFor(userId),
+      payload: { content: { campaignName: 'Launch Q3' } },
     });
     expect(draft.statusCode).toBe(201);
     expect(draft.json().brief.version).toBe(1);
@@ -149,7 +161,8 @@ describe('brief draft/submit', () => {
     const submit = await app.inject({
       method: 'POST',
       url: `/workspaces/${workspaceId}/campaigns/${campaign.id}/brief/submit`,
-      payload: { userId, content: briefContent() },
+      headers: bearerFor(userId),
+      payload: { content: briefContent() },
     });
     expect(submit.statusCode).toBe(201);
     expect(submit.json().brief.version).toBe(2);
@@ -165,7 +178,8 @@ describe('brief draft/submit', () => {
     const response = await app.inject({
       method: 'POST',
       url: `/workspaces/${workspaceId}/campaigns/${campaign.id}/brief/submit`,
-      payload: { userId, content: { campaignName: 'Launch Q3' } },
+      headers: bearerFor(userId),
+      payload: { content: { campaignName: 'Launch Q3' } },
     });
     expect(response.statusCode).toBe(400);
   });
@@ -179,7 +193,8 @@ describe('brief draft/submit', () => {
     const response = await app.inject({
       method: 'POST',
       url: `/workspaces/${workspaceId}/campaigns/${campaign.id}/brief/submit`,
-      payload: { userId, content: briefContent() },
+      headers: bearerFor(userId),
+      payload: { content: briefContent() },
     });
     expect(response.statusCode).toBe(409);
     expect(response.json().error).toBe('ALREADY_SUBMITTED');
@@ -194,7 +209,8 @@ describe('brief draft/submit', () => {
     const response = await app.inject({
       method: 'POST',
       url: `/workspaces/${workspaceId}/campaigns/${campaign.id}/brief/draft`,
-      payload: { userId, content: {} },
+      headers: bearerFor(userId),
+      payload: { content: {} },
     });
     expect(response.statusCode).toBe(404);
   });
@@ -209,13 +225,15 @@ describe('POST .../workflow/start', () => {
     await app.inject({
       method: 'POST',
       url: `/workspaces/${workspaceId}/campaigns/${campaign.id}/brief/submit`,
-      payload: { userId, content: briefContent() },
+      headers: bearerFor(userId),
+      payload: { content: briefContent() },
     });
 
     const response = await app.inject({
       method: 'POST',
       url: `/workspaces/${workspaceId}/campaigns/${campaign.id}/workflow/start`,
-      payload: { userId },
+      headers: bearerFor(userId),
+      payload: {},
     });
 
     expect(response.statusCode).toBe(202);
@@ -237,7 +255,8 @@ describe('POST .../workflow/start', () => {
     const response = await app.inject({
       method: 'POST',
       url: `/workspaces/${workspaceId}/campaigns/${campaign.id}/workflow/start`,
-      payload: { userId },
+      headers: bearerFor(userId),
+      payload: {},
     });
     expect(response.statusCode).toBe(409);
     expect(response.json().error).toBe('BRIEF_NOT_SUBMITTED');
@@ -256,13 +275,15 @@ describe('POST .../workflow/start', () => {
     await app.inject({
       method: 'POST',
       url: `/workspaces/${workspaceId}/campaigns/${campaign.id}/brief/submit`,
-      payload: { userId, content: briefContent() },
+      headers: bearerFor(userId),
+      payload: { content: briefContent() },
     });
 
     const response = await app.inject({
       method: 'POST',
       url: `/workspaces/${workspaceId}/campaigns/${campaign.id}/workflow/start`,
-      payload: { userId },
+      headers: bearerFor(userId),
+      payload: {},
     });
 
     expect(response.statusCode).toBe(202);
@@ -279,15 +300,18 @@ describe('strategy/concept/script retrieval', () => {
 
     const strategy = await app.inject({
       method: 'GET',
-      url: `/workspaces/${workspaceId}/campaigns/${campaign.id}/strategy?userId=${userId}`,
+      url: `/workspaces/${workspaceId}/campaigns/${campaign.id}/strategy`,
+      headers: bearerFor(userId),
     });
     const concept = await app.inject({
       method: 'GET',
-      url: `/workspaces/${workspaceId}/campaigns/${campaign.id}/concept?userId=${userId}`,
+      url: `/workspaces/${workspaceId}/campaigns/${campaign.id}/concept`,
+      headers: bearerFor(userId),
     });
     const script = await app.inject({
       method: 'GET',
-      url: `/workspaces/${workspaceId}/campaigns/${campaign.id}/script?userId=${userId}`,
+      url: `/workspaces/${workspaceId}/campaigns/${campaign.id}/script`,
+      headers: bearerFor(userId),
     });
 
     expect(strategy.json().strategy).toBeNull();
@@ -305,7 +329,8 @@ describe('strategy/concept/script retrieval', () => {
 
     const response = await app.inject({
       method: 'GET',
-      url: `/workspaces/${workspaceId}/campaigns/${campaign.id}/strategy?userId=${userId}`,
+      url: `/workspaces/${workspaceId}/campaigns/${campaign.id}/strategy`,
+      headers: bearerFor(userId),
     });
     expect(response.statusCode).toBe(200);
   });
@@ -317,7 +342,8 @@ describe('strategy/concept/script retrieval', () => {
 
     const response = await app.inject({
       method: 'GET',
-      url: `/workspaces/${workspaceId}/campaigns/${campaign.id}/strategy?userId=${randomUUID()}`,
+      url: `/workspaces/${workspaceId}/campaigns/${campaign.id}/strategy`,
+      headers: bearerFor(randomUUID()),
     });
     expect(response.statusCode).toBe(403);
   });
@@ -338,7 +364,8 @@ describe('GET .../approvals/concept/state', () => {
 
     const response = await app.inject({
       method: 'GET',
-      url: `/workspaces/${workspaceId}/campaigns/${campaign.id}/approvals/concept/state?userId=${userId}`,
+      url: `/workspaces/${workspaceId}/campaigns/${campaign.id}/approvals/concept/state`,
+      headers: bearerFor(userId),
     });
 
     expect(response.statusCode).toBe(200);
@@ -355,7 +382,8 @@ describe('GET .../approvals/concept/state', () => {
 
     const response = await app.inject({
       method: 'GET',
-      url: `/workspaces/${workspaceId}/campaigns/${campaign.id}/approvals/concept/state?userId=${userId}`,
+      url: `/workspaces/${workspaceId}/campaigns/${campaign.id}/approvals/concept/state`,
+      headers: bearerFor(userId),
     });
 
     expect(response.statusCode).toBe(200);

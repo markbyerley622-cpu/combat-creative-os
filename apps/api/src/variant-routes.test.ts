@@ -17,6 +17,8 @@ import {
 import type { RoleName } from '@combat/domain';
 import { MockStorageProvider } from '@combat/providers';
 import { registerVariantRoutes } from './variant-routes';
+import { registerAuthentication } from './authentication';
+import { bearerFor, permissiveTestAuthentication } from './test-helpers/authenticated-caller';
 
 function specInput(
   campaignId: string,
@@ -189,6 +191,10 @@ async function seed(store: InMemoryCampaignStore, opts: SeedOptions = {}) {
 
 function buildApp(store: InMemoryCampaignStore, signal = vi.fn().mockResolvedValue(undefined)) {
   const app = Fastify();
+  // AAMP-1 step 2: these suites exercise authorization, so the caller arrives
+  // authenticated exactly as a production caller does — a verified bearer
+  // token, never a request field. See test-helpers/authenticated-caller.ts.
+  registerAuthentication(app, permissiveTestAuthentication().hookDeps);
   const workflowClient = { getHandle: () => ({ signal }) } as unknown as WorkflowClient;
   registerVariantRoutes(app, {
     db: store,
@@ -198,8 +204,8 @@ function buildApp(store: InMemoryCampaignStore, signal = vi.fn().mockResolvedVal
   return { app, signal };
 }
 
-function url(s: { workspaceId: string; campaignId: string }, userId: string): string {
-  return `/workspaces/${s.workspaceId}/campaigns/${s.campaignId}/variants?userId=${userId}`;
+function url(s: { workspaceId: string; campaignId: string }): string {
+  return `/workspaces/${s.workspaceId}/campaigns/${s.campaignId}/variants`;
 }
 
 describe('variant routes — read surface', () => {
@@ -208,7 +214,7 @@ describe('variant routes — read surface', () => {
     const s = await seed(store);
     const { app } = buildApp(store);
 
-    const res = await app.inject({ method: 'GET', url: url(s, s.memberId) });
+    const res = await app.inject({ method: 'GET', url: url(s), headers: bearerFor(s.memberId) });
 
     expect(res.statusCode).toBe(200);
     const body = res.json();
@@ -236,7 +242,9 @@ describe('variant routes — read surface', () => {
     const s = await seed(store);
     const { app } = buildApp(store);
 
-    const body = (await app.inject({ method: 'GET', url: url(s, s.memberId) })).json();
+    const body = (
+      await app.inject({ method: 'GET', url: url(s), headers: bearerFor(s.memberId) })
+    ).json();
 
     const first = body.variants[0];
     expect(first.variant.status).toBe('READY');
@@ -253,7 +261,9 @@ describe('variant routes — read surface', () => {
     const s = await seed(store, { qaPass: false });
     const { app } = buildApp(store);
 
-    const body = (await app.inject({ method: 'GET', url: url(s, s.memberId) })).json();
+    const body = (
+      await app.inject({ method: 'GET', url: url(s), headers: bearerFor(s.memberId) })
+    ).json();
 
     expect(body.variants[0].variant.status).toBe('FAILED');
     expect(body.variants[0].qa.pass).toBe(false);
@@ -271,7 +281,7 @@ describe('variant routes — read surface', () => {
     const s = await seed(store, { withVariants: false });
     const { app } = buildApp(store);
 
-    const res = await app.inject({ method: 'GET', url: url(s, s.memberId) });
+    const res = await app.inject({ method: 'GET', url: url(s), headers: bearerFor(s.memberId) });
 
     expect(res.statusCode).toBe(200);
     expect(res.json().variants).toHaveLength(0);
@@ -282,23 +292,29 @@ describe('variant routes — read surface', () => {
     const s = await seed(store);
     const { app } = buildApp(store);
 
-    expect((await app.inject({ method: 'GET', url: url(s, randomUUID()) })).statusCode).toBe(403);
+    expect(
+      (await app.inject({ method: 'GET', url: url(s), headers: bearerFor(randomUUID()) }))
+        .statusCode,
+    ).toBe(403);
     expect(
       (
         await app.inject({
           method: 'GET',
-          url: `/workspaces/${randomUUID()}/campaigns/${s.campaignId}/variants?userId=${s.memberId}`,
+          url: `/workspaces/${randomUUID()}/campaigns/${s.campaignId}/variants`,
+          headers: bearerFor(s.memberId),
         })
       ).statusCode,
     ).toBe(403);
   });
 
-  it('400s a malformed userId', async () => {
+  // See final-qa-routes.test.ts's identical note: with identity out of the
+  // request, "malformed caller id" is not a reachable state; "no credential" is.
+  it('401s a request with no session token', async () => {
     const store = new InMemoryCampaignStore();
     const s = await seed(store);
     const { app } = buildApp(store);
 
-    expect((await app.inject({ method: 'GET', url: url(s, 'not-a-uuid') })).statusCode).toBe(400);
+    expect((await app.inject({ method: 'GET', url: url(s) })).statusCode).toBe(401);
   });
 });
 
@@ -310,7 +326,8 @@ describe('variant routes — preview placeholders', () => {
 
     const res = await app.inject({
       method: 'GET',
-      url: `/workspaces/${s.workspaceId}/campaigns/${s.campaignId}/variants/${s.assetIds[0]}/preview?userId=${s.memberId}`,
+      url: `/workspaces/${s.workspaceId}/campaigns/${s.campaignId}/variants/${s.assetIds[0]}/preview`,
+      headers: bearerFor(s.memberId),
     });
 
     expect(res.statusCode).toBe(200);
@@ -324,7 +341,8 @@ describe('variant routes — preview placeholders', () => {
 
     const res = await app.inject({
       method: 'GET',
-      url: `/workspaces/${s.workspaceId}/campaigns/${s.campaignId}/variants/${randomUUID()}/preview?userId=${s.memberId}`,
+      url: `/workspaces/${s.workspaceId}/campaigns/${s.campaignId}/variants/${randomUUID()}/preview`,
+      headers: bearerFor(s.memberId),
     });
 
     expect(res.statusCode).toBe(404);
@@ -345,7 +363,8 @@ describe('variant routes — authorized cancel', () => {
     const res = await app.inject({
       method: 'POST',
       url: `/workspaces/${s.workspaceId}/campaigns/${s.campaignId}/variants/cancel`,
-      payload: { userId: s.memberId },
+      headers: bearerFor(s.memberId),
+      payload: {},
     });
 
     expect(res.statusCode).toBe(expected);
@@ -363,7 +382,7 @@ describe('variant routes — authorized cancel', () => {
     const { app } = buildApp(store);
 
     const body = (
-      await app.inject({ method: 'GET', url: url(reviewer, reviewer.memberId) })
+      await app.inject({ method: 'GET', url: url(reviewer), headers: bearerFor(reviewer.memberId) })
     ).json();
 
     expect(body.caller).toMatchObject({ role: 'REVIEWER', canCancel: false });
@@ -377,7 +396,8 @@ describe('variant routes — authorized cancel', () => {
     const res = await app.inject({
       method: 'POST',
       url: `/workspaces/${s.workspaceId}/campaigns/${s.campaignId}/variants/cancel`,
-      payload: { userId: randomUUID() },
+      headers: bearerFor(randomUUID()),
+      payload: {},
     });
 
     expect(res.statusCode).toBe(403);
@@ -396,7 +416,8 @@ describe('variant routes — no export surface (M12 scope)', () => {
       const res = await app.inject({
         method: 'POST',
         url: `/workspaces/${s.workspaceId}/campaigns/${s.campaignId}/variants/${path}`,
-        payload: { userId: s.memberId },
+        headers: bearerFor(s.memberId),
+        payload: {},
       });
       expect(res.statusCode).toBe(404);
     }

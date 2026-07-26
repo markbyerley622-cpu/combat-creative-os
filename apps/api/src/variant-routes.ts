@@ -17,6 +17,7 @@ import {
 import { workflows } from '@combat/workflows';
 import type { StorageProvider } from '@combat/providers';
 import type { VariantDatabase } from './variant-database';
+import { requirePrincipal } from './authentication';
 
 export interface VariantRouteDeps {
   readonly db: VariantDatabase;
@@ -26,8 +27,6 @@ export interface VariantRouteDeps {
 }
 
 const BASE = '/workspaces/:workspaceId/campaigns/:campaignId/variants';
-const UserIdQuerySchema = z.object({ userId: z.string().uuid() });
-
 async function authorize(
   db: VariantDatabase,
   workspaceId: string,
@@ -79,11 +78,7 @@ export function registerVariantRoutes(
     BASE,
     async (request, reply) => {
       const { workspaceId, campaignId } = request.params;
-      const parsed = UserIdQuerySchema.safeParse(request.query);
-      if (!parsed.success) {
-        return reply.status(400).send({ error: 'INVALID_QUERY', issues: parsed.error.issues });
-      }
-      const auth = await authorize(deps.db, workspaceId, parsed.data.userId);
+      const auth = await authorize(deps.db, workspaceId, requirePrincipal(request).userId);
       if (!auth.ok) return reply.status(auth.status).send(auth.body);
 
       const campaign = await getCampaign(deps.db, workspaceId, campaignId);
@@ -213,11 +208,7 @@ export function registerVariantRoutes(
     Querystring: unknown;
   }>(`${BASE}/:assetId/preview`, async (request, reply) => {
     const { workspaceId, campaignId, assetId } = request.params;
-    const parsed = UserIdQuerySchema.safeParse(request.query);
-    if (!parsed.success) {
-      return reply.status(400).send({ error: 'INVALID_QUERY', issues: parsed.error.issues });
-    }
-    const auth = await authorize(deps.db, workspaceId, parsed.data.userId);
+    const auth = await authorize(deps.db, workspaceId, requirePrincipal(request).userId);
     if (!auth.ok) return reply.status(auth.status).send(auth.body);
 
     const campaign = await getCampaign(deps.db, workspaceId, campaignId);
@@ -244,11 +235,16 @@ export function registerVariantRoutes(
     `${BASE}/cancel`,
     async (request, reply) => {
       const { workspaceId, campaignId } = request.params;
-      const body = z.object({ userId: z.string().uuid() }).safeParse(request.body);
+      const body = z.object({}).strict().safeParse(request.body);
       if (!body.success) {
         return reply.status(400).send({ error: 'INVALID_BODY', issues: body.error.issues });
       }
-      const auth = await authorize(deps.db, workspaceId, body.data.userId, 'TRIGGER_GENERATION');
+      const auth = await authorize(
+        deps.db,
+        workspaceId,
+        requirePrincipal(request).userId,
+        'TRIGGER_GENERATION',
+      );
       if (!auth.ok) return reply.status(auth.status).send(auth.body);
       const campaign = await getCampaign(deps.db, workspaceId, campaignId);
       if (!campaign) {

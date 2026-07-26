@@ -14,9 +14,44 @@ runs `postgres` healthy, and the first real Prisma migration
 (`packages/database/prisma/migrations/20260726053508_init/`) is generated,
 applied, drift-checked and committed. It changed no application code. Runbook:
 `docs/runbooks/database-migrations.md`; accounting: `docs/architecture.md` §8's
-AAMP-1 step 1 entry. **The next milestone is AAMP-1 step 2, real
-authentication** (`docs/aamp-architecture.md` §6 task 4). No other AAMP work has
-started.
+AAMP-1 step 1 entry.
+
+**AAMP-1 step 2 (verified Clerk authentication) is done** — see
+`docs/adr/0006-clerk-identity-with-postgresql-authorization.md` and
+`docs/architecture.md` §8's AAMP-1 step 2 entry. **The next milestone is AAMP-1
+step 3, the `SERIALIZABLE` budget transaction** (`docs/aamp-architecture.md` §6
+task 5). No other AAMP work has started.
+
+## Authentication — permanent rules (AAMP-1 step 2, ADR-0006)
+
+- **Clerk proves who; PostgreSQL decides what.** A verified session token yields
+  exactly one fact — the Clerk subject. Role, workspace membership, permission
+  and entitlement are **never** read from a token claim; they are resolved from
+  `Membership` rows through the existing repository boundary, in the existing
+  order (membership → permission → campaign ownership → child-resource
+  association).
+- **Never accept caller identity from request input.** No `userId` in a body,
+  query string or unverified header, ever. Body schemas that could carry one are
+  `.strict()`, and a source-level test asserts no route file reads `userId` from
+  `request.body`/`request.query`.
+- **`apps/api` authenticates in exactly one place** —
+  `apps/api/src/authentication.ts`'s instance-wide `onRequest` hook, which runs
+  before every handler, Zod parse, repository read and `roleHasPermission` call.
+  It is default-deny; `PUBLIC_ROUTES` (`/health`, `/ready`) is the entire
+  exemption list and adding to it removes authentication from that path.
+  Route handlers take the caller from `requirePrincipal(request)` and nowhere
+  else.
+- **Clerk Organizations stay disabled.** Tenancy is `Workspace` + `Membership`.
+  `VerifiedPrincipal` deliberately carries no workspace or organisation field.
+- **The identity fakes are not selectable by configuration.**
+  `@combat/auth/testing` is reachable only by a code import (tests and
+  `dev-fake-server.ts`); no env var can choose a fake verifier in a real
+  process. `apps/api` fails closed without `CLERK_SECRET_KEY`, in every
+  environment. The dashboard never reads a secret key — it holds only the
+  publishable key.
+- **`packages/auth` owns the vendor seam.** Everything above
+  `ClerkTokenVerifier`/`ClerkProfileDirectory` is vendor-neutral; only
+  `clerk-adapter.ts` imports `@clerk/backend`.
 
 ## Post-M14 audit repair (current HEAD)
 
@@ -104,10 +139,10 @@ strings, auth headers and model payloads, while leaving correlation identifiers
 readable. The in-memory store now mirrors the `Asset` uniqueness constraint, so
 a missing checksum-dedup can no longer pass tests while failing on Postgres.
 
-**Remaining production blockers — unchanged by M14 or by the audit repair.**
-There is still **no real caller authentication**: the request-supplied `userId`
-remains the documented temporary development identity, and M14 hardens what an
-identity may _do_, never proves _who_ it is. The audit repair makes the Worker's
+**Remaining production blockers — as recorded at M14, with authentication now
+closed by AAMP-1 step 2.** Caller authentication was the standing blocker here;
+it is resolved (see the AAMP-1 step 2 note and ADR-0006 above), so the paragraph
+below stands except for that item. The audit repair makes the Worker's
 activity _registration_ correct and provable without a Temporal server; it does
 not prove the Worker runs against one, because none is available here.
 Database migrations are no longer outstanding — AAMP-1 step 1 applied the first

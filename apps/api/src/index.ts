@@ -1,8 +1,13 @@
-import { loadApiEnv } from '@combat/config';
+import { loadApiEnv, parseAuthorizedParties } from '@combat/config';
+import { createClerkProfileDirectory, createClerkTokenVerifier } from '@combat/auth';
 import { createLogger, initObservability } from '@combat/observability';
 import { buildServer } from './server';
 
 async function main(): Promise<void> {
+  // AAMP-1 step 2: `loadApiEnv` refuses to return without a Clerk secret key,
+  // so this process cannot reach `buildServer` unauthenticated. The key is read
+  // only here, only through the validated schema, and is handed straight to the
+  // adapter — it is never logged, echoed in a response, or stored on the app.
   const env = loadApiEnv();
   const logger = createLogger({ serviceName: 'api', level: env.LOG_LEVEL });
   const observability = initObservability({
@@ -10,8 +15,21 @@ async function main(): Promise<void> {
     otlpEndpoint: env.OTEL_EXPORTER_OTLP_ENDPOINT,
   });
 
+  // `refineAuthConfig` has already rejected a missing key, so this branch is
+  // unreachable — it exists to narrow the optional type honestly rather than
+  // asserting non-null over a security control.
+  if (!env.CLERK_SECRET_KEY) {
+    throw new Error('CLERK_SECRET_KEY missing after env validation');
+  }
+  const clerkConfig = {
+    secretKey: env.CLERK_SECRET_KEY,
+    authorizedParties: parseAuthorizedParties(env.CLERK_AUTHORIZED_PARTIES),
+  };
+
   const app = buildServer({
     logger,
+    tokenVerifier: createClerkTokenVerifier(clerkConfig),
+    profileDirectory: createClerkProfileDirectory(clerkConfig),
     temporalEnv: {
       TEMPORAL_ADDRESS: env.TEMPORAL_ADDRESS,
       TEMPORAL_NAMESPACE: env.TEMPORAL_NAMESPACE,

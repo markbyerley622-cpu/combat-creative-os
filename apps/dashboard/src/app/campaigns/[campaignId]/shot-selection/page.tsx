@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { SessionGate } from '@/components/SessionGate';
+import { WorkspaceGate } from '@/components/WorkspaceGate';
 import { EmptyState, ErrorState, LoadingState, PageShell } from '@/components/PageShell';
 import {
   ApiError,
@@ -11,7 +11,7 @@ import {
   type ShotReviewShot,
   type ShotReviewView,
 } from '@/lib/api-client';
-import { useSession } from '@/lib/session';
+import { useWorkspace } from '@/lib/workspace';
 
 /** Pulls the `error`/`reasons` a 409 (stale revision / ineligible candidate) carries in its JSON body. */
 function conflictMessage(body: unknown): string {
@@ -283,7 +283,7 @@ function ShotCard({
 }
 
 function ShotSelection({ campaignId }: { campaignId: string }) {
-  const { session } = useSession();
+  const { workspace, getToken } = useWorkspace();
   const [data, setData] = useState<ShotReviewView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -293,8 +293,8 @@ function ShotSelection({ campaignId }: { campaignId: string }) {
   const draftAttempted = useRef(false);
 
   async function load() {
-    if (!session) return;
-    const client = createApiClient(session.workspaceId, session.userId);
+    if (!workspace) return;
+    const client = createApiClient(workspace.workspaceId, getToken);
     try {
       let result = await client.getShotReview(campaignId);
       // Ensure a working draft exists whenever we're at the human selection stage
@@ -318,7 +318,7 @@ function ShotSelection({ campaignId }: { campaignId: string }) {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session, campaignId]);
+  }, [workspace, getToken, campaignId]);
 
   function handleActionError(err: unknown) {
     if (err instanceof ApiError) {
@@ -341,13 +341,13 @@ function ShotSelection({ campaignId }: { campaignId: string }) {
       revision: number,
     ) => Promise<void>,
   ) {
-    if (!session || submitting) return;
+    if (!workspace || submitting) return;
     const set = data?.selectionSet;
     if (!set) return;
     setSubmitting(true);
     setActionError(null);
     setNotice(null);
-    const client = createApiClient(session.workspaceId, session.userId);
+    const client = createApiClient(workspace.workspaceId, getToken);
     try {
       await mutate(client, set.id, set.revision);
     } catch (err) {
@@ -500,10 +500,10 @@ function ShotSelection({ campaignId }: { campaignId: string }) {
 
 export default function ShotSelectionPage({ params }: { params: { campaignId: string } }) {
   return (
-    <SessionGate>
+    <WorkspaceGate>
       <PageShell title="Shot selection">
         <ShotSelection campaignId={params.campaignId} />
       </PageShell>
-    </SessionGate>
+    </WorkspaceGate>
   );
 }
