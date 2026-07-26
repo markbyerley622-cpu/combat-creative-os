@@ -7,8 +7,16 @@ see `docs/architecture.md` and `docs/adr/`.
 Current state: **M14 (production hardening) done, plus the post-M14 foundation
 audit repair** — corrective maintenance, not a feature milestone. **AAMP-0
 (architecture and delivery blueprint) is documented** in
-`docs/aamp-architecture.md` and `docs/adr/0005-aamp-creative-memory-and-real-media-architecture.md`;
-no AAMP implementation milestone has started.
+`docs/aamp-architecture.md` and `docs/adr/0005-aamp-creative-memory-and-real-media-architecture.md`.
+
+**AAMP-1 step 1 (live PostgreSQL migration baseline) is done** — Docker Compose
+runs `postgres` healthy, and the first real Prisma migration
+(`packages/database/prisma/migrations/20260726053508_init/`) is generated,
+applied, drift-checked and committed. It changed no application code. Runbook:
+`docs/runbooks/database-migrations.md`; accounting: `docs/architecture.md` §8's
+AAMP-1 step 1 entry. **The next milestone is AAMP-1 step 2, real
+authentication** (`docs/aamp-architecture.md` §6 task 4). No other AAMP work has
+started.
 
 ## Post-M14 audit repair (current HEAD)
 
@@ -101,9 +109,10 @@ There is still **no real caller authentication**: the request-supplied `userId`
 remains the documented temporary development identity, and M14 hardens what an
 identity may _do_, never proves _who_ it is. The audit repair makes the Worker's
 activity _registration_ correct and provable without a Temporal server; it does
-not prove the Worker runs against one, because none is available here. Also
-outstanding: applied database migrations (no live
-Postgres in this environment — every model since M10 is unmigrated), live
+not prove the Worker runs against one, because none is available here.
+Database migrations are no longer outstanding — AAMP-1 step 1 applied the first
+one — but no application process has been pointed at live Postgres yet, so every
+test still runs against the in-memory store. Also outstanding: live
 Temporal/MinIO/ffmpeg, real Veo/Runway/ComfyUI adapters (only the deterministic
 mock — do not connect one or spend money without an explicit, separate
 decision), real export/render implementation, real ad-platform integration, and

@@ -1,7 +1,10 @@
 # AAMP — Agent Automation Marketing Plan
 
-Status: **AAMP-0, architecture only.** No application code, package, migration,
-model, credential or infrastructure change accompanies this document.
+Status: **AAMP-0 complete (architecture).** Implementation has begun:
+**AAMP-1 step 1 (live PostgreSQL migration baseline, §6 tasks 1–3) is done** —
+see `docs/architecture.md` §8's AAMP-1 step 1 entry and
+`docs/runbooks/database-migrations.md`. Everything else in this document remains
+unimplemented; the next step is **AAMP-1 step 2, real authentication** (§6 task 4).
 Date: 2026-07-26. Baseline: `ad3d241` (post-M14 foundation audit repair).
 
 This document is the delivery blueprint for turning the completed M0–M14
@@ -1560,7 +1563,7 @@ That path yields a genuine, lawful, human-approved, downloadable 15 s MP4 with
 Memory work**. AAMP-2 and AAMP-3 raise the ceiling on creative quality and
 originality; they are not on the critical path to the first real file.
 
-### 12.2 Exact first implementation milestone after AAMP-0
+### 12.2 Exact first implementation milestone after AAMP-0 — **done**
 
 **AAMP-1, step 1: live PostgreSQL and the first applied Prisma migration.**
 Bring up `infrastructure/docker-compose.yml`'s `postgres` service, run
@@ -1568,8 +1571,21 @@ Bring up `infrastructure/docker-compose.yml`'s `postgres` service, run
 covering every model since M10, verify with an empty `prisma migrate diff`, and
 document the rollback path. It is the smallest change that removes the oldest
 standing limitation (`docs/domain-model.md` §8) and unblocks every other phase.
-It requires Docker, which is **not available in this environment today** — that
-availability is the first practical dependency.
+It required Docker, named here as the first practical dependency.
+
+**Completed 2026-07-26.** Docker Desktop, WSL 2 and Docker Compose became
+available; the `postgres` service runs healthy on PostgreSQL 16.14; the initial
+full-schema migration `20260726053508_init` is generated, reviewed, applied and
+committed; the drift check reports `No difference detected.`; and
+`docs/runbooks/database-migrations.md` documents the forward-only rollback and
+recovery path. Full accounting: `docs/architecture.md` §8's AAMP-1 step 1 entry.
+
+**The next step is AAMP-1 step 2: real authentication** (§6 implementation task
+4 — `packages/auth`, the `apps/api` preHandler, and removing the body-supplied
+`userId` from every route). It is the standing production blocker, and §12.1
+puts it second precisely because every later acceptance test needs a real
+principal. Note §12.4's unresolved decision 4 (external IdP versus first-party
+sessions) blocks it until answered.
 
 ### 12.3 Dependency-ordered milestone list
 
