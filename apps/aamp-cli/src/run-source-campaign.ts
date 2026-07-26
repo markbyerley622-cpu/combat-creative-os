@@ -107,6 +107,16 @@ export interface SourceCampaignOptions {
   /** Absent when `--creative-memory off`, which is the pre-injection baseline. */
   readonly injector?: CreativeMemoryInjector;
   readonly creativeMemoryMode: CreativeMemoryMode;
+  /**
+   * Stop after the render manifest is written, without invoking FFmpeg.
+   *
+   * Exists for the controlled benchmark, whose plan and manifest comparisons
+   * are worth having on a machine with no toolchain. It is *not* a quiet
+   * degradation: the caller asks for it explicitly, the run summary records
+   * `renderSkipped`, and nothing downstream can mistake the absence of a file
+   * for a QA pass.
+   */
+  readonly skipRender?: boolean;
   readonly onProgress?: (message: string) => void;
 }
 
@@ -130,6 +140,8 @@ export interface SourceCampaignResult {
   readonly outputChecksumSha256?: string;
   readonly qaFailedChecks?: readonly string[];
   readonly agentVersions?: readonly string[];
+  /** True when `skipRender` stopped the run at the manifest. Never implied by a missing path. */
+  readonly renderSkipped?: boolean;
 }
 
 async function writeArtefact(
@@ -333,6 +345,48 @@ export async function runSourceCampaign(
   }
 
   await writeArtefact(runDirectory, 'render-manifest.json', renderManifest);
+
+  if (options.skipRender) {
+    // Everything a plan and manifest comparison needs is now on disk. The
+    // result says so explicitly rather than leaving a caller to infer it from
+    // an absent `outputPath` — which is also what "QA never ran" looks like.
+    onProgress?.('skipping the render, as asked');
+    await writeArtefact(runDirectory, 'run-summary.json', {
+      campaignId: request.campaignId,
+      workspaceId: request.workspaceId,
+      workflowRunId: options.workflowRunId,
+      runMode: options.reasoningPolicy.runMode,
+      promptSha256: request.promptSha256,
+      status: 'PLANNED_NOT_RENDERED',
+      renderSkipped: true,
+      requiresHumanApproval: true,
+      creativeMemory: {
+        mode: options.creativeMemoryMode,
+        rolesWithContext: originality.rolesWithContext,
+        originalityRiskLevel: originality.riskLevel,
+        requiresOriginalityReview: originality.requiresHumanReview,
+        anyReferenceOutputEligible: false,
+      },
+      artefacts: [
+        'campaign-request.json',
+        'agent-outputs.json',
+        'render-manifest.json',
+        'source-selection.json',
+        'asset-provenance.json',
+        'creative-memory-provenance.json',
+        'originality-report.json',
+        'run-summary.json',
+      ],
+    });
+    return {
+      exitCode: EXIT_CODES.SUCCESS,
+      runDirectory,
+      creativeMemoryMode: options.creativeMemoryMode,
+      originality,
+      agentVersions: plan.agentVersions,
+      renderSkipped: true,
+    };
+  }
 
   // --- render --------------------------------------------------------------
   let rendered;

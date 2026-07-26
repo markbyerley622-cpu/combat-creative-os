@@ -362,6 +362,24 @@ export const workerEnvSchema = baseEnvSchema
 export type WorkerEnv = z.infer<typeof workerEnvSchema>;
 
 /**
+ * Declared token prices for the controlled creative benchmark.
+ *
+ * Deliberately **not** defaulted. `aamp:benchmark` will not authorise a paid
+ * provider call unless it can print an estimated maximum cost first, and it
+ * cannot compute one without these. Hardcoding a price table would go stale
+ * silently and would make "no accidental spend" depend on this repository
+ * being up to date with a vendor's pricing page; requiring the operator to
+ * declare what they believe a token costs makes the authorisation deliberate.
+ *
+ * Cents per million tokens, so a rate can be expressed without floats.
+ */
+export const benchmarkCostEnvSchema = z.object({
+  BENCHMARK_INPUT_COST_CENTS_PER_MTOK: z.coerce.number().nonnegative().optional(),
+  BENCHMARK_OUTPUT_COST_CENTS_PER_MTOK: z.coerce.number().nonnegative().optional(),
+});
+export type BenchmarkCostEnv = z.infer<typeof benchmarkCostEnvSchema>;
+
+/**
  * `apps/aamp-cli` — the prompt-to-MP4 composition root. It runs the same
  * agents and the same ComfyUI adapter the Worker does, but reaches neither
  * Temporal nor the API, so it carries reasoning + generation config and
@@ -380,6 +398,7 @@ export const aampCliEnvSchema = baseEnvSchema
   .merge(reasoningEnvSchema)
   .merge(videoGenerationEnvSchema)
   .merge(creativeMemoryEnvSchema)
+  .merge(benchmarkCostEnvSchema)
   .merge(databaseEnvSchema.partial())
   .superRefine(refineReasoningConfig)
   .superRefine(refineVideoGenerationConfig)

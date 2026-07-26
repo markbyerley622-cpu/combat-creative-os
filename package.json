@@ -18,6 +18,7 @@
     "aamp:render": "pnpm --filter @combat/media run build && node packages/media/dist/cli/render-cli.js",
     "aamp:generate": "pnpm --filter aamp-cli run build && node --env-file-if-exists=.env apps/aamp-cli/dist/generate-cli.js",
     "aamp:doctor": "pnpm --filter aamp-cli run build && node --env-file-if-exists=.env apps/aamp-cli/dist/production/doctor-main.js",
+    "aamp:benchmark": "pnpm --filter aamp-cli run build && node --env-file-if-exists=.env apps/aamp-cli/dist/benchmark/benchmark-main.js",
     "aamp:reference": "pnpm --filter aamp-cli run build && node --env-file-if-exists=.env apps/aamp-cli/dist/creative-memory/reference-cli-main.js",
     "db:generate": "pnpm --filter @combat/database run generate",
     "db:migrate": "pnpm --filter @combat/database run migrate",

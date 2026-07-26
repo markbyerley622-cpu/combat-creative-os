@@ -15,8 +15,11 @@ a **production AAMP composition root** — one canonical dependency factory, typ
 `FIXTURE`/`LOCAL_PRODUCTION`/`PRODUCTION` execution modes derived from the
 dependencies actually built, sealed run provenance, and a read-only
 `pnpm aamp:doctor` preflight — exercised end to end against live local
-PostgreSQL, live Qdrant and real FFmpeg. See `docs/architecture.md` §8's
-production-composition-root entry.
+PostgreSQL, live Qdrant and real FFmpeg, and by a **controlled creative
+benchmark** (`pnpm aamp:benchmark`) that runs the same campaign with Creative
+Memory off and required and compares nineteen dimensions. See
+`docs/architecture.md` §8's production-composition-root and
+creative-benchmark-runner entries, and `docs/runbooks/creative-benchmark.md`.
 
 The next step in this document's own plan is unchanged: **AAMP-1 step 3, the
 `SERIALIZABLE` budget transaction** (§6 task 5).

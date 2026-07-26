@@ -86,8 +86,53 @@ is still a committed fixture. See the "Production composition root" rules below,
 `docs/architecture.md` §8's entry, and
 `docs/runbooks/prompt-driven-advertisement-generation.md` §§10–14.
 
+**The controlled creative benchmark runner is done** — `pnpm aamp:benchmark`
+runs the same campaign twice (Creative Memory `off`, then `required`) against
+identical, hashed, deep-frozen inputs and compares nineteen dimensions.
+**Proven live:** two genuine ffprobe-verified 1080×1920 MP4s at 15.000 s, both
+QA `PASS`; twelve of nineteen dimensions changed, including hook strategy, hook
+latency (3.767 s → 1.0 s), beat count (4 → 8), camera movement, motion design
+and the manifest checksum; the OFF arm performed zero retrievals and the
+REQUIRED arm eleven across three references and all four planning roles.
+**Not proven:** creative quality — the reasoning is the deterministic
+context-aware fixture. See the "Controlled creative benchmark" rules below and
+`docs/runbooks/creative-benchmark.md`.
+
 **The next milestone is AAMP-1 step 3** — the `SERIALIZABLE` budget transaction
 (`docs/aamp-architecture.md` §6 task 5), still outstanding and unstarted.
+
+## Controlled creative benchmark — permanent rules
+
+- **Difference is not improvement, and the system never says otherwise.**
+  `COMPARISON_NOTICE` and the experiment's `interpretation` travel on every
+  report. No field ranks the arms, and a test asserts no verdict word appears
+  in the Markdown. Creative quality is recorded only in the human scorecard.
+- **Both arms receive one frozen, hashed input.** The request is deep-frozen;
+  the asset manifest is hashed by **bytes**, not by path. Each arm records what
+  it actually received, and `assertArmsWereControlled` withholds the comparison
+  when they disagree — comparing two different briefs is worse than not
+  comparing, because it looks like evidence.
+- **No mutable state crosses the arm boundary.** Separate run directories,
+  workflow run ids, injectors and reasoning-provider instances. Sharing the
+  database and Qdrant handles is fine; they are read-only here.
+- **The comparison reads the artefacts on disk**, never in-memory state, so a
+  finished experiment can be re-compared and an insufficient artefact is a
+  defect found here.
+- **A human score exists only because a person wrote it.** The runner emits an
+  empty template; `aamp:benchmark score` validates a submitted file. Never add
+  a function that produces, suggests or defaults a score.
+- **Paid work needs four yeses**: a configured provider, an explicit
+  `--allow-paid-providers`, a computable maximum cost printed _before_ the
+  first call, and the authorisation recorded in provenance. Never default
+  `BENCHMARK_INPUT_COST_CENTS_PER_MTOK` / `..._OUTPUT_...` — without them
+  nothing is authorised, which is the point. Never hardcode a price table.
+- **The benchmark uses the context-aware fixture, not the golden replay.** The
+  replay provider ignores its input, so an ON/OFF comparison driven by it would
+  show two identical plans and prove nothing. The context-aware fixture is a
+  mechanism demonstration and is labelled as one everywhere.
+- **`skipRender` is asked for, never inferred.** The result carries
+  `renderSkipped`, because an absent output path is also what "QA never ran"
+  looks like.
 
 ## Production composition root — permanent rules
 

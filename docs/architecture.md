@@ -2759,6 +2759,103 @@ recorded as `NOT_METERED_BY_CLI` with zeros: the CLI reserves no budget and
 writes no ledger row, and token metering is not plumbed through `planCampaign`.
 The three human gates are untouched.
 
+---
+
+### AAMP — controlled creative benchmark runner (2026-07-27)
+
+`pnpm aamp:benchmark` runs the same campaign twice — Creative Memory `off` then
+`required` — and compares what came out. Detail:
+`docs/runbooks/creative-benchmark.md`.
+
+**What changed.**
+
+- **A versioned `CreativeBenchmarkExperiment` contract**
+  (`apps/aamp-cli/src/benchmark/experiment.ts`): experiment and workspace ids,
+  the immutable inputs hashed as one unit, benchmark profile versions with
+  their governing checksums, execution mode and dependency evidence, the
+  settings held constant, both arms, experiment/comparison/human-review status,
+  paid-provider authorisation, cost basis and a self-checksum. It lives in the
+  app rather than `packages/domain` because it names `CampaignRequest`,
+  `AampExecutionMode` and `DependencyEvidence` — lifting it into the domain
+  package would drag app types across a dependency edge that runs the other
+  way.
+
+- **Control is checked, not assumed.** The request is deep-frozen and hashed
+  once; the production asset manifest is hashed by **bytes**, not by path; each
+  arm records the hashes it actually received; and `assertArmsWereControlled`
+  refuses to emit a comparison when they disagree, when the OFF arm's mode is
+  not `off`, or when the OFF arm performed any retrieval. Separate run
+  directories, workflow run ids, injectors and reasoning-provider instances per
+  arm; the PostgreSQL and Qdrant handles are shared and read-only.
+
+- **A nineteen-dimension comparison, computed from the artefacts on disk** —
+  hook strategy, hook latency, narrative arc, beat count, beat timing, shot
+  count, shot durations, camera movement, motion design, transitions, caption
+  density, CTA timing, CTA duration, reference roles, reference diversity,
+  originality risk, manifest, actual-media QA and cost. Each row is marked
+  `STRUCTURE` or `MEASUREMENT`. Reading the durable artefacts rather than
+  in-memory state means a finished experiment can be re-compared months later,
+  and an artefact that turns out to be insufficient is a defect discovered
+  here. Nothing ranks the arms; `DIFFERENCE IS NOT IMPROVEMENT` is on every
+  report, and a test asserts no verdict word appears.
+
+- **A versioned human scorecard.** Fourteen dimensions, 1–5, each requiring a
+  reviewer id, a note of at least twenty characters, evidence (timestamp or
+  shot index), a blocking classification and a timestamp. The runner emits only
+  an **empty template**; `pnpm aamp:benchmark score` validates a file a named
+  person wrote. There is no function in the repository that produces a score,
+  and a source-level test holds that.
+
+- **A four-condition paid-provider gate.** A real provider configured, an
+  explicit `--allow-paid-providers`, a computable maximum cost printed _before_
+  the first call, and the authorisation written into provenance. The cost
+  rates (`BENCHMARK_INPUT_COST_CENTS_PER_MTOK`,
+  `BENCHMARK_OUTPUT_COST_CENTS_PER_MTOK`) are deliberately not defaulted:
+  without them nothing can be authorised, because paid work must never be
+  authorised against an unknown number, and a hardcoded price table here would
+  go stale silently. A test asserts no test file passes the flag and that the
+  runner reaches a real provider only inside the authorised branch.
+
+- **`runSourceCampaign` gained `skipRender`**, so the benchmark can produce
+  both plans and both render manifests on a machine with no toolchain. It is
+  not a quiet degradation: the caller asks explicitly and the result carries
+  `renderSkipped`, because an absent output path is also what "QA never ran"
+  looks like.
+
+**Persistence.** Durable checksummed artefacts under
+`.aamp-output/benchmarks/<experiment-id>/` — `experiment.json`,
+`comparison-report.json`, `comparison-report.md`, an empty scorecard template
+per arm, and each arm's full run directory including its
+`aamp-run-provenance.json`. No new Prisma model, for the reason recorded in the
+composition-root entry above; the experiment references the canonical
+PostgreSQL rows (benchmark profile ids and versions, reference and annotation
+ids) rather than copying them.
+
+**Proven, against live local infrastructure.** A complete benchmark producing
+two genuine 1080×1920 h264/aac MP4s of exactly 15.000 s, both QA `PASS`,
+ffprobe-verified. Twelve of nineteen dimensions changed — hook strategy
+(generic message → a measured 1.0 s proposition window), hook latency
+(3.767 s → 1.0 s), beat count (4 → 8), beat timing, shot count, shot durations,
+camera movement (`static` → `fast push in`), motion design (`LOW` → `HIGH`),
+transitions, reference roles, reference diversity (0 → 3 distinct references)
+and the render manifest checksum. The OFF arm performed **zero** retrievals;
+the REQUIRED arm performed eleven across three distinct references and all four
+planning roles. A human scorecard was submitted and summarised. All artefacts
+git-ignored. Deterministic-fixture coverage additionally proves: identical
+immutable inputs across arms, no state leaking between them, REQUIRED failing
+rather than degrading when no profile is approved, deterministic reports,
+rights-safe manifests in both arms, no reference id in any output, a HIGH
+originality result stopping the experiment with the blocked arm holding no
+render manifest at all, every paid-provider refusal path, no secret in any
+report, and no path from this milestone's code to an approval signal.
+
+**Not proven.** Creative quality, and nothing here should be read as evidence of
+it — the reasoning is the deterministic context-aware fixture, which derives
+from measured craft statistics and demonstrates the mechanism only. No real
+Claude benchmark has run (no key configured). `actualCostCents` is always
+`null`: the CLI meters no spend. A single experiment is two arms of one
+campaign, not a sample.
+
 **Next milestone: AAMP-1 step 3 — the `SERIALIZABLE` budget transaction**
 (`docs/aamp-architecture.md` §6 task 5), still outstanding and unstarted.
 
