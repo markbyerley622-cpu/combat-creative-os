@@ -18,8 +18,11 @@ into it.
 3. **Retrieval grants no output rights.** Indexing, retrieving, reranking and
    returning a reference changes nothing about what it may be used for. Agency
    media remains analysis-only.
-4. **Agent injection is not implemented.** This milestone builds the retrieval
-   layer; no specialist agent consumes it yet.
+4. **Agent injection is implemented, and proves mechanism rather than quality.**
+   The four planning agents on the `aamp:generate` path receive role-specific,
+   governed, agent-safe context (§§16–22). What is proven is that it reaches the
+   right agent, changes the plan and the render manifest, and cannot leak
+   expressive material. Nothing here supports a claim about creative quality.
 
 ## 2. Architecture
 
@@ -302,5 +305,228 @@ result manifest for human inspection; FiftyOne is never the retrieval engine.
   write `creative_memory_index_entries` rows — indexing currently reports
   outcomes and writes to Qdrant, with the `recordEntry` hook available for the
   Prisma-backed writer.
-- No agent consumes retrieval results yet.
 - FiftyOne cannot run on this machine's Python (§12).
+- Creative Memory now reaches the four planning agents — see §§16–21. Creative
+  _quality_ under injection is unproven; only the mechanism is.
+
+---
+
+## 16. Role-specific injection — what reaches which agent
+
+Retrieval answers "what is similar". Injection decides **which agent is told
+what**, under an approved benchmark profile. Each of the four planning agents
+on the `aamp:generate` path has its own versioned retrieval plan
+(`packages/domain/src/schemas/creative-memory-retrieval-plans.ts`).
+
+| Agent role               | Plan key                          | Creative Memory roles queried                                            | Query built from                                                     | Observations it may be told                                                      | Top-K / budget  |
+| ------------------------ | --------------------------------- | ------------------------------------------------------------------------ | -------------------------------------------------------------------- | -------------------------------------------------------------------------------- | --------------- |
+| `CAMPAIGN_STRATEGIST`    | `CAMPAIGN_STRATEGIST_CRAFT_V1`    | `CAMPAIGN_STRATEGY`, `PERFORMANCE_ANALYSIS`                              | brief, objective, audience, facts, platform, duration, CTA           | `hookMechanism`, `narrativeStructure`                                            | 4 / 6 000 chars |
+| `CREATIVE_DIRECTOR`      | `CREATIVE_DIRECTOR_CRAFT_V1`      | `CREATIVE_DIRECTION`, `COPY_AND_BRAND_CONTROL`, `VISUAL_QUALITY_CONTROL` | brief, strategist output, brand system, facts, platform, duration    | `hookMechanism`, `narrativeStructure`, `typographyBehaviour`, `soundProgression` | 4 / 8 000 chars |
+| `SCRIPT_TIMING_DIRECTOR` | `SCRIPT_TIMING_DIRECTOR_CRAFT_V1` | `SCRIPT_AND_TIMING`, `PLATFORM_OPTIMISATION`                             | brief, concept output, duration, platform, CTA, facts                | `narrativeStructure`, `transitionCategory`                                       | 5 / 8 000 chars |
+| `SHOT_PROMPT_ENGINEER`   | `SHOT_PROMPT_ENGINEER_CRAFT_V1`   | `MOTION_AND_TRANSITIONS`, `PREVISUALISATION`, `CONTINUITY_AND_EDITORIAL` | brief, concept output, **the specific shot**, platform, brand system | `cameraMovement`, `transitionCategory`, `typographyBehaviour`                    | 3 / 5 000 chars |
+
+The Shot-Prompt Engineer retrieves **per shot**, so a hook and a CTA get
+different context.
+
+Every plan also fixes its candidate count, items-per-reference cap, minimum
+distinct references, minimum governance status (`APPROVED_AND_ACTIVE`),
+tie-break (`RANK_THEN_REFERENCE_ID_THEN_SCENE_ID`) and fallback
+(`CONTINUE_WITHOUT_CONTEXT` — escalated to a run failure by `required` mode).
+
+**Platform is not a hard filter.** It is written into the query text and
+rewarded by scoring. A hard platform filter on a small library silently empties
+the context, and hook latency, cut density and transition mechanics transfer
+across vertical short-form platforms.
+
+**A plan is versioned data, never edited in place.** Changing one changes what
+an approved campaign was planned against; bump `planVersion`, which travels in
+every context and every provenance record.
+
+## 17. The agent-safe context envelope
+
+`CreativeMemoryContext` is the only thing an agent receives. Per item:
+
+- `referenceId`, `annotationId`, `annotationVersion`, `sceneId`
+- `contributingRole`, `retrievalScore`, `rerankScore`, `finalRank`
+- `measurements` — durations, scene count, cuts per second, average scene
+  length, first-cut latency, aspect ratio, pacing, product-reveal and CTA
+  seconds, and the reference's ordered scene-duration sequence
+- `observations` — only the fields the role's plan permits
+- `craftPrinciple` (the approved `transferablePrinciple`, verbatim)
+- `intendedApplication` (system-authored, per role)
+- `riskWarning` (the reviewer's `prohibitedDirectSimilarity`)
+
+Plus the plan and profile identity, retrieval/reranking profile,
+`fallbackStatus`, the query hash, the role's focus areas, the standing usage
+directive and the rights notice.
+
+**Never present:** file paths, URLs, media bytes, transcripts, advertising
+copy, lyrics or music, logos, credentials, exact frame sequences, production
+asset ids, brand, title, campaign or agency. Agency and source identity remain
+available in administrator-facing governance and `ADMIN` retrieval results and
+must not enter an agent prompt.
+
+`assertAgentSafeContext` walks the serialised envelope before **every** agent
+invocation and throws `UNSAFE_AGENT_CONTEXT`. It checks
+`AGENT_SAFE_FORBIDDEN_KEYS`, path/URL/media-filename patterns and imitation
+phrasing. `usageDirective`, `notice` and `riskWarning` are exempt from the
+imitation check alone — a prohibition necessarily names what it forbids.
+
+## 18. Benchmark governance — the approval flow
+
+A profile is what a named human approved. Rows are never rewritten.
+
+```sh
+# 1. Create + approve + activate one profile per specialist role.
+pnpm aamp:reference benchmark-seed \
+  --workspace <uuid> --reviewer <reviewer-id> --activated-by <operator-id> \
+  [--name combat-reviews-benchmark] [--platform TIKTOK]
+
+# 2. Inspect what exists, with reviewer, activation and checksum.
+pnpm aamp:reference benchmark-list --workspace <uuid> [--role CAMPAIGN_STRATEGIST]
+
+# 3. Ask what would govern a specific campaign right now, and if nothing, why.
+pnpm aamp:reference benchmark-resolve \
+  --workspace <uuid> --campaign <uuid> --role CAMPAIGN_STRATEGIST [--platform TIKTOK]
+
+# 4. Withdraw. The only mutation, and it touches no governing field.
+pnpm aamp:reference benchmark-withdraw --workspace <uuid> --profile <uuid>
+```
+
+Rules the repository enforces:
+
+- An `APPROVED` profile must name a reviewer and an approval instant.
+- A profile cannot be active unless it is approved.
+- A new version supersedes the active one and deactivates it, recording
+  `supersedesProfileId` on the new row.
+- `governingChecksumSha256` covers governing fields only — so withdrawal keeps
+  it valid, and a mismatch means the row was edited outside the repository.
+  A mismatched row is refused with `CHECKSUM_MISMATCH`.
+- A profile may only **tighten** a plan: lower top-K, lower the context budget,
+  lower items-per-reference, raise the diversity minimum.
+- Cross-workspace profiles are invisible.
+
+`benchmark-seed` is a fixture convenience, not an auto-approval path: it still
+demands a named reviewer and activator and refuses without them.
+
+## 19. CLI usage
+
+```sh
+pnpm aamp:generate --request <campaign-request.json> \
+  --creative-memory required|optional|off \
+  [--assets <production-assets.json>] [--output-dir <dir>] [--plan-only] [--json]
+```
+
+| Mode            | Behaviour                                                                                                                       |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `off` (default) | No retrieval. Byte-identical to the pre-injection baseline. Needs no database, no Qdrant and no profile.                        |
+| `optional`      | Uses context where a governed, eligible one exists; otherwise continues and records a typed `NOT_USED` reason.                  |
+| `required`      | Retrieval, an approved profile and eligible role-specific context are mandatory. Any failure exits **9** before any agent runs. |
+
+`required` and `optional` need `DATABASE_URL` (the library, its approved
+annotations and its profiles live in PostgreSQL) and a reachable Qdrant.
+
+Exit codes added by this milestone:
+
+| Code | Meaning                                                                                                 |
+| ---- | ------------------------------------------------------------------------------------------------------- |
+| `9`  | `CREATIVE_MEMORY_UNAVAILABLE` — required mode could not obtain governed context. Nothing ran.           |
+| `10` | `ORIGINALITY_RISK_BLOCKED` — a HIGH originality result stopped planning before any source was selected. |
+
+## 20. Originality, divergence and the gate
+
+Each of the four agents returns `creativeMemoryDivergence`: the principles it
+used (cited by reference id), the campaign-specific transformation, elements
+deliberately changed, prohibited elements avoided, a self-assessed risk level
+and a rationale.
+
+`evaluateOriginality` reads the structured outputs deterministically:
+
+| Signal                      | Severity | Fires when                                                              |
+| --------------------------- | -------- | ----------------------------------------------------------------------- |
+| `COPIED_REFERENCE_PHRASE`   | HIGH     | 8+ consecutive words reproduced from a reference craft note             |
+| `IDENTICAL_BEAT_SEQUENCE`   | HIGH     | the planned beat lengths reproduce a reference's scene sequence         |
+| `NAMED_AGENCY_IMITATION`    | HIGH     | an affirmative instruction to imitate an agency, studio or campaign     |
+| `FORBIDDEN_FIELD_IN_OUTPUT` | HIGH     | a path, URL or media filename in an output field                        |
+| `AGENT_DECLARED_HIGH_RISK`  | HIGH     | the agent assessed itself as HIGH                                       |
+| `SINGLE_SOURCE_DEPENDENCE`  | MEDIUM   | every cited principle came from one reference while others were offered |
+| `MISSING_DIVERGENCE_RECORD` | MEDIUM   | context was injected but no record came back                            |
+| `UNKNOWN_REFERENCE_CITED`   | MEDIUM   | a citation names a reference that was not in that agent's context       |
+
+HIGH blocks; MEDIUM is recorded and flagged for human review; LOW continues.
+The evaluator may raise an agent's declared level and never lowers it. Negated
+sentences are excluded from the imitation check, because an agent restating its
+constraints is complying, not instructing.
+
+**This is a governance signal, not comprehensive copyright, plagiarism or
+similarity detection**, and every report says so.
+
+## 21. Failure modes and run artefacts
+
+Typed injection failures: `MISSING_APPROVED_PROFILE`, `RETRIEVAL_UNAVAILABLE`,
+`NO_ELIGIBLE_REFERENCES`, `CROSS_WORKSPACE_RESULT`, `UNSAFE_AGENT_CONTEXT`,
+`CONTEXT_BUDGET_OVERFLOW`, `SOURCE_DIVERSITY_FAILURE`,
+`ORIGINALITY_RISK_BLOCKED`, `STALE_PROFILE_OR_ANNOTATION`,
+`MALFORMED_RETRIEVAL_RESPONSE`.
+
+`CROSS_WORKSPACE_RESULT` and `UNSAFE_AGENT_CONTEXT` are **integrity** failures
+and always throw, in every mode. The rest are availability failures and degrade
+under `optional` to a recorded `NOT_USED` reason
+(`NO_APPROVED_PROFILE`, `RETRIEVAL_UNAVAILABLE`, `NO_ELIGIBLE_REFERENCES`,
+`NO_ROLE_MATCHED_REFERENCES`, `COLLECTION_NOT_PERMITTED`,
+`CONTEXT_BUDGET_OVERFLOW`, `SOURCE_DIVERSITY_FAILURE`,
+`STALE_PROFILE_OR_ANNOTATION`, `MALFORMED_RETRIEVAL_RESPONSE`).
+
+Every run directory gains two artefacts:
+
+- `creative-memory-provenance.json` — mode, status, one audit record per agent
+  invocation (plan key and version, benchmark profile with reviewer, activation
+  and checksum, reference roles queried, query hash and length, retrieval and
+  reranking profile, fallback status, collection, candidates retrieved,
+  effective limits, distinct references, items dropped for budget, context hash,
+  and per item the reference id, annotation id and version, scene id,
+  contributing role, scores and rank), the divergence records, the originality
+  summary, and `anyReferenceOutputEligible: false`.
+- `originality-report.json` — the full assessment and its signals.
+
+`run-summary.json` gains a `creativeMemory` block carrying the mode, the roles
+that had context, the originality risk level and whether human review is
+required.
+
+**Nothing forbidden is persisted in these artefacts**: they carry ids, scores,
+hashes and measurements, never retrieved prose or expressive content.
+
+## 22. What injection proves and what it does not
+
+**Proven** (`injection.test.ts`, `injection-acceptance.test.ts`,
+`creative-memory-modes.test.ts`, plus the domain and repository suites):
+
+- four agents receive four different role-appropriate contexts
+- the same request and index state produce deterministic contexts
+- different briefs produce different retrieval queries
+- `required`, `optional` and `off` behave exactly as specified
+- a retrieval outage cannot silently activate fixture creative
+- transcripts, URLs, paths, bytes, copy, logos, credentials and media fields
+  cannot cross the agent-safe boundary
+- only `READY_FOR_RETRIEVAL` references with approved annotations are used
+- only approved, active, same-workspace benchmark profiles govern a campaign
+- cross-workspace references and profiles are invisible
+- source-diversity rules are enforced
+- a HIGH originality result blocks with FFmpeg never invoked and no render
+  manifest written; MEDIUM is recorded for review
+- ON versus OFF changes hook strategy, beat plan, a transition decision, the
+  shot specification and the render manifest, and the manifest still contains
+  only output-eligible sources
+
+**Not proven:**
+
+- **creative quality.** The ON/OFF comparison is driven by a deterministic
+  fixture provider that derives from measurements. It demonstrates the
+  mechanism, not judgement, and says nothing about how a real reasoning model
+  would use this context.
+- **agency-grade output.** Nothing here assesses that, and nothing should claim
+  it.
+- **Qwen retrieval quality** — still unproven, no endpoint (§4, §15).
+- **behaviour against live PostgreSQL.** Every test runs against the in-memory
+  reference store; the benchmark-profile table has a migration but no
+  application process has been pointed at live Postgres.

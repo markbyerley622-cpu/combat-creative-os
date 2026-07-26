@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { CreativeDivergenceRecordSchema, CreativeMemoryContextSchema } from '@combat/domain';
 
 /** Which beat of the ad structure a shot belongs to (hook/promise/feature/CTA). */
 export const ShotBeatSchema = z.enum(['HOOK', 'PROMISE', 'FEATURE', 'CTA']);
@@ -19,6 +20,13 @@ export const ScriptTimingDirectorInputSchema = z.object({
   campaignPrompt: z.string().min(1).max(8000).optional(),
   /** Binding product/event facts as `PRODUCT — …` / `EVENT — …` lines. */
   factualConstraints: z.array(z.string().min(1)).default([]),
+  /**
+   * Bounded, governed benchmark timing context for this role — opening-hook
+   * latency, beat density, transition timing, CTA timing. The measurements are
+   * evidence about rhythm; reproducing a reference's ordered beat lengths is a
+   * blocking originality failure, not a shortcut.
+   */
+  creativeMemory: CreativeMemoryContextSchema.optional(),
 });
 export type ScriptTimingDirectorInput = z.infer<typeof ScriptTimingDirectorInputSchema>;
 
@@ -36,5 +44,6 @@ export type ScriptShot = z.infer<typeof ScriptShotSchema>;
 export const ScriptTimingDirectorResultSchema = z.object({
   totalDurationFrames: z.number().int().positive(),
   shots: z.array(ScriptShotSchema).min(1),
+  creativeMemoryDivergence: CreativeDivergenceRecordSchema.optional(),
 });
 export type ScriptTimingDirectorResult = z.infer<typeof ScriptTimingDirectorResultSchema>;

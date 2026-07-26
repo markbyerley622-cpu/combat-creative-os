@@ -1,5 +1,6 @@
 export * from './roles';
 export * from './tenancy';
+export * from './canonical-json';
 export * from './agent-envelope';
 export * from './agent-invocation-activity';
 export * from './schemas';

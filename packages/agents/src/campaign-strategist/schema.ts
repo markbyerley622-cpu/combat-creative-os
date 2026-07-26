@@ -1,5 +1,9 @@
 import { z } from 'zod';
-import { DeliveryPlatformSchema } from '@combat/domain';
+import {
+  CreativeDivergenceRecordSchema,
+  CreativeMemoryContextSchema,
+  DeliveryPlatformSchema,
+} from '@combat/domain';
 
 export const CampaignStrategistInputSchema = z.object({
   brandName: z.string().min(1),
@@ -34,6 +38,14 @@ export const CampaignStrategistInputSchema = z.object({
    * choose which to lead on and may not contradict or invent alongside them.
    */
   factualConstraints: z.array(z.string().min(1)).default([]),
+  /**
+   * Bounded, governed benchmark craft context for this role — audience
+   * tension, positioning, hook strategy, CTA strategy. Resolved by the
+   * orchestrator before the call and validated agent-safe; the agent never
+   * queries for it. Optional so every existing caller keeps compiling and so
+   * `--creative-memory off` is byte-identical to the pre-injection baseline.
+   */
+  creativeMemory: CreativeMemoryContextSchema.optional(),
 });
 export type CampaignStrategistInput = z.infer<typeof CampaignStrategistInputSchema>;
 
@@ -51,5 +63,7 @@ export const CampaignStrategistResultSchema = z.object({
     keyMessages: z.array(z.string().min(1)).min(1),
     toneGuidelines: z.array(z.string().min(1)).min(1),
   }),
+  /** Required whenever `creativeMemory` was supplied; see `CreativeDivergenceRecordSchema`. */
+  creativeMemoryDivergence: CreativeDivergenceRecordSchema.optional(),
 });
 export type CampaignStrategistResult = z.infer<typeof CampaignStrategistResultSchema>;

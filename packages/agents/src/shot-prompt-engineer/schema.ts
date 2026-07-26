@@ -1,5 +1,7 @@
 import { z } from 'zod';
 import {
+  CreativeDivergenceRecordSchema,
+  CreativeMemoryContextSchema,
   MotionIntensitySchema,
   QualityFailureCategorySchema,
   QualityFailureSeveritySchema,
@@ -28,6 +30,12 @@ export const ShotPromptEngineerInputSchema = z.object({
   campaignPrompt: z.string().min(1).max(8000).optional(),
   /** Binding product/event facts as `PRODUCT — …` / `EVENT — …` lines. */
   factualConstraints: z.array(z.string().min(1)).default([]),
+  /**
+   * Bounded, governed benchmark craft context for this role — camera movement,
+   * motion design, transition mechanics, continuity. Retrieved per shot, so
+   * two shots in the same campaign may receive different context.
+   */
+  creativeMemory: CreativeMemoryContextSchema.optional(),
 });
 export type ShotPromptEngineerInput = z.infer<typeof ShotPromptEngineerInputSchema>;
 
@@ -61,5 +69,6 @@ export const ShotPromptEngineerResultSchema = z.object({
   appInterfaceRequirements: z.string().optional(),
   continuityRequirements: z.array(z.string().min(1)).default([]),
   qualityRubric: z.array(z.string().min(1)).default([]),
+  creativeMemoryDivergence: CreativeDivergenceRecordSchema.optional(),
 });
 export type ShotPromptEngineerResult = z.infer<typeof ShotPromptEngineerResultSchema>;

@@ -8,34 +8,53 @@ import type {
   ShotPromptEngineerResult,
 } from '@combat/agents';
 import { executeAgent, type AgentDefinition } from '@combat/agent-runtime';
-import type { AgentInput } from '@combat/domain';
+import type {
+  AgentInput,
+  CreativeDivergenceRecord,
+  CreativeMemoryAgentRole,
+  CreativeMemoryContext,
+  RetrievalPlanInputs,
+} from '@combat/domain';
 import type { ReasoningProvider } from '@combat/providers';
 
 import { formatFactualConstraints, type CampaignRequest } from './campaign-request';
+import type { CreativeMemoryInjector } from './creative-memory/injection';
 import type { ScriptedShot } from './source-selection';
 
 /**
  * Runs the existing specialist agents against a campaign request.
  *
- * The difference from the previous milestone's pipeline is what reaches the
- * agents. Before, they received a derived summary — an objective string and a
- * couple of key messages — and the requester's actual brief never left the CLI.
- * Now every planning agent receives `campaignPrompt` verbatim and the same
- * ordered `factualConstraints`, so the plan can be specific to what was
- * actually asked for. That propagation is the milestone, and
- * `plan-campaign.test.ts` asserts it rather than trusting it.
+ * Two milestones' worth of input now reaches the agents. The prompt-driven
+ * milestone gave them `campaignPrompt` verbatim and the ordered
+ * `factualConstraints`. This one adds, immediately before each call, a bounded
+ * and governed **role-specific Creative Memory context** — different for each
+ * agent, because the four are answering different craft questions, and absent
+ * entirely when `--creative-memory off` so the previous behaviour is preserved
+ * byte for byte.
  *
- * Still not a second orchestration framework: every call is `executeAgent`
- * with a definition from the canonical `AGENT_REGISTRY`, validated by that
- * agent's own schemas, handed to the next by typed result. No persistence, no
- * approvals — the three human gates live only in the workflow path.
+ * Still not a second orchestration framework: every call is `executeAgent` with
+ * a definition from the canonical `AGENT_REGISTRY`, validated by that agent's
+ * own schemas, handed to the next by typed result. The agents themselves reach
+ * nothing — the injector resolves context here, the same way an Activity would
+ * inside Temporal, and no agent can initiate a query. No persistence, no
+ * approvals: the three human gates continue to live only in the workflow path.
  */
 
 export interface CampaignPlanOptions {
   readonly request: CampaignRequest;
   readonly reasoningProvider: ReasoningProvider;
   readonly workflowRunId: string;
+  /** Absent in `--creative-memory off`, which is the pre-injection baseline. */
+  readonly injector?: CreativeMemoryInjector;
   readonly onProgress?: (message: string) => void;
+}
+
+/** One agent invocation's Creative Memory record, for provenance and originality. */
+export interface RoleContextRecord {
+  readonly agentRole: CreativeMemoryAgentRole;
+  readonly shotIndex?: number;
+  readonly context?: CreativeMemoryContext;
+  readonly divergence?: CreativeDivergenceRecord;
 }
 
 export interface CampaignPlan {
@@ -48,6 +67,8 @@ export interface CampaignPlan {
   readonly captionLines: readonly string[];
   /** `agentName@promptVersion` for every agent that ran, in order. */
   readonly agentVersions: readonly string[];
+  /** What each agent was given and what it said it did with it, in call order. */
+  readonly roleContexts: readonly RoleContextRecord[];
 }
 
 export class CampaignPlanningError extends Error {
@@ -111,6 +132,26 @@ async function runOne<TInput, TResult>(
 }
 
 /**
+ * The brand system, as one line for retrieval.
+ *
+ * Colours, type and safe areas are the properties a benchmark's typography and
+ * hierarchy observations are actually relevant to; the logo asset id is
+ * deliberately excluded because an asset identifier is production-side and has
+ * no business in a reference query.
+ */
+export function describeBrandSystem(request: CampaignRequest): string {
+  const { brandKit } = request;
+  return [
+    `primary ${brandKit.primaryColorHex}`,
+    `accent ${brandKit.accentColorHex}`,
+    `caption type ${brandKit.captionFontFamily}`,
+    '9:16 vertical',
+    `top safe area ${brandKit.safeAreaTopPx}px`,
+    `bottom safe area ${brandKit.safeAreaBottomPx}px`,
+  ].join(', ');
+}
+
+/**
  * The inputs handed to each agent, exposed separately from execution so tests
  * can assert prompt propagation and request determinism without a model.
  */
@@ -136,22 +177,62 @@ export function buildPlanningInputs(request: CampaignRequest): {
   };
 }
 
+/** The retrieval inputs available before any agent has run. */
+export function baseRetrievalInputs(request: CampaignRequest): RetrievalPlanInputs {
+  return {
+    campaignPrompt: request.campaignPrompt,
+    factualConstraints: formatFactualConstraints(request),
+    objective: request.objective,
+    targetAudience: request.targetAudience,
+    brandSystem: describeBrandSystem(request),
+    platform: request.platform,
+    targetDurationSeconds: request.targetDurationSeconds,
+    ctaHeadline: request.cta.headline,
+  };
+}
+
 export async function planCampaign(options: CampaignPlanOptions): Promise<CampaignPlan> {
-  const { request } = options;
+  const { request, injector } = options;
   const agentVersions: string[] = [];
+  const roleContexts: RoleContextRecord[] = [];
   const shared = { ...options, agentVersions };
   const { strategist, factualConstraints } = buildPlanningInputs(request);
   const durations = [Math.round(request.targetDurationSeconds)];
+  let retrievalInputs = baseRetrievalInputs(request);
 
+  const record = (
+    agentRole: CreativeMemoryAgentRole,
+    context: CreativeMemoryContext | undefined,
+    divergence: CreativeDivergenceRecord | undefined,
+    shotIndex?: number,
+  ): void => {
+    roleContexts.push({
+      agentRole,
+      ...(shotIndex === undefined ? {} : { shotIndex }),
+      ...(context ? { context } : {}),
+      ...(divergence ? { divergence } : {}),
+    });
+  };
+
+  const strategyContext = await injector?.contextFor('CAMPAIGN_STRATEGIST', retrievalInputs);
   const strategy = await runOne<unknown, CampaignStrategistResult>(
     'campaign-strategist',
-    strategist,
-    {
-      ...shared,
-      stage: 'STRATEGY',
-    },
+    { ...strategist, ...(strategyContext ? { creativeMemory: strategyContext } : {}) },
+    { ...shared, stage: 'STRATEGY' },
   );
+  record('CAMPAIGN_STRATEGIST', strategyContext, strategy.creativeMemoryDivergence);
 
+  retrievalInputs = {
+    ...retrievalInputs,
+    strategy: {
+      positioning: strategy.strategy.positioning,
+      targetAudienceSummary: strategy.strategy.targetAudienceSummary,
+      keyMessages: strategy.strategy.keyMessages,
+      toneGuidelines: strategy.strategy.toneGuidelines,
+    },
+  };
+
+  const conceptContext = await injector?.contextFor('CREATIVE_DIRECTOR', retrievalInputs);
   const concept = await runOne<unknown, CreativeDirectorResult>(
     'creative-director',
     {
@@ -167,10 +248,22 @@ export async function planCampaign(options: CampaignPlanOptions): Promise<Campai
       priorLearnings: [],
       campaignPrompt: request.campaignPrompt,
       factualConstraints,
+      ...(conceptContext ? { creativeMemory: conceptContext } : {}),
     },
     { ...shared, stage: 'CONCEPT' },
   );
+  record('CREATIVE_DIRECTOR', conceptContext, concept.creativeMemoryDivergence);
 
+  retrievalInputs = {
+    ...retrievalInputs,
+    concept: {
+      logline: concept.logline,
+      visualDirection: concept.visualDirection,
+      narrativeArc: concept.narrativeArc,
+    },
+  };
+
+  const scriptContext = await injector?.contextFor('SCRIPT_TIMING_DIRECTOR', retrievalInputs);
   const script = await runOne<unknown, ScriptTimingDirectorResult>(
     'script-timing-director',
     {
@@ -183,16 +276,30 @@ export async function planCampaign(options: CampaignPlanOptions): Promise<Campai
       frameRate: 30,
       campaignPrompt: request.campaignPrompt,
       factualConstraints,
+      ...(scriptContext ? { creativeMemory: scriptContext } : {}),
     },
     { ...shared, stage: 'SCRIPT' },
   );
+  record('SCRIPT_TIMING_DIRECTOR', scriptContext, script.creativeMemoryDivergence);
 
   const shots: ScriptedShot[] = [];
   const shotBriefs: ShotPromptEngineerResult[] = [];
   const captionLines: string[] = [];
 
   for (const shot of script.shots) {
+    // Retrieved per shot: a hook and a CTA are different craft questions, so
+    // giving both the same context would waste the plan's specificity.
     // eslint-disable-next-line no-await-in-loop -- shot briefs are produced in script order so shot indices stay stable
+    const shotContext = await injector?.contextFor(
+      'SHOT_PROMPT_ENGINEER',
+      {
+        ...retrievalInputs,
+        shot: { index: shot.index, description: shot.description, beat: shot.beat },
+      },
+      { shotIndex: shot.index },
+    );
+
+    // eslint-disable-next-line no-await-in-loop -- same ordering rationale
     const brief = await runOne<unknown, ShotPromptEngineerResult>(
       'shot-prompt-engineer',
       {
@@ -207,9 +314,11 @@ export async function planCampaign(options: CampaignPlanOptions): Promise<Campai
         providerId: request.generation.source === 'COMFYUI' ? 'comfyui' : 'source-library',
         campaignPrompt: request.campaignPrompt,
         factualConstraints,
+        ...(shotContext ? { creativeMemory: shotContext } : {}),
       },
       { ...shared, stage: 'SHOT_PROMPTS' },
     );
+    record('SHOT_PROMPT_ENGINEER', shotContext, brief.creativeMemoryDivergence, shot.index);
 
     shots.push({
       index: shot.index,
@@ -225,7 +334,16 @@ export async function planCampaign(options: CampaignPlanOptions): Promise<Campai
     throw new CampaignPlanningError('script-timing-director', 'produced no shots');
   }
 
-  return { strategy, concept, script, shots, shotBriefs, captionLines, agentVersions };
+  return {
+    strategy,
+    concept,
+    script,
+    shots,
+    shotBriefs,
+    captionLines,
+    agentVersions,
+    roleContexts,
+  };
 }
 
 /**

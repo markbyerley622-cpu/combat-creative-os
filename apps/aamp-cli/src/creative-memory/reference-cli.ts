@@ -33,6 +33,13 @@ import {
   runSearchCommand,
   type RetrievalContext,
 } from './retrieval-commands';
+import {
+  runBenchmarkListCommand,
+  runBenchmarkResolveCommand,
+  runBenchmarkSeedCommand,
+  runBenchmarkWithdrawCommand,
+  type BenchmarkCommandContext,
+} from './benchmark-profile-commands';
 
 /**
  * `pnpm aamp:reference <command>` — the Creative Memory operator surface.
@@ -85,6 +92,18 @@ export interface ReferenceCliContext {
   readonly embedder?: MultimodalEmbeddingProvider;
   readonly reranker?: MultimodalRerankerProvider;
   readonly qdrant?: QdrantClient;
+  /** Overridable so a seeded governance fixture is reproducible. */
+  readonly now?: () => Date;
+}
+
+/** Narrows the ingestion CLI context onto the benchmark commands' own shape. */
+function benchmarkContext(context: ReferenceCliContext): BenchmarkCommandContext {
+  return {
+    db: context.db,
+    stdout: context.stdout,
+    stderr: context.stderr,
+    now: context.now ?? ((): Date => new Date()),
+  };
 }
 
 /** Narrows the ingestion CLI context onto the retrieval commands' own shape. */
@@ -111,6 +130,12 @@ function usage(): string {
     '  inspect   --workspace <uuid> --reference <key>',
     '  approve   --workspace <uuid> --annotation <uuid>',
     '  project   --workspace <uuid> [--output-dir <dir>]  (FiftyOne projection)',
+    '',
+    'Agency benchmark governance (which references may influence which agent):',
+    '  benchmark-seed     --workspace <uuid> --reviewer <id> [--activated-by <id>] [--name <name>] [--platform <PLATFORM>]',
+    '  benchmark-list     --workspace <uuid> [--role <AGENT_ROLE>]',
+    '  benchmark-resolve  --workspace <uuid> --campaign <uuid> --role <AGENT_ROLE> [--platform <PLATFORM>]',
+    '  benchmark-withdraw --workspace <uuid> --profile <uuid>',
     '',
     'Reference material is analysis-only. No command here can make a reference',
     'usable in a produced advertisement.',
@@ -185,6 +210,15 @@ export async function runReferenceCli(
       return runSearchCommand(values, retrievalContext(context));
     case 'remove-from-index':
       return runRemoveFromIndexCommand(values, retrievalContext(context));
+    // --- agency benchmark governance ----------------------------------------
+    case 'benchmark-seed':
+      return runBenchmarkSeedCommand(values, benchmarkContext(context));
+    case 'benchmark-list':
+      return runBenchmarkListCommand(values, benchmarkContext(context));
+    case 'benchmark-withdraw':
+      return runBenchmarkWithdrawCommand(values, benchmarkContext(context));
+    case 'benchmark-resolve':
+      return runBenchmarkResolveCommand(values, benchmarkContext(context));
     default:
       context.stderr(`${usage()}\n`);
       return REFERENCE_EXIT_CODES.INVALID_MANIFEST;

@@ -22,9 +22,10 @@ models, 41 enums, 41 unique indexes, 76 indexes and 68 foreign keys currently in
 
 **Migration SQL is never hand-authored** (CLAUDE.md "Migration rules"). Files
 under `prisma/migrations/` are produced by Prisma and reviewed before commit.
-The one narrow exception — an invariant Prisma cannot express — requires the
-reason to be documented in the migration directory and in this runbook. No such
-exception exists today.
+The one narrow exception requires the reason to be documented in this runbook.
+One exception has been taken: see §4.2, where `migrate diff` generated the SQL
+because `migrate dev` cannot run without an interactive terminal. The SQL was
+still produced by Prisma, not written by hand.
 
 ---
 
@@ -96,6 +97,73 @@ constraints, foreign keys, enum values and `ON DELETE`/`ON UPDATE` behaviour
 match the Prisma schema, and that any new workspace-owned table has a
 `workspaceId` column with an index led by that column (CLAUDE.md "Migration
 rules").
+
+### 4.1 Migration directory names are ordered lexicographically
+
+Prisma applies migrations in **directory-name order**, not creation order. On
+this machine the existing chain is named from **local** time — `20260727010351`
+corresponds to `15:03:51 UTC`, matching that row's `finished_at` exactly — so a
+directory named from UTC sorts _before_ migrations created earlier the same day.
+
+That is not cosmetic. During AAMP Creative Memory injection, a directory
+initially named `20260726181737` (UTC) sorted ahead of
+`20260727010351_add_creative_memory_reference_tables` and, on a fresh database,
+ran before the enum it depends on existed:
+
+```
+Error: P3018  type "ReferenceBusinessRole[]" does not exist
+```
+
+The live database was unaffected — it already had the enum — so **only the
+fresh-database replay caught it**. Always replay the complete chain into an
+empty disposable database before committing a migration; a migration that only
+works on a database that already exists is not a migration.
+
+### 4.2 Documented exception — `migrate diff` + `migrate deploy`
+
+`20260727041853_add_benchmark_governance_profiles` was **not** created by
+`prisma migrate dev`. That command refuses to start without an interactive
+terminal, and the agent session that produced this milestone has none.
+
+The narrow exception CLAUDE.md's "Migration rules" allows was taken, and this is
+the record of it. The SQL was still **Prisma-generated, never hand-authored**:
+
+```sh
+npx prisma migrate diff \
+  --from-url "<disposable clone restored from a verified pg_dump -Fc>" \
+  --to-schema-datamodel prisma/schema.prisma \
+  --script > <migration dir>/migration.sql
+npx prisma migrate deploy
+```
+
+Before it reached the real database it was: scanned for `DROP`/`DELETE FROM`/
+`TRUNCATE`/`ALTER COLUMN`/`RENAME`/DML (zero hits — the only `DELETE` token is
+the `ON DELETE SET NULL` referential action), applied and drift-checked against
+a faithful clone, replayed into an empty database as part of the complete chain,
+and drift-checked again. `prisma migrate status` then showed exactly one pending
+migration on the real database before `migrate deploy` applied it.
+
+Prefer `migrate dev` in a real terminal whenever one is available. Use this path
+only when it is not, and record the reason here.
+
+### 4.3 A rolled-back row is not a modified migration
+
+`_prisma_migrations` carries one stale row for
+`20260726062308_add_user_clerk_subject`: `applied_steps_count = 0`,
+`finished_at` NULL, `rolled_back_at` set, logging a Postgres `42601` syntax
+error at position 1 caused by a UTF-8 BOM in the first attempt. The BOM was
+stripped and the migration re-applied successfully as a second row whose
+checksum matches the committed file byte-for-byte.
+
+`prisma migrate dev` reports this as _"the migration was modified after it was
+applied"_ and offers to reset. **The file was never modified**, and the row was
+never proven to be the cause — `migrate status`, `migrate deploy` and drift
+detection all accept it, and a controlled two-clone experiment could not
+distinguish its presence from its absence on any non-interactive probe.
+
+Leave the row alone. It is inert for `status`, `deploy` and drift detection, and
+deleting it would be an unproven fix to `_prisma_migrations` for a problem that
+`migrate deploy` does not have.
 
 ## 5. Deploying a migration (staging and production)
 

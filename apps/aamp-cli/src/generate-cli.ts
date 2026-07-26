@@ -4,6 +4,12 @@ import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, resolve } from 'node:path';
 
 import { aampCliEnvSchema, type AampCliEnv } from '@combat/config';
+import { createPrismaClient } from '@combat/database';
+import {
+  CREATIVE_MEMORY_MODES,
+  CreativeMemoryModeSchema,
+  type CreativeMemoryMode,
+} from '@combat/domain';
 import {
   NodeCommandRunner,
   renderAdvertisement,
@@ -19,6 +25,17 @@ import {
 } from '@combat/providers';
 
 import { buildRenderManifest } from './build-render-manifest';
+import {
+  CreativeMemoryInjectionError,
+  CreativeMemoryInjector,
+  type CreativeMemoryDependencies,
+} from './creative-memory/injection';
+import {
+  resolveEmbedder,
+  resolveQdrant,
+  resolveReranker,
+  type RetrievalCliEnv,
+} from './creative-memory/retrieval-commands';
 import {
   CampaignRequestValidationError,
   loadCampaignRequest,
@@ -82,6 +99,12 @@ export interface GenerateCliOptions {
    * reasoning provider fails rather than quietly producing generic output.
    */
   readonly fixtureDemo: boolean;
+  /**
+   * Whether approved benchmark intelligence may influence this campaign.
+   * Defaults to `off`, so an existing command line behaves exactly as it did
+   * before this milestone.
+   */
+  readonly creativeMemory: CreativeMemoryMode;
 }
 
 export function parseGenerateCliArguments(argv: readonly string[]): GenerateCliOptions {
@@ -93,10 +116,22 @@ export function parseGenerateCliArguments(argv: readonly string[]): GenerateCliO
   let json = false;
   let planOnly = false;
   let fixtureDemo = false;
+  let creativeMemory: CreativeMemoryMode = 'off';
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     switch (arg) {
+      case '--creative-memory': {
+        const value = argv[++i];
+        const parsed = CreativeMemoryModeSchema.safeParse(value);
+        if (!parsed.success) {
+          throw new Error(
+            `--creative-memory must be one of ${CREATIVE_MEMORY_MODES.join('|')} (got "${value ?? ''}")`,
+          );
+        }
+        creativeMemory = parsed.data;
+        break;
+      }
       case '--request':
         requestPath = argv[++i];
         break;
@@ -130,6 +165,8 @@ export function parseGenerateCliArguments(argv: readonly string[]): GenerateCliO
     throw new Error(
       [
         'Usage: aamp:generate --request <campaign-request.json> [--assets <production-assets.json>] [--output-dir <dir>]',
+        '  --creative-memory required|optional|off',
+        '                   whether approved benchmark intelligence may influence this campaign (default: off)',
         '  --fixture-demo   replay committed fixture creative instead of calling a real reasoning model',
         '  --plan-only      stop after planning, before any render',
         '  --json           machine-readable output',
@@ -147,6 +184,7 @@ export function parseGenerateCliArguments(argv: readonly string[]): GenerateCliO
     json,
     planOnly,
     fixtureDemo,
+    creativeMemory,
   };
 }
 
@@ -174,6 +212,12 @@ export interface GenerateCliContext {
   /** Overridable so an integration test can drive a fake endpoint. */
   readonly providerOverride?: VideoGenerationProvider;
   readonly workflowRunId?: string;
+  /**
+   * Creative Memory collaborators, injected so tests run against the in-memory
+   * reference store and an in-process Qdrant. Production builds them from env,
+   * and there is no environment variable that can select a fake here.
+   */
+  readonly creativeMemoryDependencies?: CreativeMemoryDependencies;
 }
 
 /**
@@ -525,6 +569,110 @@ async function runLegacyManifestCli(
   return 0;
 }
 
+interface ResolvedCreativeMemory {
+  readonly injector?: CreativeMemoryInjector;
+  readonly dispose: () => Promise<void>;
+  /** Why no injector could be built. Fatal under `required`, a warning under `optional`. */
+  readonly problem?: string;
+}
+
+/**
+ * Builds the Creative Memory injector, or explains why it cannot.
+ *
+ * The composition root is the only place a real `PrismaClient` and a real
+ * `QdrantClient` are constructed for this command, and `--creative-memory off`
+ * constructs neither — a source-only run must not acquire a database
+ * dependency it does not use. Tests inject their collaborators through
+ * `context.creativeMemoryDependencies`; no environment variable can select a
+ * fake, which is the same discipline `@combat/auth/testing` follows.
+ */
+async function resolveCreativeMemory(
+  mode: CreativeMemoryMode,
+  env: AampCliEnv,
+  context: GenerateCliContext,
+  request: CampaignRequest,
+  now: Date,
+  onProgress: (message: string) => void,
+): Promise<ResolvedCreativeMemory> {
+  const noop = async (): Promise<void> => undefined;
+  if (mode === 'off') return { dispose: noop };
+
+  const build = (
+    dependencies: CreativeMemoryDependencies,
+    dispose: () => Promise<void>,
+  ): ResolvedCreativeMemory => ({
+    injector: new CreativeMemoryInjector({
+      mode,
+      dependencies,
+      workspaceId: request.workspaceId,
+      campaignId: request.campaignId,
+      platform: request.platform,
+      now,
+      onProgress,
+    }),
+    dispose,
+  });
+
+  if (context.creativeMemoryDependencies) {
+    return build(context.creativeMemoryDependencies, noop);
+  }
+
+  if (!env.DATABASE_URL) {
+    return {
+      dispose: noop,
+      problem:
+        'DATABASE_URL is not set, so the reference library, its approved annotations and its benchmark governance profiles cannot be read.',
+    };
+  }
+
+  // The retrieval commands take the raw environment shape; this command's
+  // schema has already coerced the numeric fields, so they are put back as
+  // strings here rather than duplicating the resolver for one type difference.
+  const retrievalEnv: RetrievalCliEnv = {
+    CREATIVE_MEMORY_EMBEDDING_PROFILE: env.CREATIVE_MEMORY_EMBEDDING_PROFILE,
+    ...(env.CREATIVE_MEMORY_EMBEDDING_ENDPOINT
+      ? { CREATIVE_MEMORY_EMBEDDING_ENDPOINT: env.CREATIVE_MEMORY_EMBEDDING_ENDPOINT }
+      : {}),
+    ...(env.CREATIVE_MEMORY_RERANKER_ENDPOINT
+      ? { CREATIVE_MEMORY_RERANKER_ENDPOINT: env.CREATIVE_MEMORY_RERANKER_ENDPOINT }
+      : {}),
+    ...(env.CREATIVE_MEMORY_EMBEDDING_API_KEY
+      ? { CREATIVE_MEMORY_EMBEDDING_API_KEY: env.CREATIVE_MEMORY_EMBEDDING_API_KEY }
+      : {}),
+    CREATIVE_MEMORY_TIMEOUT_MS: String(env.CREATIVE_MEMORY_TIMEOUT_MS),
+    QDRANT_URL: env.QDRANT_URL,
+    ...(env.QDRANT_API_KEY ? { QDRANT_API_KEY: env.QDRANT_API_KEY } : {}),
+  };
+
+  let embedder;
+  try {
+    embedder = resolveEmbedder(retrievalEnv);
+  } catch (error) {
+    return { dispose: noop, problem: error instanceof Error ? error.message : String(error) };
+  }
+
+  const qdrant = resolveQdrant(retrievalEnv);
+  if (!(await qdrant.isHealthy())) {
+    return {
+      dispose: noop,
+      problem: `Qdrant is not reachable at ${env.QDRANT_URL}. Start it with: docker compose -f infrastructure/docker-compose.yml up -d qdrant`,
+    };
+  }
+
+  const prisma = createPrismaClient();
+  return build(
+    {
+      db: prisma as unknown as CreativeMemoryDependencies['db'],
+      qdrant,
+      embedder,
+      reranker: resolveReranker(retrievalEnv),
+    },
+    async () => {
+      await prisma.$disconnect();
+    },
+  );
+}
+
 /**
  * The canonical flow: a campaign request, real reasoning, real owned assets, a
  * deterministic render, and a run directory that records every decision.
@@ -602,52 +750,98 @@ async function runCampaignRequestCli(
     ? resolve(repositoryRoot, options.outputDirectory)
     : resolve(repositoryRoot, request.outputDirectory);
   const runDirectory = runDirectoryFor(outputRoot, request.name, workflowRunId);
+  const now = context.now ? context.now() : new Date();
+  const progress = (message: string): void => {
+    if (!options.json) context.stderr(`  ${message}\n`);
+  };
 
-  if (options.planOnly) {
-    try {
-      const plan = await planCampaign({
-        request,
-        reasoningProvider,
-        workflowRunId,
-        onProgress: (message) => {
-          if (!options.json) context.stderr(`  ${message}\n`);
-        },
-      });
-      context.stdout(
-        `${JSON.stringify(
-          {
-            runMode: policy.runMode,
-            promptSha256: request.promptSha256,
-            agentVersions: plan.agentVersions,
-            shots: plan.shots,
-            captionLines: plan.captionLines,
-          },
-          null,
-          2,
-        )}\n`,
-      );
-      return EXIT_CODES.SUCCESS;
-    } catch (error) {
-      context.stderr(`${error instanceof Error ? error.message : String(error)}\n`);
-      return EXIT_CODES.PLANNING_FAILURE;
-    }
-  }
-
-  const result = await runSourceCampaign({
+  // --- Creative Memory: resolved before any agent runs ----------------------
+  const creativeMemory = await resolveCreativeMemory(
+    options.creativeMemory,
+    env,
+    context,
     request,
-    reasoningProvider,
-    reasoningPolicy: policy,
-    runDirectory,
-    repositoryRoot,
-    binaries: resolveFfmpegBinaries(context.env),
-    workflowRunId,
-    now: context.now ? context.now() : new Date(),
-    ...(context.runner ? { runner: context.runner } : {}),
-    onProgress: (message) => {
-      if (!options.json) context.stderr(`  ${message}\n`);
-    },
-  });
+    now,
+    progress,
+  );
+  if (creativeMemory.problem) {
+    // `required` stops here, with its own exit code, having produced nothing.
+    // `optional` says so loudly and continues — but it never substitutes
+    // fixture creative or generic benchmark text for the missing context.
+    if (options.creativeMemory === 'required') {
+      context.stderr(
+        `Creative Memory is required for this run but is unavailable:\n  ${creativeMemory.problem}\nRefusing to continue. This command will not plan a campaign without the governed benchmark context it was told to use.\n`,
+      );
+      return EXIT_CODES.CREATIVE_MEMORY_UNAVAILABLE;
+    }
+    context.stderr(
+      `WARNING: Creative Memory is unavailable and the mode is "optional"; planning will proceed without benchmark context.\n  ${creativeMemory.problem}\n`,
+    );
+  }
+  context.stderr(`creative memory: ${options.creativeMemory}\n`);
 
+  try {
+    if (options.planOnly) {
+      try {
+        const plan = await planCampaign({
+          request,
+          reasoningProvider,
+          workflowRunId,
+          ...(creativeMemory.injector ? { injector: creativeMemory.injector } : {}),
+          onProgress: progress,
+        });
+        context.stdout(
+          `${JSON.stringify(
+            {
+              runMode: policy.runMode,
+              creativeMemoryMode: options.creativeMemory,
+              promptSha256: request.promptSha256,
+              agentVersions: plan.agentVersions,
+              shots: plan.shots,
+              captionLines: plan.captionLines,
+              creativeMemoryRetrievals: creativeMemory.injector?.audits ?? [],
+            },
+            null,
+            2,
+          )}\n`,
+        );
+        return EXIT_CODES.SUCCESS;
+      } catch (error) {
+        context.stderr(`${error instanceof Error ? error.message : String(error)}\n`);
+        return error instanceof CreativeMemoryInjectionError
+          ? EXIT_CODES.CREATIVE_MEMORY_UNAVAILABLE
+          : EXIT_CODES.PLANNING_FAILURE;
+      }
+    }
+
+    const result = await runSourceCampaign({
+      request,
+      reasoningProvider,
+      reasoningPolicy: policy,
+      runDirectory,
+      repositoryRoot,
+      binaries: resolveFfmpegBinaries(context.env),
+      workflowRunId,
+      now,
+      creativeMemoryMode: options.creativeMemory,
+      ...(creativeMemory.injector ? { injector: creativeMemory.injector } : {}),
+      ...(context.runner ? { runner: context.runner } : {}),
+      onProgress: progress,
+    });
+    return reportCampaignResult(result, request, policy, options, context);
+  } finally {
+    await creativeMemory.dispose();
+  }
+}
+
+/** Formats the run's outcome. Split out so the run body stays one readable flow. */
+function reportCampaignResult(
+  result: Awaited<ReturnType<typeof runSourceCampaign>>,
+  request: CampaignRequest,
+  policy: ReasoningPolicy,
+  options: GenerateCliOptions,
+  context: GenerateCliContext,
+): number {
   if (options.json) {
     context.stdout(`${JSON.stringify(result, null, 2)}\n`);
   } else if (result.exitCode === EXIT_CODES.SUCCESS || result.exitCode === EXIT_CODES.QA_FAILURE) {
@@ -667,11 +861,20 @@ async function runCampaignRequestCli(
         `codecs:            ${result.measuredCodecs ?? '?'}`,
         `QA status:         ${result.qaVerdict ?? 'unknown'}`,
         `heuristic score:   ${result.heuristicAverage ?? '?'} / 5 (structural only, not a quality verdict)`,
+        `creative memory:   ${result.creativeMemoryMode ?? 'off'}`,
+        `originality risk:  ${result.originality?.riskLevel ?? 'not evaluated'}${
+          result.originality?.requiresHumanReview ? ' — requires human review' : ''
+        }`,
         `status:            ${result.exitCode === EXIT_CODES.SUCCESS ? 'RENDERED — REQUIRES HUMAN APPROVAL' : 'REJECTED BY QA'}`,
       ].join('\n')}\n`,
     );
   }
 
+  if (result.exitCode === EXIT_CODES.ORIGINALITY_RISK_BLOCKED) {
+    context.stderr(
+      '\nBLOCKED: originality risk is HIGH. Nothing was rendered. See originality-report.json in the run directory.\n',
+    );
+  }
   if (result.failure) context.stderr(`\n${result.failure}\n`);
   if (policy.runMode !== 'REAL' && result.exitCode === EXIT_CODES.SUCCESS) {
     context.stderr(

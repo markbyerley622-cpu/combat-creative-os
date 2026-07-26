@@ -718,6 +718,30 @@ and a conformance test asserts the table covers exactly the agents that declare
 a Creative Memory dependency — the same shape as
 `workflows/activity-name-contract.ts`'s compile-time coverage proof.
 
+**As implemented (2026-07-27), on the `aamp:generate` path.** The shipped
+version covers the four planning agents that path actually runs, as versioned
+`CreativeMemoryRetrievalPlan`s in `@combat/domain`
+(`creative-memory-retrieval-plans.ts`) resolved by a `CreativeMemoryInjector` in
+`apps/aamp-cli`. Three deliberate differences from the table above, each for a
+reason worth recording:
+
+- **No excerpt budget, because there are no excerpts.** The shipped context
+  carries no transcript, no caption copy and no keyframe at all — only
+  measurements, a reviewer's abstraction and the approved transferable
+  principle. The excerpt caps become a whole-context character budget
+  (5 000–8 000 per role), enforced by trimming lowest-ranked items and failing
+  with `CONTEXT_BUDGET_OVERFLOW` rather than truncating silently.
+- **`topK` is lower** (3–5, not 6–10), because the scope is craft evidence
+  rather than citation breadth, and because the library is small.
+- **Intents become Creative Memory business roles plus permitted observation
+  fields**, which is the vocabulary the ingestion side already records. The
+  substance is unchanged: the Shot-Prompt Engineer still receives no transcript,
+  no copy and no brand name, and the Strategist still receives no imagery.
+
+The blueprint's `resolveCreativeMemoryActivity` remains the shape for the
+Temporal path; the injector is deliberately the same resolution discipline in
+the composition root, so an Activity can adopt the plans unchanged.
+
 ### 7.6 How references legitimately inform each craft dimension
 
 | Dimension           | What is extracted                                                                | What is never extracted                       |
@@ -745,6 +769,15 @@ a Creative Memory dependency — the same shape as
 | unrestricted historical context returned to agents | every query is workspace-scoped, collection-scoped, `approvedOnly: true`, `topK`-bounded, and `truncated` is explicit                                                                   |
 | prompt dumping entire libraries                    | per-agent `topK` + excerpt caps + a hard token ceiling on `CreativeMemoryContext`; exceeding it fails the Activity, it does not truncate silently                                       |
 | losing source/licensing attribution                | `CreativeMemoryCitation` requires source, rights holder, licence type, usage class and restrictions — non-optional fields; a `RetrievalCitation` row is persisted per consumed citation |
+
+**As implemented (2026-07-27).** Three enforcement points were added on top of
+the table above, all on the `aamp:generate` path:
+
+| Prohibition                                           | Enforcement                                                                                                                                                                                                   |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| an unapproved library influencing a campaign          | an approved, active, same-workspace `BenchmarkGovernanceProfile` is required per agent role; it is written once, versioned, checksummed over its governing fields and withdrawable                            |
+| a retrieved principle surviving into output unchanged | each agent must return a `creativeMemoryDivergence` record; a deterministic evaluator blocks an 8-word run copied from a craft note, a replayed beat sequence, an imitation instruction and leaked paths/URLs |
+| an unsafe context reaching a model at all             | `assertAgentSafeContext` walks the serialised envelope before **every** invocation and fails closed on forbidden keys, path/URL/media patterns and imitation phrasing                                         |
 
 ### 7.8 Storage lifecycle and cost controls
 

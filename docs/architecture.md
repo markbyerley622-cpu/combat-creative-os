@@ -2544,8 +2544,100 @@ but never run against a real endpoint. FiftyOne 1.0.1 cannot install on this
 repository's Python 3.12.10 (it declares 3.9–3.11); the pin was deliberately
 left unchanged and both supported paths documented.
 
-**Next milestone: role-specific Creative Memory injection and agency benchmark
-governance.**
+---
+
+### AAMP — role-specific Creative Memory injection and benchmark governance (2026-07-27)
+
+Connects retrieval to the prompt-to-ad pipeline. `pnpm aamp:generate` can now
+retrieve role-specific, agent-safe craft intelligence and inject it into the
+four specialist agents that produce the campaign plan. Detail:
+`docs/runbooks/creative-memory-retrieval.md` §§16–22.
+
+**What changed.**
+
+- **Four versioned retrieval plans**, one per planning agent
+  (`@combat/domain`'s `creative-memory-retrieval-plans.ts`). Each declares the
+  Creative Memory roles it queries, the inputs its query is built from, the
+  observation fields it may be told, top-K, context budget, source-diversity
+  rules, minimum governance status, deterministic tie-break and fallback. Query
+  construction is pure — no clock, no I/O — so the same request produces the
+  same query. Platform is written into the query rather than applied as a hard
+  filter: a hard platform filter on a small library silently empties the
+  context, and hook latency, cut density and transition mechanics transfer
+  across vertical short-form platforms.
+
+- **One canonical agent context envelope.** `CreativeMemoryContext` carries
+  reference and annotation ids, role, retrieval and rerank scores, structural
+  measurements, the approved craft principle, a system-authored intended
+  application, a risk warning and provenance. It carries no path, URL, byte,
+  transcript, copy, logo, brand, title or agency. `assertAgentSafeContext`
+  walks the serialised envelope against `AGENT_SAFE_FORBIDDEN_KEYS`, path/URL/
+  media patterns and imitation phrasing **before every agent invocation** and
+  fails closed. Prohibition fields are exempt from the imitation check alone,
+  because a prohibition necessarily names what it forbids.
+
+- **Agency benchmark governance.** `BenchmarkGovernanceProfile` records
+  workspace, name, version, applicable role/platform/campaign, active and
+  review status, permitted reference roles and collections, top-K and
+  context-budget ceilings, diversity policy, originality requirement,
+  prohibited-similarity rules, reviewer identity, approval instant and
+  immutable activation provenance with a governing-field checksum. Rows are
+  never rewritten: a change is a new version carrying `supersedesProfileId`,
+  and withdrawal is the only mutation — which is why the checksum stays valid
+  for the row's lifetime and a mismatch means tampering. A profile may only
+  **tighten** a plan's limits. Migration
+  `20260727041853_add_benchmark_governance_profiles`; operator surface is
+  `aamp:reference benchmark-seed|benchmark-list|benchmark-resolve|benchmark-withdraw`.
+
+- **Divergence and a deterministic originality evaluator.** Each of the four
+  agents now returns `creativeMemoryDivergence` — principles used, the
+  campaign-specific transformation, what was changed, what was avoided, a
+  self-assessed risk level and a rationale. `evaluateOriginality` reads the
+  structured outputs and detects copied eight-word runs from a reference craft
+  note, a beat plan reproducing a reference's scene sequence, dependence on one
+  source, affirmative agency-imitation instructions, leaked paths/URLs, missing
+  divergence records and unknown citations. HIGH blocks production planning
+  before any source is selected; MEDIUM is recorded for human review; LOW
+  continues. It is a governance signal, not copyright detection, and says so in
+  every report.
+
+- **`--creative-memory required|optional|off`** on `aamp:generate`, defaulting
+  to `off` so an existing command line is unchanged. `required` exits 9
+  (`CREATIVE_MEMORY_UNAVAILABLE`) before any agent runs if retrieval, an
+  approved profile or eligible context is missing; `optional` continues with an
+  explicit `NOT_USED` reason in provenance; `off` performs no retrieval. A
+  HIGH originality result exits 10 (`ORIGINALITY_RISK_BLOCKED`). Runs write
+  `creative-memory-provenance.json` and `originality-report.json` carrying the
+  profile and version, mode, query hashes, provider/profile, reference and
+  annotation ids, scores, per-agent context hashes, governance decisions,
+  divergence results, fallback reasons and an explicit
+  `anyReferenceOutputEligible: false`.
+
+- **Prompt versions.** Campaign Strategist, Creative Director and
+  Script/Timing Director to v3; Shot-Prompt Engineer to v4 — each composed from
+  its previous immutable version plus one shared Creative Memory addendum.
+  Snapshots were updated deliberately, and a test asserts the section is
+  present in exactly those four prompts.
+
+**Proven.** Four agents receive four different role-appropriate contexts from
+the synthetic benchmark fixture; contexts are deterministic; different briefs
+produce different queries; all three modes behave as specified; a retrieval
+outage cannot activate fixture creative; the agent-safe walk holds on real
+retrieved material; only `READY_FOR_RETRIEVAL` references with approved
+annotations and only approved, active, same-workspace profiles are used;
+diversity is enforced; a HIGH result blocks with FFmpeg never invoked and no
+render manifest written; ON versus OFF changes hook strategy, beat plan, a
+transition decision, the shot specification and the render manifest, while the
+manifest still contains only output-eligible sources.
+
+**Not proven.** Creative quality. The ON/OFF comparison is driven by a
+deterministic fixture provider that derives from measurements; it demonstrates
+the mechanism, not judgement, and says nothing about how a real model would use
+the context. Qwen retrieval remains unproven (no endpoint). The three human
+gates are untouched and still the only approval path.
+
+**Next milestone: AAMP-1 step 3 — the `SERIALIZABLE` budget transaction**
+(`docs/aamp-architecture.md` §6 task 5), still outstanding and unstarted.
 
 ---
 

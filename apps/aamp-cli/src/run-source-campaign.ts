@@ -7,6 +7,11 @@ import {
   type CommandRunner,
   type FfmpegBinaries,
 } from '@combat/media';
+import {
+  evaluateOriginality,
+  type CreativeMemoryMode,
+  type OriginalityAssessment,
+} from '@combat/domain';
 import type { ReasoningProvider } from '@combat/providers';
 
 import {
@@ -18,6 +23,11 @@ import {
 import { buildSourceEdit, EditConstructionError } from './build-source-edit';
 import type { CampaignRequest } from './campaign-request';
 import { buildCreativeScorecard } from './creative-scorecard';
+import {
+  CreativeMemoryInjectionError,
+  type CreativeMemoryInjector,
+} from './creative-memory/injection';
+import { buildOriginalityEntries } from './creative-memory/originality-inputs';
 import { CampaignPlanningError, planCampaign } from './plan-campaign';
 import { parseProductionAssetManifest, ProductionAssetManifestError } from './production-assets';
 import type { ReasoningPolicy } from './reasoning-policy';
@@ -53,11 +63,28 @@ export const EXIT_CODES = {
   PLANNING_FAILURE: 6,
   RENDERING_FAILURE: 7,
   QA_FAILURE: 8,
+  /**
+   * `--creative-memory required` could not obtain governed, eligible,
+   * role-specific context. Distinct from a planning failure on purpose: the
+   * agents never ran, and the response is an operator action (approve a
+   * profile, start Qdrant, index the library), not a re-prompt.
+   */
+  CREATIVE_MEMORY_UNAVAILABLE: 9,
+  /** A HIGH originality risk stopped the run before any source was selected. */
+  ORIGINALITY_RISK_BLOCKED: 10,
 } as const;
 export type ExitCode = (typeof EXIT_CODES)[keyof typeof EXIT_CODES];
 
 /** Rejections that mean "the rights are wrong" rather than "the file is missing". */
 const RIGHTS_REJECTIONS = new Set(['RIGHTS_NOT_PERMITTED', 'LICENCE_EXPIRED']);
+
+/**
+ * Written on every Creative Memory provenance artefact. The audit record is
+ * the place a later reader decides whether the run was legitimate, so it states
+ * the rights position rather than leaving it to be inferred from an absence.
+ */
+const CREATIVE_MEMORY_PROVENANCE_NOTICE =
+  'Reference material is analysis-only. Retrieval, injection and benchmark-profile approval grant no output rights, and no reference contributed a byte to the rendered advertisement.' as const;
 
 export interface SourceCampaignOptions {
   readonly request: CampaignRequest;
@@ -69,6 +96,9 @@ export interface SourceCampaignOptions {
   readonly workflowRunId: string;
   readonly now: Date;
   readonly runner?: CommandRunner;
+  /** Absent when `--creative-memory off`, which is the pre-injection baseline. */
+  readonly injector?: CreativeMemoryInjector;
+  readonly creativeMemoryMode: CreativeMemoryMode;
   readonly onProgress?: (message: string) => void;
 }
 
@@ -81,6 +111,8 @@ export interface SourceCampaignResult {
   readonly measuredResolution?: string;
   readonly measuredCodecs?: string;
   readonly heuristicAverage?: number;
+  readonly creativeMemoryMode?: CreativeMemoryMode;
+  readonly originality?: OriginalityAssessment;
   readonly failure?: string;
 }
 
@@ -170,9 +202,26 @@ export async function runSourceCampaign(
       request,
       reasoningProvider: options.reasoningProvider,
       workflowRunId: options.workflowRunId,
+      ...(options.injector ? { injector: options.injector } : {}),
       ...(onProgress ? { onProgress } : {}),
     });
   } catch (error) {
+    // A governance failure is reported as itself. Folding it into
+    // PLANNING_FAILURE would tell an operator to look at the brief when the
+    // actual problem is that nobody approved a benchmark profile.
+    if (error instanceof CreativeMemoryInjectionError) {
+      await writeArtefact(runDirectory, 'creative-memory-provenance.json', {
+        mode: options.creativeMemoryMode,
+        status: 'FAILED',
+        failureKind: error.kind,
+        agentRole: error.agentRole,
+        detail: error.message,
+        retrievals: options.injector?.audits ?? [],
+        anyReferenceOutputEligible: false,
+        notice: CREATIVE_MEMORY_PROVENANCE_NOTICE,
+      });
+      return fail(EXIT_CODES.CREATIVE_MEMORY_UNAVAILABLE, error.message);
+    }
     return fail(
       EXIT_CODES.PLANNING_FAILURE,
       error instanceof CampaignPlanningError
@@ -190,6 +239,43 @@ export async function runSourceCampaign(
     shotBriefs: plan.shotBriefs,
     agentVersions: plan.agentVersions,
   });
+
+  // --- Creative Memory provenance and originality --------------------------
+  const originality = evaluateOriginality(buildOriginalityEntries(plan));
+  await writeArtefact(runDirectory, 'originality-report.json', originality);
+  await writeArtefact(runDirectory, 'creative-memory-provenance.json', {
+    mode: options.creativeMemoryMode,
+    status: options.creativeMemoryMode === 'off' ? 'NOT_USED' : 'COMPLETED',
+    retrievals: options.injector?.audits ?? [],
+    divergence: plan.roleContexts.map((record) => ({
+      agentRole: record.agentRole,
+      ...(record.shotIndex === undefined ? {} : { shotIndex: record.shotIndex }),
+      contextInjected: record.context !== undefined,
+      contextItems: record.context?.items.length ?? 0,
+      ...(record.divergence ? { divergence: record.divergence } : {}),
+    })),
+    originality: {
+      riskLevel: originality.riskLevel,
+      blocked: originality.blocked,
+      requiresHumanReview: originality.requiresHumanReview,
+      signals: originality.signals,
+    },
+    anyReferenceOutputEligible: false,
+    notice: CREATIVE_MEMORY_PROVENANCE_NOTICE,
+  });
+
+  if (originality.blocked) {
+    // Stopped here, before any source is selected or any frame is rendered:
+    // the cheapest place to catch it, and the only one where nothing has been
+    // produced that could later be mistaken for an approved deliverable.
+    return fail(
+      EXIT_CODES.ORIGINALITY_RISK_BLOCKED,
+      `originality risk is HIGH — production planning stopped. Signals: ${originality.signals
+        .filter((signal) => signal.severity === 'HIGH')
+        .map((signal) => `${signal.agentRole}/${signal.code}`)
+        .join(', ')}`,
+    );
+  }
 
   // --- source selection ---------------------------------------------------
   let selections: readonly ShotSelection[];
@@ -302,6 +388,15 @@ export async function runSourceCampaign(
       audioCodec: summary.audioCodec,
     },
     heuristicAverage: scorecard.heuristicAverage,
+    creativeMemory: {
+      mode: options.creativeMemoryMode,
+      rolesWithContext: originality.rolesWithContext,
+      originalityRiskLevel: originality.riskLevel,
+      // MEDIUM never blocks, but it must not disappear either: the run summary
+      // is what a reviewer reads first.
+      requiresOriginalityReview: originality.requiresHumanReview,
+      anyReferenceOutputEligible: false,
+    },
     artefacts: [
       'campaign-request.json',
       'agent-outputs.json',
@@ -309,6 +404,8 @@ export async function runSourceCampaign(
       'source-selection.json',
       'asset-provenance.json',
       'creative-scorecard.json',
+      'creative-memory-provenance.json',
+      'originality-report.json',
       'execution-mode.json',
       'run-summary.json',
     ],
@@ -329,6 +426,8 @@ export async function runSourceCampaign(
       measuredResolution,
       measuredCodecs,
       heuristicAverage: scorecard.heuristicAverage,
+      creativeMemoryMode: options.creativeMemoryMode,
+      originality,
       failure: rendered.qaReport.measurements
         .filter((measurement) => measurement.verdict === 'FAIL')
         .map((measurement) => `${measurement.check}: expected ${measurement.expected}`)
@@ -345,6 +444,8 @@ export async function runSourceCampaign(
     measuredResolution,
     measuredCodecs,
     heuristicAverage: scorecard.heuristicAverage,
+    creativeMemoryMode: options.creativeMemoryMode,
+    originality,
   };
 }
 

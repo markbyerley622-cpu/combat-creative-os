@@ -2240,3 +2240,90 @@ model CreativeMemoryIndexEntry {
   @@index([workspaceId, state])
   @@map("creative_memory_index_entries")
 }
+
+// ============================================================================
+// Agency benchmark governance (AAMP Creative Memory injection)
+//
+// Retrieval decides what is *similar*. These rows decide what is *permitted*:
+// which specialist role may be influenced by the reference library, for which
+// campaigns and platforms, under which top-K, context-budget, diversity and
+// originality limits, approved by which named human.
+//
+// Deliberately still on the reference side of the wall. Nothing here names an
+// asset, a path or a licence, and no relation reaches Asset, LicenseRecord or
+// RenderJob — a benchmark profile authorises influence on *planning* and can
+// never make reference material renderable.
+//
+// Rows are never edited once activated. A change is a new version carrying
+// `supersedesProfileId`, so the chain of who permitted what is auditable
+// without a mutation log.
+// ============================================================================
+
+enum CreativeMemoryAgentRole {
+  CAMPAIGN_STRATEGIST
+  CREATIVE_DIRECTOR
+  SCRIPT_TIMING_DIRECTOR
+  SHOT_PROMPT_ENGINEER
+}
+
+enum BenchmarkProfileReviewStatus {
+  DRAFT
+  APPROVED
+  REJECTED
+  WITHDRAWN
+}
+
+model BenchmarkGovernanceProfile {
+  id          String                  @id @default(uuid())
+  workspaceId String
+  name        String
+  version     Int
+  agentRole   CreativeMemoryAgentRole
+
+  /// Empty means every platform. Non-empty is an allowlist.
+  applicablePlatforms   String[] @default([])
+  /// Empty means every campaign in the workspace. Non-empty is an allowlist.
+  applicableCampaignIds String[] @default([])
+
+  active       Boolean                      @default(false)
+  reviewStatus BenchmarkProfileReviewStatus @default(DRAFT)
+
+  requiredReferenceRoles ReferenceBusinessRole[]
+  allowedCollections     String[]                @default([])
+
+  maxTopK               Int
+  maxContextCharacters  Int
+  maxItemsPerReference  Int
+  minDistinctReferences Int
+
+  requireOriginalTransformation Boolean  @default(true)
+  prohibitedSimilarityRules     String[]
+  /// Days after activation at which this profile must be re-reviewed.
+  activationValidForDays        Int?
+  /// Days after which an approved annotation is too old to influence a campaign.
+  annotationValidForDays        Int?
+
+  reviewerId String?
+  approvedAt DateTime?
+
+  /// Immutable activation provenance. Written once, with the row.
+  activatedBy            String
+  activatedAt            DateTime
+  supersedesProfileId    String?
+  /// sha256 over the governing fields only, so a tampered row is detectable
+  /// while an edited note is not a false alarm.
+  governingChecksumSha256 String
+
+  notes     String?
+  createdAt DateTime @default(now())
+
+  supersedes BenchmarkGovernanceProfile?  @relation("BenchmarkProfileSupersedes", fields: [supersedesProfileId], references: [id], onDelete: SetNull)
+  supersededBy BenchmarkGovernanceProfile[] @relation("BenchmarkProfileSupersedes")
+
+  /// One row per (workspace, name, role, version): a new decision is a new
+  /// version, never an update in place.
+  @@unique([workspaceId, name, agentRole, version])
+  @@index([workspaceId])
+  @@index([workspaceId, agentRole, active])
+  @@map("benchmark_governance_profiles")
+}

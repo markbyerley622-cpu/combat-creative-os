@@ -365,13 +365,22 @@ export type WorkerEnv = z.infer<typeof workerEnvSchema>;
  * `apps/aamp-cli` — the prompt-to-MP4 composition root. It runs the same
  * agents and the same ComfyUI adapter the Worker does, but reaches neither
  * Temporal nor the API, so it carries reasoning + generation config and
- * nothing else. No `DATABASE_URL`: the CLI writes its artefacts to disk and
- * leaves repository registration to the Activity path.
+ * nothing else. It still writes its artefacts to disk and leaves repository
+ * registration to the Activity path.
+ *
+ * `DATABASE_URL` is **optional** here, and deliberately so. The CLI needs it
+ * only for `--creative-memory required|optional`, where the reference library,
+ * its approved annotations and its benchmark governance profiles all live in
+ * PostgreSQL. Making it required would break every existing source-only run
+ * for a feature that run does not use; making it absent would mean Creative
+ * Memory could never be reached from the CLI at all. The commands that need it
+ * check for it and fail with a specific message.
  */
 export const aampCliEnvSchema = baseEnvSchema
   .merge(reasoningEnvSchema)
   .merge(videoGenerationEnvSchema)
   .merge(creativeMemoryEnvSchema)
+  .merge(databaseEnvSchema.partial())
   .superRefine(refineReasoningConfig)
   .superRefine(refineVideoGenerationConfig)
   .superRefine(refineCreativeMemoryConfig);

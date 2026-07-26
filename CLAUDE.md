@@ -55,11 +55,25 @@ and `docs/runbooks/creative-memory-ingestion.md`.
 against live Qdrant; the Qwen3-VL 2B and 8B profiles are implemented behind
 typed endpoint adapters and **unproven**, because no endpoint was available.
 See the "Creative Memory retrieval" rules below and
-`docs/runbooks/creative-memory-retrieval.md`. **The next milestone is
-role-specific Creative Memory injection and agency benchmark governance.**
-AAMP-1 step 3 (the
-`SERIALIZABLE` budget transaction, `docs/aamp-architecture.md` §6 task 5)
-remains outstanding and unstarted.
+`docs/runbooks/creative-memory-retrieval.md`.
+
+**Role-specific Creative Memory injection and agency benchmark governance is
+done** — `pnpm aamp:generate --creative-memory required|optional|off` retrieves
+role-specific, agent-safe craft intelligence and injects it into the four
+planning agents, under an approved, versioned benchmark profile, with a
+deterministic originality gate. **Proven:** four distinct role-appropriate
+contexts, determinism, the three modes, the agent-safe boundary on real
+retrieved material, governance and workspace isolation, a HIGH originality
+result blocking before any render, and an ON-versus-OFF comparison that changes
+hook strategy, beat plan, a transition decision, the shot specification and the
+render manifest. **Not proven:** creative quality — the comparison is driven by
+a deterministic fixture provider that derives from measurements, so it
+demonstrates the mechanism and says nothing about how a real model would use
+the context. See the "Creative Memory injection" rules below and
+`docs/runbooks/creative-memory-retrieval.md` §§16–22.
+
+**The next milestone is AAMP-1 step 3** — the `SERIALIZABLE` budget transaction
+(`docs/aamp-architecture.md` §6 task 5), still outstanding and unstarted.
 
 ## Creative Memory — permanent rules (lawful benchmark ingestion)
 
@@ -272,6 +286,62 @@ remains outstanding and unstarted.
 - **Do not default `QDRANT__SERVICE__API_KEY` to an empty value** — Qdrant
   treats empty as "auth enabled with an empty key" and 401s every data request
   while `/healthz` still answers.
+
+## Creative Memory injection — permanent rules
+
+- **Injection grants no output rights either.** A benchmark profile authorises
+  influence on _planning_. It cannot make a reference renderable, no field in
+  it can reach a render manifest, and every provenance artefact records
+  `anyReferenceOutputEligible: false` explicitly rather than leaving it to be
+  inferred.
+- **Agents never query.** Context is resolved by the orchestrator immediately
+  before each invocation and arrives as a typed field on that agent's own
+  validated input. There is no agent tool, no second search, and no path from a
+  prompt back into retrieval.
+- **Every context is checked before every invocation.**
+  `assertAgentSafeContext` walks the serialised envelope and fails closed.
+  Prohibition fields (`usageDirective`, `notice`, `riskWarning`) are exempt from
+  the imitation-phrase check _only_ — a prohibition necessarily names what it
+  forbids. Keep the exemption to those fields.
+- **Role scoping is the point.** Each of the four planning agents has its own
+  versioned retrieval plan deciding which Creative Memory roles are queried and
+  which observation fields it may be told. Never widen a plan's
+  `permittedObservations` to "everything"; a camera move is not evidence about
+  positioning.
+- **A plan is versioned data, never edited in place.** Changing a plan changes
+  what an approved campaign was planned against — bump `planVersion`, which
+  travels in every context and every provenance record.
+- **Governance may only tighten.** A benchmark profile can lower top-K, lower
+  the context budget, lower items-per-reference and raise the diversity
+  minimum. It may never loosen one, or approval becomes a way to buy more
+  benchmark influence rather than less.
+- **A profile row is written once.** A changed decision is a new version with
+  `supersedesProfileId`; withdrawal is the only mutation and touches no
+  governing field. The activation checksum covers governing fields alone, so it
+  stays valid for the row's lifetime and a mismatch means tampering. Never add
+  an update path that rewrites a governing field.
+- **Approval is attributable or it does not happen.** An `APPROVED` profile
+  without a reviewer and an approval instant is refused, and an inactive or
+  unapproved profile can never govern a campaign. There is no auto-approval
+  path, and `benchmark-seed` is a fixture convenience that still demands a named
+  reviewer and activator.
+- **Integrity failures are not availability failures.** A cross-workspace
+  result and an unsafe context always throw, in every mode. Only missing
+  profiles, retrieval outages, empty results, diversity failures and budget
+  overflows degrade under `optional`.
+- **No mode ever substitutes.** `required` exits 9 having produced nothing;
+  `optional` records a typed `NOT_USED` reason; `off` performs no retrieval.
+  Never add a fallback from a required-mode failure to fixture creative,
+  generic benchmark text or a fabricated reference.
+- **HIGH originality blocks before rendering; MEDIUM is recorded.** The gate
+  runs after planning and before source selection, so a blocked run has
+  produced no timeline and no file. `evaluateOriginality` may raise an agent's
+  self-declared risk level and never lowers it. It is a governance signal, not
+  comprehensive copyright detection, and every report says so.
+- **The ON/OFF acceptance comparison proves mechanism, not quality.** Its
+  reasoning provider is a deterministic fixture that derives from
+  measurements. Never cite it as evidence about creative quality, and never
+  move it into `packages/providers`.
 
 ## Authentication — permanent rules (AAMP-1 step 2, ADR-0006)
 

@@ -148,6 +148,14 @@ export class InMemoryReferenceStore implements ReferenceDataSource {
   readonly referenceDerivedArtifact = this.makeDelegate<never>('referenceDerivedArtifact', [
     ['referenceAdvertisementId', 'kind', 'localPath'],
   ]);
+  /**
+   * Mirrors the migration's `(workspaceId, name, agentRole, version)` unique
+   * constraint, so a second write of the same version fails here exactly as it
+   * would in Postgres rather than passing tests and failing in production.
+   */
+  readonly benchmarkGovernanceProfile = this.makeDelegate<never>('benchmarkGovernanceProfile', [
+    ['workspaceId', 'name', 'agentRole', 'version'],
+  ]);
 
   /** Test helper: every row of a table, for assertions. */
   snapshot(name: string): Record<string, unknown>[] {

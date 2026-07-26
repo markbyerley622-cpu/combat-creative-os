@@ -37,4 +37,5 @@ export * from './repositories/agent-invocation-repository';
 // doc comment in in-memory-campaign-store.ts.
 export * from './repositories/test-helpers/in-memory-campaign-store';
 export * from './repositories/reference-repository';
+export * from './repositories/benchmark-profile-repository';
 export * from './repositories/in-memory-reference-store';

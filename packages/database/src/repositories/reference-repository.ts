@@ -1,3 +1,4 @@
+import type { BenchmarkProfileDataSource } from './benchmark-profile-repository';
 import type {
   ReferenceBusinessRole,
   ReferenceFailureReason,
@@ -165,8 +166,16 @@ export interface ReferenceDerivedArtifactRecord {
   createdAt: Date;
 }
 
-/** The Prisma-shaped surface this repository needs. Mirrors the other repositories' style. */
-export interface ReferenceDataSource {
+/**
+ * The Prisma-shaped surface this repository needs. Mirrors the other
+ * repositories' style.
+ *
+ * It extends `BenchmarkProfileDataSource` because governance profiles are part
+ * of the same reference-side world and always travel with the same database
+ * handle — a caller that can read references is exactly the caller that needs
+ * to know which of them a human approved for use.
+ */
+export interface ReferenceDataSource extends BenchmarkProfileDataSource {
   referenceSource: {
     create(args: { data: Record<string, unknown> }): Promise<ReferenceSourceRecord>;
     findFirst(args: { where: Record<string, unknown> }): Promise<ReferenceSourceRecord | null>;
