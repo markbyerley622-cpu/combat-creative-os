@@ -2262,6 +2262,29 @@ status" below. Full operational detail is in
 them. `apps/worker` gained `@combat/media` for ffprobe. All three human gates are
 untouched; the CLI dispatches no approval signal.
 
+- **Every result declares what produced it.** The command has two independent
+  substitution points — reasoning and generation — so there are four execution
+  modes (`REAL_REASONING_AND_REAL_GENERATION`,
+  `REAL_REASONING_AND_FIXTURE_GENERATION`,
+  `FIXTURE_REASONING_AND_REAL_GENERATION`,
+  `FIXTURE_REASONING_AND_FIXTURE_GENERATION`), derived from the selected
+  providers so a label cannot disagree with what ran. The mode is announced on
+  stderr before work begins, repeated after the result, included in `--json`,
+  and written to a `*.generation-provenance.json` sidecar carrying
+  `isRealAdvertisement`. Only one mode sets it true. The risk being managed is
+  not a crash: it is a plausible-looking 1080×1920 MP4 with a `PASS` verdict
+  being mistaken for genuine prompt-driven generation.
+- **Real generation never silently degrades.** Selecting `comfyui` and getting
+  an endpoint that cannot run the profile is a hard failure — the CLI verifies
+  nodes and VRAM first and exits 3 with the specific problems. There is no
+  fallback to fixtures.
+- **Fixture generation is demo-only and cannot reach production.**
+  `FixtureVideoGenerationProvider` synthesises rights-free FFmpeg `lavfi` test
+  patterns so the render/QA/deliverable stages are exercisable with no GPU. It
+  lives in `apps/aamp-cli`, deliberately outside `packages/providers`, so no
+  `apps/worker` configuration value can select it, and it records itself as
+  `modelIdentifier: NONE-SYNTHETIC-TEST-PATTERN`.
+
 **Honest status.** No real, model-generated frame has passed through this code.
 Inspection found a **GTX 1650 Ti with 4 GB VRAM** — three times below
 `LTX_2_3_DRAFT`'s 12 GB floor and six times below Hunyuan's 24 GB — and no
@@ -2277,9 +2300,18 @@ path is not yet reachable: reference bytes need storage materialisation in the
 dispatch Activity, so it fails closed; the CLI path supplies real local paths
 and is fully exercisable. The CLI does not write `Asset`/`AssetProvenance` rows —
 repository registration stays with the Activity. No live Temporal server is
-available here, so the wired Worker has not been run against one.
+available here, so the wired Worker has not been run against one. And with
+`REASONING_PROVIDER=mock` the agents replay committed golden fixtures, so the
+manifest's campaign prompt has no effect on the creative — real prompt-driven
+creative requires `REASONING_PROVIDER=claude`.
 
-**Next milestone: close prompt-to-video usability gaps before Creative Memory.**
+**What is proven, precisely:** real FFmpeg rendering (a genuine playable
+1080×1920 h264 MP4 passing actual-media QA, measured by ffprobe); the full
+`aamp:generate` command chain end to end; and ComfyUI protocol integration
+against a fake protocol server. **What is not:** real AI video generation, on
+hardware that cannot execute either intended quality profile.
+
+**Next milestone: real prompt-driven source-based advertisement generation.**
 
 ---
 

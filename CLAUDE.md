@@ -25,15 +25,19 @@ done** — the system produces a genuine playable 1080×1920 MP4 from a render
 manifest. See the "Real media rendering" section below and
 `docs/architecture.md` §8's vertical-slice-1 entry.
 
-**AAMP generation vertical slice 2 (ComfyUI video generation) is implemented
-but not proven** — the whole chain from campaign prompt through the specialist
-agents, a real ComfyUI adapter and the FFmpeg renderer to actual-media QA
-exists and is tested, but **no model-generated frame has ever passed through
-it**: this machine has a 4 GB GPU against a 12 GB floor, and no endpoint is
-configured. See the "ComfyUI video generation" section below,
-`docs/runbooks/comfyui-video-generation.md` and `docs/architecture.md` §8's
-vertical-slice-2 entry. **The next milestone is closing prompt-to-video
-usability gaps before Creative Memory.** AAMP-1 step 3 (the `SERIALIZABLE`
+**AAMP generation vertical slice 2 (ComfyUI video generation gateway) is
+done** — but read what it does and does not prove. **Proven:** real FFmpeg
+rendering (a genuine playable 1080×1920 h264 MP4 passing actual-media QA,
+measured by ffprobe), the full `pnpm aamp:generate` chain end to end, and
+ComfyUI protocol integration against a fake protocol server. **Not proven:**
+real AI video generation — **no model-generated frame has ever passed through
+this code**, because this machine has a 4 GB GPU against a 12 GB floor and
+**cannot execute either intended quality profile**, and no endpoint is
+configured. Also note **mock reasoning ignores the campaign prompt**: it
+replays committed golden fixtures. See the "ComfyUI video generation" section
+below, `docs/runbooks/comfyui-video-generation.md` and `docs/architecture.md`
+§8's vertical-slice-2 entry. **The next milestone is real prompt-driven
+source-based advertisement generation.** AAMP-1 step 3 (the `SERIALIZABLE`
 budget transaction, `docs/aamp-architecture.md` §6 task 5) remains outstanding
 and unstarted.
 
@@ -119,6 +123,29 @@ and unstarted.
   fake protocol server is for protocol tests only and is not evidence of
   working generation. The binding acceptance test is opt-in:
   `COMFYUI_INTEGRATION=1 pnpm --filter @combat/providers test:comfyui`.
+- **Every `aamp:generate` result declares its execution mode.** The four modes
+  (`REAL_REASONING_AND_REAL_GENERATION`,
+  `REAL_REASONING_AND_FIXTURE_GENERATION`,
+  `FIXTURE_REASONING_AND_REAL_GENERATION`,
+  `FIXTURE_REASONING_AND_FIXTURE_GENERATION`) are derived from the selected
+  providers, never set independently, so a label cannot disagree with what
+  ran. The mode goes to stderr before and after the run, into `--json`, and
+  into a `*.generation-provenance.json` sidecar carrying
+  `isRealAdvertisement`. Never remove or soften these — a 1080×1920 MP4 with a
+  `PASS` verdict reads as a finished advertisement, and in three of the four
+  modes it is not one.
+- **Fixture output is never presented as generation.**
+  `FixtureVideoGenerationProvider` synthesises FFmpeg `lavfi` test patterns for
+  demos only. It lives in `apps/aamp-cli`, outside `packages/providers`, so no
+  `apps/worker` configuration value can select it, and it records
+  `modelIdentifier: NONE-SYNTHETIC-TEST-PATTERN`. Do not move it into
+  `packages/providers` or add it to `createVideoGenerationProvider`.
+- **Requesting real generation without a working endpoint fails hard.** The CLI
+  verifies nodes and VRAM before generating and exits 3 with the specific
+  problems. Never add a fallback from `comfyui` to any fixture path.
+- **Mock reasoning ignores the campaign prompt.** It replays committed golden
+  fixtures, so it exercises plumbing and says nothing about creative quality.
+  Never evaluate or report creative quality from a `FIXTURE_REASONING` run.
 
 ## Authentication — permanent rules (AAMP-1 step 2, ADR-0006)
 

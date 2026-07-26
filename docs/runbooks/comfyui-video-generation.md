@@ -8,18 +8,69 @@ Companion documents: `docs/aamp-architecture.md` (blueprint),
 `docs/adr/0005-aamp-creative-memory-and-real-media-architecture.md` (rationale),
 `docs/runbooks/database-migrations.md` (the AAMP-1 step 1 counterpart).
 
-## 1. What this slice does and does not prove
+## 1. Precise current capability
 
 The chain **prompt → specialist agents → shot specifications → ComfyUI →
 generated clips → FFmpeg renderer → actual-media QA → MP4** is implemented end
 to end and is exercised by tests at every seam.
 
-It has **not** been proven against a real model. No compatible ComfyUI endpoint
-was reachable from this machine at implementation time, so no
-model-generated frame has ever passed through it. See §7 for the exact
-hardware finding. Every protocol test runs against an in-process fake server,
-which proves the adapter speaks ComfyUI correctly and proves nothing at all
-about video quality. Only `COMFYUI_INTEGRATION=1` (§6) can establish that.
+**Proven on this machine:**
+
+- **Real FFmpeg rendering.** `pnpm aamp:render` and `pnpm aamp:generate` both
+  produce a genuine playable 1080×1920 h264 MP4 that passes actual-media QA,
+  with duration, geometry and codecs measured back out of the produced file by
+  ffprobe. This is real and repeatable.
+- **The full command chain.** `pnpm aamp:generate` runs the four specialist
+  agents, produces shot specifications, obtains clips, assembles the render
+  manifest, renders, and QAs — end to end, in one command.
+- **ComfyUI protocol integration.** Submission, idempotent re-submission,
+  polling, history, output retrieval, checksum, cancellation, timeout,
+  reconnect, malformed-response and missing-output handling are all implemented
+  and tested against an in-process fake protocol server.
+
+**Not proven:**
+
+- **Real AI video generation.** No model-generated frame has ever passed
+  through this code. The current hardware **cannot execute either intended
+  quality profile** (4 GB VRAM against a 12 GB floor — §7), and no remote
+  endpoint is configured. A fake protocol server proves the adapter speaks
+  ComfyUI; it proves nothing whatever about video quality. Only
+  `COMFYUI_INTEGRATION=1` (§6) can establish that.
+- **Prompt-driven creative.** With `REASONING_PROVIDER=mock`, the agents replay
+  committed golden fixtures and **ignore the manifest's campaign prompt
+  entirely**. The same four results come back whatever the brief says.
+
+## 1a. Execution modes — what a given run is worth
+
+There are two independent substitution points, so four combinations. **Every
+run announces its mode on stderr before starting and again on the result, puts
+it in `--json` output, and writes it to a `*.generation-provenance.json`
+sidecar beside the MP4.** Only one mode produces a real advertisement.
+
+| Mode                                       | Reasoning | Generation   | What the MP4 is worth                                 |
+| ------------------------------------------ | --------- | ------------ | ----------------------------------------------------- |
+| `REAL_REASONING_AND_REAL_GENERATION`       | Claude    | ComfyUI      | A real advertisement. `isRealAdvertisement: true`.    |
+| `REAL_REASONING_AND_FIXTURE_GENERATION`    | Claude    | test pattern | Real copy and structure; the visuals are not footage. |
+| `FIXTURE_REASONING_AND_REAL_GENERATION`    | fixtures  | ComfyUI      | Real generated footage for a canned brief.            |
+| `FIXTURE_REASONING_AND_FIXTURE_GENERATION` | fixtures  | test pattern | Proves the pipeline runs. Nothing else.               |
+
+Selection is `REASONING_PROVIDER` × `VIDEO_GENERATION_PROVIDER`; there is no
+separate switch, so a mode cannot disagree with the providers that produced it.
+
+**Mock mode is test/demo only.** `VIDEO_GENERATION_PROVIDER=mock` in the CLI
+synthesises FFmpeg `lavfi` test patterns — rights-free, deterministic, and
+recorded in provenance as `modelIdentifier: NONE-SYNTHETIC-TEST-PATTERN`,
+`workflowProfileKey: FIXTURE`. That provider lives in `apps/aamp-cli`, not in
+`packages/providers`, precisely so no `apps/worker` configuration value can
+reach it. `MockVideoGenerationProvider` (metadata only, no file) remains what
+the Worker and its tests use.
+
+**Real generation never silently degrades.** Requesting
+`VIDEO_GENERATION_PROVIDER=comfyui` and getting an endpoint that cannot run the
+selected profile is a hard failure: the CLI verifies `/object_info` and
+`/system_stats` first and **exits 3** with the specific problems and the line
+`This command will not substitute fixture footage for real generation.` No
+fallback path exists.
 
 ## 2. Configuration
 
@@ -134,7 +185,9 @@ pnpm aamp:fixtures
 # Render an existing manifest with real FFmpeg
 pnpm aamp:render --manifest packages/media/fixtures/combat-reviews-15s.manifest.json
 
-# The full chain: prompt -> agents -> ComfyUI -> FFmpeg -> QA -> MP4
+# The full chain: prompt -> agents -> generation -> FFmpeg -> QA -> MP4.
+# With no configuration this runs FIXTURE_REASONING_AND_FIXTURE_GENERATION and
+# says so, loudly, before and after.
 pnpm aamp:generate --manifest apps/aamp-cli/examples/combat-reviews-15s.generation.json
 
 # Agents only, no generation and no endpoint required
@@ -210,7 +263,12 @@ remotely. No model was downloaded, because none could run.
 
 ## 10. Known limitations
 
-- No real generation has occurred (§1, §7).
+- No real generation has occurred (§1, §7). The current hardware cannot execute
+  either intended quality profile.
+- **Mock reasoning ignores the campaign prompt.** `REASONING_PROVIDER=mock`
+  replays committed golden fixtures for the Combat Reviews brief; the manifest's
+  `campaignPrompt` has no effect on the creative. Any evaluation of creative
+  quality requires `REASONING_PROVIDER=claude`.
 - `LTX_2_3_DRAFT`'s graph is unexecuted (§3).
 - `HUNYUAN_VIDEO_1_5_QUALITY` is not selectable (§3).
 - **Image-to-video through the Temporal path is not yet reachable.**

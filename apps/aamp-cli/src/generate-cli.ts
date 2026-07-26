@@ -11,6 +11,7 @@ import {
   type CommandRunner,
 } from '@combat/media';
 import {
+  ComfyUIVideoGenerationProvider,
   createClaudeReasoningProvider,
   createVideoGenerationProvider,
   type ReasoningProvider,
@@ -18,7 +19,15 @@ import {
 } from '@combat/providers';
 
 import { buildRenderManifest } from './build-render-manifest';
-import { FIXTURE_CREATIVE_WARNING, createFixtureReasoningProvider } from './fixture-reasoning';
+import {
+  describeExecutionMode,
+  isFullyReal,
+  resolveExecutionMode,
+  usesFixtureGeneration,
+  type ExecutionProvenance,
+} from './execution-mode';
+import { FixtureVideoGenerationProvider } from './fixture-generation';
+import { createFixtureReasoningProvider } from './fixture-reasoning';
 import { generateShots, type GeneratedShotResult } from './generate-shots';
 import {
   GenerationManifestValidationError,
@@ -120,17 +129,11 @@ export interface GenerateCliContext {
  * committed golden results instead — and the caller announces that the
  * creative is canned, because it is.
  */
-async function resolveReasoning(
-  env: AampCliEnv,
-  shotCount: number,
-): Promise<{ provider: ReasoningProvider; warning?: string }> {
+async function resolveReasoning(env: AampCliEnv, shotCount: number): Promise<ReasoningProvider> {
   if (env.REASONING_PROVIDER === 'claude') {
-    return { provider: await createClaudeReasoningProvider(env.ANTHROPIC_API_KEY!) };
+    return createClaudeReasoningProvider(env.ANTHROPIC_API_KEY!);
   }
-  return {
-    provider: createFixtureReasoningProvider(shotCount),
-    warning: FIXTURE_CREATIVE_WARNING,
-  };
+  return createFixtureReasoningProvider(shotCount);
 }
 
 /**
@@ -211,6 +214,16 @@ export async function runGenerateCli(
 
   const workflowRunId = context.workflowRunId ?? `aamp-cli-${randomUUID()}`;
 
+  // Announced before any work starts, and repeated on the result. A reader who
+  // sees only the first line or only the last must still know what they have.
+  const executionMode = resolveExecutionMode({
+    reasoningProvider: env.REASONING_PROVIDER,
+    videoGenerationProvider: env.VIDEO_GENERATION_PROVIDER,
+  });
+  context.stderr(
+    `${isFullyReal(executionMode) ? '' : 'WARNING: '}${describeExecutionMode(executionMode)}\n`,
+  );
+
   let resolvedAssets: { asset: ManifestAsset; absolutePath: string }[];
   try {
     resolvedAssets = manifest.assets.map((asset) => ({
@@ -229,11 +242,9 @@ export async function runGenerateCli(
   // --- 1-3: agents produce structured shot specifications -------------------
   let pipeline;
   try {
-    const reasoning = await resolveReasoning(env, manifest.generation.shotCount);
-    if (reasoning.warning) context.stderr(`WARNING: ${reasoning.warning}\n`);
     pipeline = await runAgentPipeline({
       manifest,
-      reasoningProvider: reasoning.provider,
+      reasoningProvider: await resolveReasoning(env, manifest.generation.shotCount),
       workflowRunId,
       onProgress: progress,
     });
@@ -245,7 +256,7 @@ export async function runGenerateCli(
   if (options.planOnly) {
     context.stdout(
       `${JSON.stringify(
-        { campaignId: manifest.campaignId, shotBriefs: pipeline.shotBriefs },
+        { executionMode, campaignId: manifest.campaignId, shotBriefs: pipeline.shotBriefs },
         null,
         2,
       )}\n`,
@@ -253,33 +264,61 @@ export async function runGenerateCli(
     return 0;
   }
 
-  // --- 4-6: real generation, retrieved and measured -------------------------
+  const binaries = resolveFfmpegBinaries(context.env);
+
+  // --- 4-6: generation, retrieved and measured ------------------------------
   let provider: VideoGenerationProvider;
   try {
-    provider =
-      context.providerOverride ??
-      createVideoGenerationProvider({
-        kind: env.VIDEO_GENERATION_PROVIDER,
+    if (context.providerOverride) {
+      provider = context.providerOverride;
+    } else if (env.VIDEO_GENERATION_PROVIDER === 'comfyui') {
+      const comfyui = createVideoGenerationProvider({
+        kind: 'comfyui',
         nodeEnv: env.NODE_ENV,
-        ...(env.VIDEO_GENERATION_PROVIDER === 'comfyui'
-          ? {
-              comfyui: {
-                baseUrl: env.COMFYUI_BASE_URL!,
-                workflowProfile: manifest.generation.profile,
-                clientId: env.COMFYUI_CLIENT_ID,
-                outputTimeoutMs: env.COMFYUI_OUTPUT_TIMEOUT_MS,
-                outputDirectory: resolve(repositoryRoot, env.COMFYUI_OUTPUT_DIR),
-                ...(env.COMFYUI_API_KEY ? { apiKey: env.COMFYUI_API_KEY } : {}),
-              },
-            }
-          : {}),
+        comfyui: {
+          baseUrl: env.COMFYUI_BASE_URL!,
+          workflowProfile: manifest.generation.profile,
+          clientId: env.COMFYUI_CLIENT_ID,
+          outputTimeoutMs: env.COMFYUI_OUTPUT_TIMEOUT_MS,
+          outputDirectory: resolve(repositoryRoot, env.COMFYUI_OUTPUT_DIR),
+          ...(env.COMFYUI_API_KEY ? { apiKey: env.COMFYUI_API_KEY } : {}),
+        },
       });
+
+      // Real generation was explicitly requested, so an endpoint that cannot
+      // actually run this profile is a hard failure here — before any budget,
+      // any GPU time, and above all before anything downstream could present a
+      // substituted result as genuine. There is no fallback path.
+      if (comfyui instanceof ComfyUIVideoGenerationProvider) {
+        progress(`verifying ComfyUI endpoint for profile ${manifest.generation.profile}`);
+        const environment = await comfyui.verifyEnvironment();
+        if (!environment.compatible) {
+          context.stderr(
+            `Real generation was requested (VIDEO_GENERATION_PROVIDER=comfyui) but the endpoint cannot run profile ${manifest.generation.profile}:\n${environment.problems
+              .map((problem) => `  - ${problem}`)
+              .join(
+                '\n',
+              )}\nRefusing to continue. This command will not substitute fixture footage for real generation.\n`,
+          );
+          return 3;
+        }
+      }
+      provider = comfyui;
+    } else {
+      // Demo path. `MockVideoGenerationProvider` produces no file at all, so
+      // the render and QA stages would be unreachable; a synthetic test
+      // pattern keeps them exercisable. Everything downstream labels it.
+      provider = new FixtureVideoGenerationProvider({
+        runner: context.runner ?? new NodeCommandRunner(),
+        binaries,
+        outputDirectory: resolve(repositoryRoot, env.COMFYUI_OUTPUT_DIR),
+      });
+    }
   } catch (error) {
     context.stderr(`${error instanceof Error ? error.message : String(error)}\n`);
     return 2;
   }
 
-  const binaries = resolveFfmpegBinaries(context.env);
   let generatedShots: readonly GeneratedShotResult[];
   try {
     generatedShots = await generateShots({
@@ -330,17 +369,47 @@ export async function runGenerateCli(
     return 1;
   }
 
+  // Provenance travels with the deliverable, not just with the terminal that
+  // produced it. An MP4 that outlives this shell must still be able to say
+  // whether a model made it.
+  const provenance: ExecutionProvenance = {
+    executionMode,
+    reasoningProvider: env.REASONING_PROVIDER,
+    videoGenerationProvider: env.VIDEO_GENERATION_PROVIDER,
+    workflowProfile: usesFixtureGeneration(executionMode) ? 'FIXTURE' : manifest.generation.profile,
+    campaignId: manifest.campaignId,
+    workflowRunId,
+    isRealAdvertisement: isFullyReal(executionMode),
+    caveat: describeExecutionMode(executionMode),
+    generatedShots: generatedShots.map((shot) => ({
+      shotId: shot.brief.shotId,
+      localPath: shot.localPath,
+      checksumSha256: shot.checksumSha256,
+      measuredDurationSeconds: shot.measuredDurationSeconds,
+      measuredWidthPx: shot.measuredWidthPx,
+      measuredHeightPx: shot.measuredHeightPx,
+      measuredVideoCodec: shot.measuredVideoCodec,
+      synthetic: usesFixtureGeneration(executionMode),
+    })),
+  };
+  const provenancePath = `${result.outputPath}.generation-provenance.json`;
+  await writeFile(provenancePath, `${JSON.stringify(provenance, null, 2)}\n`, 'utf8');
+
   const { summary } = result.qaReport;
   if (options.json) {
     context.stdout(
       `${JSON.stringify(
         {
+          executionMode,
+          isRealAdvertisement: provenance.isRealAdvertisement,
+          caveat: provenance.caveat,
           campaignId: manifest.campaignId,
-          generationProfile: manifest.generation.profile,
+          generationProfile: provenance.workflowProfile,
           generatedShotPaths: generatedShots.map((shot) => shot.localPath),
           outputPath: result.outputPath,
           qaReport: result.qaReport,
           qaReportPath: result.qaReportPath,
+          provenancePath,
         },
         null,
         2,
@@ -349,8 +418,9 @@ export async function runGenerateCli(
   } else {
     context.stdout(
       `${[
+        `execution mode:    ${executionMode}`,
         `campaign ID:       ${manifest.campaignId}`,
-        `generation profile:${' '}${manifest.generation.profile}`,
+        `generation profile:${' '}${provenance.workflowProfile}`,
         `generated shots:   ${generatedShots.map((shot) => shot.localPath).join('\n                   ')}`,
         `final MP4:         ${result.outputPath}`,
         `duration:          ${summary.durationSeconds === null ? 'unknown' : `${summary.durationSeconds.toFixed(3)}s`}`,
@@ -358,8 +428,15 @@ export async function runGenerateCli(
         `codecs:            ${summary.videoCodec ?? 'none'} / ${summary.audioCodec ?? 'none'}`,
         `QA status:         ${result.qaReport.verdict}`,
         `QA report:         ${result.qaReportPath}`,
+        `provenance:        ${provenancePath}`,
       ].join('\n')}\n`,
     );
+    // Repeated after the result, not only before it: a PASS verdict beside a
+    // 1080x1920 path reads as a finished advertisement, and for three of the
+    // four modes it is not one.
+    if (!isFullyReal(executionMode)) {
+      context.stderr(`\nWARNING: ${describeExecutionMode(executionMode)}\n`);
+    }
   }
 
   if (result.qaReport.verdict !== 'PASS') {
