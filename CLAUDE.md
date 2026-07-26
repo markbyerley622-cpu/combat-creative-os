@@ -72,8 +72,72 @@ demonstrates the mechanism and says nothing about how a real model would use
 the context. See the "Creative Memory injection" rules below and
 `docs/runbooks/creative-memory-retrieval.md` §§16–22.
 
+**The production AAMP composition root and operational doctor are done** —
+`aamp:generate` now builds every collaborator through one canonical factory,
+derives a typed execution mode from the dependencies that were actually built,
+and writes a sealed run-provenance record. `pnpm aamp:doctor` is a read-only
+preflight. **Proven against live local infrastructure:** Docker PostgreSQL and
+Qdrant, real FFmpeg 8.1.2, four synthetic references ingested/approved/indexed,
+four approved benchmark profiles, and a full `--execution-mode local-production
+--creative-memory required` run producing an ffprobe-verified 1080×1920 MP4 at
+exactly 15.000 s. **Not proven:** `PRODUCTION` mode has never executed (no
+`ANTHROPIC_API_KEY` here) — only its refusal is proven — and creative quality
+is still a committed fixture. See the "Production composition root" rules below,
+`docs/architecture.md` §8's entry, and
+`docs/runbooks/prompt-driven-advertisement-generation.md` §§10–14.
+
 **The next milestone is AAMP-1 step 3** — the `SERIALIZABLE` budget transaction
 (`docs/aamp-architecture.md` §6 task 5), still outstanding and unstarted.
+
+## Production composition root — permanent rules
+
+- **There is one AAMP composition root.**
+  `apps/aamp-cli/src/production/dependency-factory.ts` builds and owns every
+  collaborator a campaign run uses. `generate-cli.ts` constructs no
+  `PrismaClient`, `QdrantClient`, embedder or reasoning provider of its own.
+  Adding a second construction site is how the execution-mode label stops being
+  true.
+- **The execution mode is derived from evidence, never from a flag.**
+  `resolveAttainedExecutionMode` takes only `DependencyEvidence` and cannot see
+  the requested mode. `--execution-mode` is a **floor**: it may refuse a run and
+  may never promote its label. Keep it that way — a demonstration filed as a
+  production result is the failure this whole module exists to prevent.
+- **`PRODUCTION` refuses every substitute**: fixture reasoning, fixture
+  generation, an in-memory store and any injected test collaborator, each with
+  its own typed failure kind. A run a test could have substituted into is not a
+  production run.
+- **The factory imports no fixture.** Deterministic providers arrive through
+  the `fixtures` seam, supplied by the CLI; a source-level test asserts no
+  import in `dependency-factory.ts` can reach one. Do not import a fixture,
+  mock or in-memory module there.
+- **`NOT_REQUIRED`, `SIMULATED` and `UNAVAILABLE` are three different
+  statements.** A source-only campaign genuinely needs no generation; a missing
+  FFmpeg is not a substitute; an injected runner is. Never collapse them.
+- **Resources close on success, failure and cancellation.** Construction keeps
+  a closer stack and unwinds it if a later step throws; `close()` is idempotent
+  and is called from the CLI's `finally`.
+- **The doctor is read-only and reports everything.** It deliberately does not
+  use the factory's fail-fast path — an operator fixing one blocker at a time is
+  the failure it exists to avoid. No generation call, no spend, no database
+  write, no render, no contact with the reasoning provider. Its only write is a
+  probe file it removes. Statuses map to exit codes 0/1/2, and DEGRADED is
+  non-zero on purpose.
+- **Run provenance is durable, sealed and safe.** Every run writes a
+  canonically-serialised, self-checksummed `aamp-run-provenance.json`.
+  `assertRunProvenanceSafe` walks it against forbidden keys _and_
+  credential-shaped values and fails closed; keep both lists exhaustive when
+  adding a field. It records `requiresHumanApproval: true` and the cost basis
+  explicitly rather than leaving either to be inferred.
+- **No new Prisma model for CLI run provenance.** Every campaign-lifecycle
+  table is keyed to a `Campaign` row only the workflow path creates, and those
+  rows drive the three human gates. The record references the PostgreSQL rows
+  that are already canonical instead of copying them.
+- **An index entry claims `INDEXED` only after the Qdrant upsert returned.** A
+  half-filled collection whose entries all say `INDEXED` fails silently and
+  looks plausible, and the next run would skip exactly the missing scenes.
+- **`aamp:reference ingest --force` refreshes declared manifest metadata** and
+  nothing else. Analysis outcomes (`processingState`, `mediaAcquired`,
+  `failureReason`) are results, not manifest values.
 
 ## Creative Memory — permanent rules (lawful benchmark ingestion)
 

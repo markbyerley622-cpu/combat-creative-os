@@ -2636,6 +2636,129 @@ the mechanism, not judgement, and says nothing about how a real model would use
 the context. Qwen retrieval remains unproven (no endpoint). The three human
 gates are untouched and still the only approval path.
 
+---
+
+### AAMP — production composition root and operational doctor (2026-07-27)
+
+Turns the components the previous milestones proved separately into one real
+execution path with one owner. Detail:
+`docs/runbooks/prompt-driven-advertisement-generation.md` §§10–13 and
+`docs/runbooks/creative-memory-retrieval.md` §23.
+
+**What changed.**
+
+- **One canonical composition root.** `apps/aamp-cli/src/production/dependency-factory.ts`
+  builds and owns validated configuration, the PrismaClient, the PostgreSQL
+  reference and benchmark-governance repositories, the Qdrant client, the
+  embedder and reranker, the reasoning provider, the video-generation provider,
+  the FFmpeg toolchain and actual-media QA, the logger and shutdown. Failures
+  are typed (`AampDependencyError` over ten `AampDependencyFailure` kinds), each
+  naming the remedy. Construction keeps a closer stack and unwinds it on
+  success, failure and cancellation; `close()` is idempotent. `aamp:generate`
+  no longer constructs a PrismaClient, a Qdrant client, an embedder or a
+  reasoning provider of its own.
+
+- **Typed execution modes, derived from evidence.** `FIXTURE`,
+  `LOCAL_PRODUCTION` and `PRODUCTION` (`production/aamp-execution-mode.ts`).
+  `resolveAttainedExecutionMode` takes only a `DependencyEvidence` record — six
+  axes: persistence, vector search, reasoning, video generation, rendering, QA
+  — and **cannot see the requested mode**, so a label can never be promoted by
+  what the operator typed. `--execution-mode` is a _floor_: it can refuse a run
+  and nothing else. `PRODUCTION` additionally refuses fixture reasoning,
+  fixture generation, an in-memory store and any injected test collaborator,
+  each with its own failure kind. `NOT_REQUIRED` is distinguished from both
+  "real" and "simulated" so a source-only campaign is not penalised for needing
+  no generation, and `UNAVAILABLE` is distinguished from "simulated" so a
+  missing renderer is not reported as a substitute.
+
+- **`pnpm aamp:doctor`** — a read-only preflight over configuration,
+  PostgreSQL, Prisma migration status (compared against the migration
+  directories on disk), Qdrant, the expected collection name, vector
+  dimensions, approved benchmark profiles per planning role, eligible approved
+  references, reasoning configuration, FFmpeg/ffprobe, ComfyUI, production
+  asset rights and output-directory writability. Every check is marked required
+  or advisory _for the mode being asked about_, so it reports all problems at
+  once rather than the first — deliberately not the factory's fail-fast path.
+  Statuses READY/DEGRADED/BLOCKED map to exit codes 0/1/2. It makes no
+  generation call, spends nothing, writes no database row, renders nothing and
+  never contacts the reasoning provider; its one write is a probe file it
+  removes.
+
+- **Durable run provenance.** Every run writes a canonically-serialised,
+  self-checksummed `aamp-run-provenance.json` carrying workspace, campaign,
+  request hash, prompt hash, requested and attained mode, dependency evidence,
+  the label, every provider's identity/version/capability/simulated flag,
+  Creative Memory mode, per-role retrieval evidence (profile id and version,
+  governing checksum, query and context hashes, reference/annotation/scene ids,
+  scores), agent prompt versions, reasoning and render providers, the measured
+  output checksum, QA verdict, originality decision, cost basis, failure and
+  fallback reasons, correlation and idempotency identifiers, and
+  `requiresHumanApproval: true`. `assertRunProvenanceSafe` walks it against
+  forbidden keys _and_ credential-shaped value patterns and fails closed.
+  **No new Prisma model was added**: every campaign-lifecycle table is keyed to
+  a `Campaign` row only the workflow path creates, and those rows drive the
+  three human gates — fabricating them so a CLI run had somewhere to hang
+  provenance would be worse than the problem. The record instead references the
+  PostgreSQL rows that are already canonical.
+
+- **Creative Memory index-entry persistence, finally wired.**
+  `creative_memory_index_runs` and `creative_memory_index_entries` were created
+  by the retrieval migration and `indexWorkspace` had always accepted seams for
+  them, but nothing passed those seams: the tables stayed empty and every
+  re-index re-embedded every scene. `packages/database`'s
+  `creative-memory-index-repository.ts` fills them, and `aamp:reference index`
+  wires it. Failure detail is redacted before persistence.
+
+- **`aamp:reference workspace-ensure`.** The tenancy root had no creation path
+  anywhere in the repository, so a live setup was impossible without a
+  hand-written `INSERT`. Idempotent by id; refuses a slug that already belongs
+  to a different workspace.
+
+**Defects found and fixed.**
+
+1. **Index entries claimed `INDEXED` before the Qdrant upsert had succeeded.**
+   A failure mid-batch left rows saying scenes were searchable when the
+   collection held nothing for them — and the next run, seeing an unchanged
+   input hash, would skip exactly those scenes. Entries are now written after
+   the upsert returns, and a failed batch is recorded `FAILED` /
+   `UPSERT_FAILED` with its outcomes rewritten in place.
+2. **`aamp:reference ingest --force` never refreshed declared metadata.** An
+   operator who corrected a reference's `businessRoles` and re-ran got a fresh
+   analysis attached to the stale roles, with nothing saying the edit had been
+   ignored — and a role a retrieval plan queries would silently never match.
+   `updateReferenceDeclaredMetadata` now refreshes the declared fields under
+   `--force`; analysis outcomes are untouched.
+3. **`--creative-memory off` still performed retrieval when collaborators were
+   injected.** Introduced while wiring the factory and caught by a test that
+   counts Qdrant searches rather than inspecting results. Both the factory and
+   the CLI now guard on the mode.
+
+**Proven, against live local infrastructure.** Docker PostgreSQL and Qdrant
+running; real FFmpeg 8.1.2; workspace ensured; four synthetic references
+ingested, annotated, approved and indexed (11 scenes, 288-dimensional
+collection); a second index run skipping all 11 unchanged; four approved
+benchmark profiles seeded; doctor READY for `local-production`; a full
+`aamp:generate --execution-mode local-production --creative-memory required
+--fixture-demo` producing a genuine 1080×1920 h264/aac MP4 of exactly 15.000 s
+(ffprobe-verified, QA `PASS`), whose sha256 matches the provenance record;
+the run labelled `LOCAL_PRODUCTION — PARTIALLY SIMULATED` naming reasoning as
+the simulated half; `--execution-mode production` refused with exit 11 having
+produced nothing; doctor BLOCKED with exit 2 and no database row written.
+Unit and integration coverage: mode derivation and labelling, every production
+refusal, resource release, secret-free errors and reports, provenance safety
+and tamper detection, doctor READY/DEGRADED/BLOCKED, doctor read-only,
+`off` performing zero searches, workspace isolation in PostgreSQL and Qdrant,
+`ANALYSIS_ONLY` refused before FFmpeg is invoked, and no source-level path from
+this milestone's code to an approval signal.
+
+**Not proven.** Creative quality — the run's reasoning is still a committed
+fixture that ignores the campaign prompt. `PRODUCTION` mode itself has never
+executed, because no `ANTHROPIC_API_KEY` is configured here; what is proven is
+that it refuses correctly. ComfyUI generation remains unexecuted. Cost is
+recorded as `NOT_METERED_BY_CLI` with zeros: the CLI reserves no budget and
+writes no ledger row, and token metering is not plumbed through `planCampaign`.
+The three human gates are untouched.
+
 **Next milestone: AAMP-1 step 3 — the `SERIALIZABLE` budget transaction**
 (`docs/aamp-architecture.md` §6 task 5), still outstanding and unstarted.
 

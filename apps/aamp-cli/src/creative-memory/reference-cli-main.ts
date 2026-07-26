@@ -21,6 +21,10 @@ async function main(): Promise<void> {
     // structural `ReferenceDataSource`; the cast is the same boundary
     // `createPrismaActivityDatabase` crosses on the production side.
     db: prisma as unknown as ReferenceCliContext['db'],
+    // Tenancy provisioning is a separate handle onto the same client, so
+    // `workspace-ensure` is reachable only from this entry point and never from
+    // a test's injected reference store.
+    provisioning: prisma as unknown as NonNullable<ReferenceCliContext['provisioning']>,
   };
 
   try {

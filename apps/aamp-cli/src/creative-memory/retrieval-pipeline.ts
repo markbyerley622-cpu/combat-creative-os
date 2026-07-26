@@ -251,6 +251,7 @@ export interface IndexOptions {
     pointId: string;
     collection: string;
     state: 'INDEXED' | 'FAILED';
+    failureKind?: 'EMBEDDING_FAILED' | 'UPSERT_FAILED';
     failureDetail?: string;
   }) => Promise<void>;
   /** Returns the previously recorded input hash for a scene, if any. */
@@ -275,8 +276,71 @@ export async function indexWorkspace(options: IndexOptions): Promise<IndexSummar
   options.onProgress?.(`${bundles.length} eligible scene(s) for ${profile.profile}`);
 
   const outcomes: IndexOutcome[] = [];
-  const pending: QdrantPoint[] = [];
   const batchSize = options.batchSize ?? 16;
+
+  /**
+   * A point that has been embedded but is not yet in the collection, together
+   * with everything needed to record its outcome once it is.
+   *
+   * The index entry is written **after** the upsert returns, never before. The
+   * previous ordering recorded `INDEXED` at embed time, so a Qdrant failure
+   * during the batch left rows claiming a scene was searchable when the
+   * collection held nothing for it — and the next run, seeing an unchanged
+   * input hash, would skip re-embedding it. A half-filled collection that looks
+   * complete is the exact failure this package's rules single out.
+   */
+  interface PendingPoint {
+    readonly point: QdrantPoint;
+    readonly sceneId: string;
+    readonly referenceAdvertisementId: string;
+    readonly inputHash: string;
+    readonly vectorChecksum: string;
+    /** Slot in `outcomes`, so a failed flush rewrites the report in place. */
+    readonly outcomeIndex: number;
+  }
+  const pending: PendingPoint[] = [];
+
+  const flush = async (): Promise<void> => {
+    if (pending.length === 0) return;
+    const batch = pending.splice(0, pending.length);
+    try {
+      await options.qdrant.upsertPoints(
+        collection,
+        batch.map((entry) => entry.point),
+      );
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      for (const entry of batch) {
+        outcomes[entry.outcomeIndex] = { sceneId: entry.sceneId, status: 'FAILED', detail };
+        // eslint-disable-next-line no-await-in-loop -- recorded in batch order
+        await options.recordEntry?.({
+          sceneId: entry.sceneId,
+          referenceAdvertisementId: entry.referenceAdvertisementId,
+          inputHash: entry.inputHash,
+          vectorChecksum: entry.vectorChecksum,
+          pointId: entry.point.id,
+          collection,
+          state: 'FAILED',
+          failureKind: 'UPSERT_FAILED',
+          failureDetail: detail,
+        });
+      }
+      throw error;
+    }
+
+    for (const entry of batch) {
+      // eslint-disable-next-line no-await-in-loop -- recorded in batch order
+      await options.recordEntry?.({
+        sceneId: entry.sceneId,
+        referenceAdvertisementId: entry.referenceAdvertisementId,
+        inputHash: entry.inputHash,
+        vectorChecksum: entry.vectorChecksum,
+        pointId: entry.point.id,
+        collection,
+        state: 'INDEXED',
+      });
+    }
+  };
 
   for (const bundle of bundles) {
     const document = buildSceneEmbeddingDocument(bundle.source);
@@ -302,6 +366,7 @@ export async function indexWorkspace(options: IndexOptions): Promise<IndexSummar
         pointId: '',
         collection,
         state: 'FAILED',
+        failureKind: 'EMBEDDING_FAILED',
         failureDetail: detail,
       });
       continue;
@@ -317,7 +382,7 @@ export async function indexWorkspace(options: IndexOptions): Promise<IndexSummar
     }
 
     const pointId = pointIdFor(options.workspaceId, bundle.sceneId, profile.profile);
-    pending.push({
+    const point: QdrantPoint = {
       id: pointId,
       vector: embedded.vector,
       payload: {
@@ -334,32 +399,30 @@ export async function indexWorkspace(options: IndexOptions): Promise<IndexSummar
         ingestionVersion: bundle.ingestionVersion,
         modelRevision: profile.embeddingRevision,
       },
-    });
+    };
 
-    outcomes.push({
-      sceneId: bundle.sceneId,
-      status: 'INDEXED',
-      pointId,
-      inputHash: embedded.inputHash,
-    });
-    // eslint-disable-next-line no-await-in-loop -- same ordering rationale
-    await options.recordEntry?.({
+    pending.push({
+      point,
       sceneId: bundle.sceneId,
       referenceAdvertisementId: bundle.referenceAdvertisementId,
       inputHash: embedded.inputHash,
       vectorChecksum: embedded.vectorChecksum,
-      pointId,
-      collection,
-      state: 'INDEXED',
+      outcomeIndex:
+        outcomes.push({
+          sceneId: bundle.sceneId,
+          status: 'INDEXED',
+          pointId,
+          inputHash: embedded.inputHash,
+        }) - 1,
     });
 
     if (pending.length >= batchSize) {
       // eslint-disable-next-line no-await-in-loop -- batched writes are inherently sequential
-      await options.qdrant.upsertPoints(collection, pending.splice(0, pending.length));
+      await flush();
     }
   }
 
-  if (pending.length > 0) await options.qdrant.upsertPoints(collection, pending);
+  await flush();
 
   return {
     collection,

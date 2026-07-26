@@ -50,6 +50,9 @@ importers:
       '@combat/media':
         specifier: workspace:*
         version: link:../../packages/media
+      '@combat/observability':
+        specifier: workspace:*
+        version: link:../../packages/observability
       '@combat/providers':
         specifier: workspace:*
         version: link:../../packages/providers

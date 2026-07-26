@@ -38,4 +38,5 @@ export * from './repositories/agent-invocation-repository';
 export * from './repositories/test-helpers/in-memory-campaign-store';
 export * from './repositories/reference-repository';
 export * from './repositories/benchmark-profile-repository';
+export * from './repositories/creative-memory-index-repository';
 export * from './repositories/in-memory-reference-store';

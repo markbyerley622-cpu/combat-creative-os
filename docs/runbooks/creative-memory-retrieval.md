@@ -527,6 +527,54 @@ hashes and measurements, never retrieved prose or expressive content.
 - **agency-grade output.** Nothing here assesses that, and nothing should claim
   it.
 - **Qwen retrieval quality** — still unproven, no endpoint (§4, §15).
-- **behaviour against live PostgreSQL.** Every test runs against the in-memory
-  reference store; the benchmark-profile table has a migration but no
-  application process has been pointed at live Postgres.
+- **behaviour against live PostgreSQL** — superseded by §23; see below.
+
+## 23. Live PostgreSQL and Qdrant (production composition root, 2026-07-27)
+
+The gap above is closed. `pnpm aamp:generate` now composes its collaborators
+through `apps/aamp-cli/src/production/dependency-factory.ts`, which is the only
+place a real `PrismaClient` or `QdrantClient` is built for a campaign run, and
+the whole chain has been exercised against live local services.
+
+**Index-entry persistence, finally wired.** `creative_memory_index_runs` and
+`creative_memory_index_entries` were created by the retrieval migration and
+`indexWorkspace` had always accepted `recordEntry`/`previousHash` seams for
+them — but nothing passed those seams. The tables stayed empty and every
+re-index re-embedded every scene. `pnpm aamp:reference index` now writes them
+through `packages/database`'s `creative-memory-index-repository.ts`, so a
+second run skips unchanged scenes.
+
+**An entry claims `INDEXED` only after the point is in the collection.** The
+previous ordering recorded `INDEXED` at embed time, so a Qdrant failure
+mid-batch left rows claiming a scene was searchable when nothing had been
+written for it — and the next run, seeing an unchanged input hash, would skip
+exactly the scenes that were missing. A half-filled collection that looks
+complete is precisely the failure this area's rules single out. Entries are now
+written after the upsert returns; a refused batch is recorded `FAILED` with
+`UPSERT_FAILED`, and the next run re-embeds it.
+
+**Failure detail is redacted before persistence.** A provider's own error text
+is the likeliest carrier of an endpoint credential into durable storage, and it
+arrives already stringified, so a field-name allowlist cannot help. URLs,
+key-shaped tokens and anything introduced by the words _api key_, _token_,
+_password_ or _secret_ are removed, and the detail is length-bounded.
+
+**`aamp:reference workspace-ensure`.** The tenancy root had no creation path
+anywhere in the repository — every runbook assumed a workspace nothing could
+create. It is idempotent by id and refuses a slug already held by a different
+workspace.
+
+**`--force` now refreshes declared metadata.** Re-ingesting an existing
+reference previously reused the stored row untouched, so an operator who
+corrected `businessRoles` and re-ran got a fresh analysis attached to the stale
+roles — and a role a retrieval plan queries would silently never match. Under
+`--force` the declared fields are updated; analysis outcomes are not.
+
+**Proven live.** Docker PostgreSQL and Qdrant; four synthetic references
+ingested, annotated, approved and indexed into
+`creative_memory__structural_baseline_v1__rev_v1__d288__s1` (11 scenes, 288
+dimensions); a second index run skipping all 11; four approved benchmark
+profiles resolved from PostgreSQL; all four planning agents receiving
+role-appropriate context retrieved from live Qdrant; and the whole run
+producing an ffprobe-verified 1080×1920 MP4. Still unproven: Qwen retrieval
+quality (no endpoint), and creative quality (the reasoning is still a fixture).

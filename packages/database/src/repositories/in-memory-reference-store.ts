@@ -156,6 +156,16 @@ export class InMemoryReferenceStore implements ReferenceDataSource {
   readonly benchmarkGovernanceProfile = this.makeDelegate<never>('benchmarkGovernanceProfile', [
     ['workspaceId', 'name', 'agentRole', 'version'],
   ]);
+  readonly creativeMemoryIndexRun = this.makeDelegate<never>('creativeMemoryIndexRun');
+  /**
+   * Mirrors the migration's `(referenceSceneId, profile)` unique constraint —
+   * the constraint that makes indexing idempotent. Without it here, a
+   * re-indexing bug that accumulated a second row per scene would pass every
+   * in-memory test and only surface against Postgres.
+   */
+  readonly creativeMemoryIndexEntry = this.makeDelegate<never>('creativeMemoryIndexEntry', [
+    ['referenceSceneId', 'profile'],
+  ]);
 
   /** Test helper: every row of a table, for assertions. */
   snapshot(name: string): Record<string, unknown>[] {

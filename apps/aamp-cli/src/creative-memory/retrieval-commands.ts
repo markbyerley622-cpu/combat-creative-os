@@ -1,4 +1,11 @@
-import { type ReferenceDataSource } from '@combat/database';
+import {
+  completeCreativeMemoryIndexRun,
+  listCreativeMemoryIndexEntries,
+  previousIndexInputHash,
+  recordCreativeMemoryIndexEntry,
+  startCreativeMemoryIndexRun,
+  type ReferenceDataSource,
+} from '@combat/database';
 import { CreativeMemoryQuerySchema, type CreativeMemoryQuery } from '@combat/domain';
 import {
   collectionNameFor,
@@ -56,6 +63,8 @@ export interface RetrievalContext {
   readonly embedder?: MultimodalEmbeddingProvider;
   readonly reranker?: MultimodalRerankerProvider;
   readonly qdrant?: QdrantClient;
+  /** Caller-supplied instant, so index-run provenance is reproducible in tests. */
+  readonly now?: () => Date;
 }
 
 /**
@@ -151,6 +160,33 @@ export async function runIndexCommand(
     return RETRIEVAL_EXIT_CODES.QDRANT_UNAVAILABLE;
   }
 
+  // Index-entry persistence, wired here rather than inside the pipeline: the
+  // pipeline stays storage-agnostic, and this is the composition root that
+  // already holds the data source. Without it the migrated
+  // `creative_memory_index_*` tables stay empty and every re-index re-embeds
+  // every scene, which is what happened before this milestone.
+  const modelProfile = embedder.getProfile();
+  const now = context.now ?? ((): Date => new Date());
+  const collection = collectionNameFor(modelProfile);
+  let indexRunId: string | undefined;
+  try {
+    indexRunId = (
+      await startCreativeMemoryIndexRun(context.db, workspaceId, {
+        profile: modelProfile.profile,
+        qdrantCollection: collection,
+        startedAt: now(),
+      })
+    ).id;
+  } catch (error) {
+    // A run row is provenance, not a precondition. Losing it must not stop an
+    // index that would otherwise succeed — but it is said out loud.
+    context.stderr(
+      `  warning: could not open a Creative Memory index run record: ${
+        error instanceof Error ? error.message : String(error)
+      }\n`,
+    );
+  }
+
   try {
     const summary = await indexWorkspace({
       db: context.db,
@@ -160,12 +196,42 @@ export async function runIndexCommand(
       batchSize: Number(context.env.CREATIVE_MEMORY_BATCH_SIZE ?? 16),
       ...(flags.has('force') ? { force: true } : {}),
       onProgress: (message) => context.stderr(`  ${message}\n`),
+      recordEntry: async (entry) =>
+        void (await recordCreativeMemoryIndexEntry(context.db, workspaceId, {
+          referenceSceneId: entry.sceneId,
+          referenceAdvertisementId: entry.referenceAdvertisementId,
+          profile: modelProfile.profile,
+          modelRevision: modelProfile.embeddingRevision,
+          vectorDimension: modelProfile.vectorDimension,
+          embeddingInputHash: entry.inputHash,
+          vectorChecksum: entry.vectorChecksum,
+          qdrantCollection: entry.collection,
+          qdrantPointId: entry.pointId,
+          state: entry.state,
+          at: now(),
+          ...(entry.failureKind ? { failureType: entry.failureKind } : {}),
+          ...(entry.failureDetail ? { failureDetail: entry.failureDetail } : {}),
+          ...(indexRunId ? { indexRunId } : {}),
+        })),
+      previousHash: async (sceneId) =>
+        previousIndexInputHash(context.db, workspaceId, sceneId, modelProfile.profile),
     });
+
+    if (indexRunId) {
+      await completeCreativeMemoryIndexRun(context.db, indexRunId, {
+        indexedCount: summary.indexed,
+        skippedCount: summary.skipped,
+        failedCount: summary.failed,
+        completedAt: now(),
+      });
+    }
+
     context.stdout(
       `${JSON.stringify(
         {
           ...summary,
-          neural: embedder.getProfile().neural,
+          neural: modelProfile.neural,
+          indexRunId: indexRunId ?? null,
           notice: 'Indexing grants no output rights. Reference material remains analysis-only.',
         },
         null,
@@ -176,6 +242,19 @@ export async function runIndexCommand(
       ? RETRIEVAL_EXIT_CODES.INDEXING_FAILURE
       : RETRIEVAL_EXIT_CODES.SUCCESS;
   } catch (error) {
+    // The run row is closed on the failure path too, so an interrupted index
+    // is distinguishable from one that is still going.
+    if (indexRunId) {
+      const entries = await listCreativeMemoryIndexEntries(context.db, workspaceId, {
+        profile: modelProfile.profile,
+      });
+      await completeCreativeMemoryIndexRun(context.db, indexRunId, {
+        indexedCount: entries.filter((entry) => entry.state === 'INDEXED').length,
+        skippedCount: 0,
+        failedCount: entries.filter((entry) => entry.state === 'FAILED').length,
+        completedAt: now(),
+      }).catch(() => undefined);
+    }
     if (error instanceof QdrantError) {
       context.stderr(`${error.kind}: ${error.message}\n`);
       return error.kind === 'DIMENSION_MISMATCH'

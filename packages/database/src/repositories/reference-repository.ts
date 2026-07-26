@@ -1,4 +1,5 @@
 import type { BenchmarkProfileDataSource } from './benchmark-profile-repository';
+import type { CreativeMemoryIndexDataSource } from './creative-memory-index-repository';
 import type {
   ReferenceBusinessRole,
   ReferenceFailureReason,
@@ -175,7 +176,8 @@ export interface ReferenceDerivedArtifactRecord {
  * handle — a caller that can read references is exactly the caller that needs
  * to know which of them a human approved for use.
  */
-export interface ReferenceDataSource extends BenchmarkProfileDataSource {
+export interface ReferenceDataSource
+  extends BenchmarkProfileDataSource, CreativeMemoryIndexDataSource {
   referenceSource: {
     create(args: { data: Record<string, unknown> }): Promise<ReferenceSourceRecord>;
     findFirst(args: { where: Record<string, unknown> }): Promise<ReferenceSourceRecord | null>;
@@ -338,6 +340,63 @@ export async function createReferenceAdvertisement(
 ): Promise<ReferenceAdvertisementRecord> {
   return db.referenceAdvertisement.create({
     data: { workspaceId, ...input, processingState: input.processingState ?? 'REGISTERED' },
+  });
+}
+
+/**
+ * Refreshes the metadata an operator *declared* in the manifest.
+ *
+ * Only declared fields. `processingState`, `failureReason` and `mediaAcquired`
+ * are outcomes of the analysis pipeline, not manifest values, and rewriting
+ * them here would let an edited manifest reset a reference's state without any
+ * analysis having happened.
+ *
+ * This exists because re-ingesting an existing reference previously reused the
+ * stored row untouched: an operator who corrected `businessRoles` and re-ran
+ * with `--force` got a fresh analysis attached to the *old* declared metadata,
+ * with nothing to indicate the edit had been ignored.
+ */
+export async function updateReferenceDeclaredMetadata(
+  db: ReferenceDataSource,
+  workspaceId: string,
+  referenceAdvertisementId: string,
+  input: {
+    referenceSourceId: string;
+    title: string;
+    brand: string;
+    campaign?: string;
+    agency?: string;
+    productionCompany?: string;
+    director?: string;
+    platform?: string;
+    publicationYear?: number;
+    declaredDurationSeconds?: number;
+    businessRoles: ReferenceBusinessRole[];
+    operatorNotes?: string;
+  },
+): Promise<ReferenceAdvertisementRecord> {
+  const existing = await db.referenceAdvertisement.findFirst({
+    where: { workspaceId, id: referenceAdvertisementId },
+  });
+  if (!existing) {
+    throw new Error(`Reference ${referenceAdvertisementId} not found in workspace ${workspaceId}`);
+  }
+  return db.referenceAdvertisement.update({
+    where: { id: referenceAdvertisementId },
+    data: {
+      referenceSourceId: input.referenceSourceId,
+      title: input.title,
+      brand: input.brand,
+      campaign: input.campaign ?? null,
+      agency: input.agency ?? null,
+      productionCompany: input.productionCompany ?? null,
+      director: input.director ?? null,
+      platform: input.platform ?? null,
+      publicationYear: input.publicationYear ?? null,
+      declaredDurationSeconds: input.declaredDurationSeconds ?? null,
+      businessRoles: input.businessRoles,
+      operatorNotes: input.operatorNotes ?? null,
+    },
   });
 }
 

@@ -15,6 +15,7 @@
     "@combat/database": "workspace:*",
     "@combat/domain": "workspace:*",
     "@combat/media": "workspace:*",
+    "@combat/observability": "workspace:*",
     "@combat/providers": "workspace:*",
     "zod": "^3.23.8"
   },

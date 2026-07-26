@@ -4,10 +4,13 @@ import { dirname, isAbsolute, resolve } from 'node:path';
 
 import {
   approveReferenceAnnotation,
+  ensureWorkspace,
   listReferenceScenes,
   listReferences,
   setReferenceState,
+  WorkspaceProvisioningError,
   type ReferenceDataSource,
+  type WorkspaceProvisioningDataSource,
 } from '@combat/database';
 import { ReferenceIngestionManifestV1Schema } from '@combat/domain';
 import { NodeCommandRunner, resolveFfmpegBinaries, type CommandRunner } from '@combat/media';
@@ -94,6 +97,12 @@ export interface ReferenceCliContext {
   readonly qdrant?: QdrantClient;
   /** Overridable so a seeded governance fixture is reproducible. */
   readonly now?: () => Date;
+  /**
+   * Tenancy provisioning. Deliberately a separate handle from `db`: creating
+   * the tenancy root is not a reference-library concern, and only the process
+   * entry point (which holds the real client) supplies it.
+   */
+  readonly provisioning?: WorkspaceProvisioningDataSource;
 }
 
 /** Narrows the ingestion CLI context onto the benchmark commands' own shape. */
@@ -116,6 +125,7 @@ function retrievalContext(context: ReferenceCliContext): RetrievalContext {
     ...(context.embedder ? { embedder: context.embedder } : {}),
     ...(context.reranker ? { reranker: context.reranker } : {}),
     ...(context.qdrant ? { qdrant: context.qdrant } : {}),
+    ...(context.now ? { now: context.now } : {}),
   };
 }
 
@@ -124,6 +134,7 @@ function usage(): string {
     'Usage: aamp:reference <command> [options]',
     '',
     'Commands:',
+    '  workspace-ensure --workspace <uuid> --name <name> [--slug <slug>]   (idempotent tenancy root)',
     '  ingest    --manifest <reference-manifest.json> [--analysis-dir <dir>] [--force] [--scene-clips]',
     '  register  --manifest <reference-manifest.json>     (link-only entries; acquires no media)',
     '  list      --workspace <uuid> [--state <STATE>] [--role <ROLE>]',
@@ -178,6 +189,8 @@ export async function runReferenceCli(
     isAbsolute(candidate) ? candidate : resolve(repositoryRoot, candidate);
 
   switch (command) {
+    case 'workspace-ensure':
+      return workspaceEnsureCommand(values, context);
     case 'ingest':
     case 'register':
       return ingestCommand(
@@ -222,6 +235,63 @@ export async function runReferenceCli(
     default:
       context.stderr(`${usage()}\n`);
       return REFERENCE_EXIT_CODES.INVALID_MANIFEST;
+  }
+}
+
+/**
+ * Creates the tenancy root, or confirms it is already there.
+ *
+ * Every other command in this file writes rows whose `workspaceId` has a
+ * foreign key onto `workspaces`, so this is the first step of a live setup and
+ * the one that was previously missing entirely — the runbooks assumed a
+ * workspace that nothing in the repository could create.
+ */
+async function workspaceEnsureCommand(
+  values: Readonly<Record<string, string>>,
+  context: ReferenceCliContext,
+): Promise<number> {
+  const workspaceId = values.workspace;
+  const name = values.name;
+  if (!workspaceId || !name) {
+    context.stderr('workspace-ensure requires --workspace <uuid> --name <name> [--slug <slug>]\n');
+    return REFERENCE_EXIT_CODES.INVALID_MANIFEST;
+  }
+  if (!context.provisioning) {
+    context.stderr(
+      'workspace-ensure needs a database connection; run it through `pnpm aamp:reference`.\n',
+    );
+    return REFERENCE_EXIT_CODES.PERSISTENCE_FAILED;
+  }
+
+  const slug =
+    values.slug ??
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '');
+
+  try {
+    const result = await ensureWorkspace(context.provisioning, { id: workspaceId, name, slug });
+    context.stdout(
+      `${JSON.stringify(
+        {
+          workspaceId: result.workspace.id,
+          name: result.workspace.name,
+          slug: result.workspace.slug,
+          created: result.created,
+          notice:
+            'A workspace is the tenancy root. Creating it grants no rights over any material; reference ingestion remains analysis-only.',
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    return REFERENCE_EXIT_CODES.SUCCESS;
+  } catch (error) {
+    context.stderr(`${error instanceof Error ? error.message : String(error)}\n`);
+    return error instanceof WorkspaceProvisioningError
+      ? REFERENCE_EXIT_CODES.INVALID_MANIFEST
+      : REFERENCE_EXIT_CODES.PERSISTENCE_FAILED;
   }
 }
 

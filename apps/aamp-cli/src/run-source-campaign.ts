@@ -72,6 +72,14 @@ export const EXIT_CODES = {
   CREATIVE_MEMORY_UNAVAILABLE: 9,
   /** A HIGH originality risk stopped the run before any source was selected. */
   ORIGINALITY_RISK_BLOCKED: 10,
+  /**
+   * `--execution-mode` named a tier the actual dependencies could not reach.
+   * Distinct from a dependency failure: every collaborator may be present and
+   * working, and the run still refused because one of them was a substitute.
+   */
+  EXECUTION_MODE_NOT_ATTAINED: 11,
+  /** A collaborator could not be constructed at all. Nothing ran. */
+  DEPENDENCY_UNAVAILABLE: 12,
 } as const;
 export type ExitCode = (typeof EXIT_CODES)[keyof typeof EXIT_CODES];
 
@@ -114,6 +122,14 @@ export interface SourceCampaignResult {
   readonly creativeMemoryMode?: CreativeMemoryMode;
   readonly originality?: OriginalityAssessment;
   readonly failure?: string;
+  /**
+   * Facts the run provenance record needs and that nothing else can supply
+   * afterwards. The checksum in particular is *measured from the produced file*
+   * by actual-media QA — never a value the manifest declared.
+   */
+  readonly outputChecksumSha256?: string;
+  readonly qaFailedChecks?: readonly string[];
+  readonly agentVersions?: readonly string[];
 }
 
 async function writeArtefact(
@@ -416,27 +432,11 @@ export async function runSourceCampaign(
   const measuredResolution = `${summary.widthPx ?? '?'}x${summary.heightPx ?? '?'}`;
   const measuredCodecs = `${summary.videoCodec ?? 'none'} / ${summary.audioCodec ?? 'none'}`;
 
-  if (rendered.qaReport.verdict !== 'PASS') {
-    return {
-      exitCode: EXIT_CODES.QA_FAILURE,
-      runDirectory,
-      outputPath: rendered.outputPath,
-      qaVerdict: rendered.qaReport.verdict,
-      measuredDurationSeconds: summary.durationSeconds,
-      measuredResolution,
-      measuredCodecs,
-      heuristicAverage: scorecard.heuristicAverage,
-      creativeMemoryMode: options.creativeMemoryMode,
-      originality,
-      failure: rendered.qaReport.measurements
-        .filter((measurement) => measurement.verdict === 'FAIL')
-        .map((measurement) => `${measurement.check}: expected ${measurement.expected}`)
-        .join('; '),
-    };
-  }
+  const qaFailedChecks = rendered.qaReport.measurements
+    .filter((measurement) => measurement.verdict === 'FAIL')
+    .map((measurement) => `${measurement.check}: expected ${measurement.expected}`);
 
-  return {
-    exitCode: EXIT_CODES.SUCCESS,
+  const common = {
     runDirectory,
     outputPath: rendered.outputPath,
     qaVerdict: rendered.qaReport.verdict,
@@ -446,7 +446,15 @@ export async function runSourceCampaign(
     heuristicAverage: scorecard.heuristicAverage,
     creativeMemoryMode: options.creativeMemoryMode,
     originality,
+    outputChecksumSha256: summary.checksumSha256,
+    qaFailedChecks,
+    agentVersions: plan.agentVersions,
   };
+
+  if (rendered.qaReport.verdict !== 'PASS') {
+    return { ...common, exitCode: EXIT_CODES.QA_FAILURE, failure: qaFailedChecks.join('; ') };
+  }
+  return { ...common, exitCode: EXIT_CODES.SUCCESS };
 }
 
 /** Re-exported for the CLI's own resolution of the run directory. */

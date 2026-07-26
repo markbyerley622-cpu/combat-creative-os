@@ -19,7 +19,12 @@
         "no use in any produced advertisement or other output",
         "no redistribution"
       ],
-      "businessRoles": ["MOTION_AND_TRANSITIONS", "PLATFORM_OPTIMISATION", "SCRIPT_AND_TIMING"],
+      "businessRoles": [
+        "CAMPAIGN_STRATEGY",
+        "SCRIPT_AND_TIMING",
+        "PLATFORM_OPTIMISATION",
+        "MOTION_AND_TRANSITIONS"
+      ],
       "operatorNotes": "Synthetic six-scene one-second-per-cut fixture. Exists to exercise pacing measurement, not to demonstrate craft.",
       "annotation": {
         "authorId": "acceptance-fixture",
@@ -45,7 +50,12 @@
       "rightsHolder": "Combat Reviews",
       "permittedUses": ["private structural analysis"],
       "prohibitedUses": ["no use in any produced advertisement or other output"],
-      "businessRoles": ["CREATIVE_DIRECTION", "CONTINUITY_AND_EDITORIAL"],
+      "businessRoles": [
+        "CREATIVE_DIRECTION",
+        "COPY_AND_BRAND_CONTROL",
+        "SCRIPT_AND_TIMING",
+        "CONTINUITY_AND_EDITORIAL"
+      ],
       "operatorNotes": "Synthetic three-scene fixture with a longer hold, for contrast against the fast-cut reference.",
       "annotation": {
         "authorId": "acceptance-fixture",
@@ -73,7 +83,12 @@
         "no use in any produced advertisement or other output",
         "no reframing for vertical delivery"
       ],
-      "businessRoles": ["VIDEO_PRODUCTION", "VISUAL_QUALITY_CONTROL"],
+      "businessRoles": [
+        "PERFORMANCE_ANALYSIS",
+        "VISUAL_QUALITY_CONTROL",
+        "PREVISUALISATION",
+        "VIDEO_PRODUCTION"
+      ],
       "operatorNotes": "Landscape fixture, to prove aspect ratio is measured rather than assumed vertical.",
       "annotation": {
         "authorId": "acceptance-fixture",

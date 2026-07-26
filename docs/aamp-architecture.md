@@ -5,8 +5,21 @@ Status: **AAMP-0 complete (architecture).** Implementation has begun:
 see `docs/architecture.md` §8's AAMP-1 step 1 entry and
 `docs/runbooks/database-migrations.md` — and **AAMP-1 step 2 (verified Clerk
 authentication, §6 task 4) is done**, see §8's AAMP-1 step 2 entry and
-**ADR-0006**. Everything else in this document remains unimplemented; the next
-step is **AAMP-1 step 3, the `SERIALIZABLE` budget transaction** (§6 task 5).
+**ADR-0006**.
+
+Beyond the AAMP-1 tasks, four vertical slices have been delivered against this
+blueprint's invariants (§3) rather than in its phase order: real FFmpeg
+rendering, the ComfyUI gateway, prompt-driven source generation, and Creative
+Memory ingestion → retrieval → role-specific injection. Those are now joined by
+a **production AAMP composition root** — one canonical dependency factory, typed
+`FIXTURE`/`LOCAL_PRODUCTION`/`PRODUCTION` execution modes derived from the
+dependencies actually built, sealed run provenance, and a read-only
+`pnpm aamp:doctor` preflight — exercised end to end against live local
+PostgreSQL, live Qdrant and real FFmpeg. See `docs/architecture.md` §8's
+production-composition-root entry.
+
+The next step in this document's own plan is unchanged: **AAMP-1 step 3, the
+`SERIALIZABLE` budget transaction** (§6 task 5).
 Date: 2026-07-26. Baseline: `ad3d241` (post-M14 foundation audit repair).
 
 This document is the delivery blueprint for turning the completed M0–M14

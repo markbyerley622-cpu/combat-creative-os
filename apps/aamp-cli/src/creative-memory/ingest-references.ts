@@ -5,6 +5,7 @@ import {
   assertReferenceClassification,
   clearDerivedAnalysis,
   createReferenceAdvertisement,
+  updateReferenceDeclaredMetadata,
   createReferenceAnnotation,
   createReferenceSource,
   findReferenceMediaByChecksum,
@@ -196,26 +197,37 @@ async function ingestOne(
     ...(entry.jurisdictionNotes ? { jurisdictionNotes: entry.jurisdictionNotes } : {}),
   });
 
+  const declared = {
+    referenceSourceId: source.id,
+    title: entry.title,
+    brand: entry.brand,
+    ...(entry.campaign ? { campaign: entry.campaign } : {}),
+    ...(entry.agency ? { agency: entry.agency } : {}),
+    ...(entry.productionCompany ? { productionCompany: entry.productionCompany } : {}),
+    ...(entry.director ? { director: entry.director } : {}),
+    ...(entry.platform ? { platform: entry.platform } : {}),
+    ...(entry.publicationYear ? { publicationYear: entry.publicationYear } : {}),
+    ...(entry.declaredDurationSeconds
+      ? { declaredDurationSeconds: entry.declaredDurationSeconds }
+      : {}),
+    businessRoles: [...entry.businessRoles],
+    ...(entry.operatorNotes ? { operatorNotes: entry.operatorNotes } : {}),
+  };
+
+  // `--force` means "re-do this reference from the manifest", so the declared
+  // metadata is refreshed too. Without it, an operator who corrected a
+  // reference's `businessRoles` and re-ran would get a fresh analysis attached
+  // to the stale roles, with nothing saying the edit had been ignored — and a
+  // role a retrieval plan queries would silently never match.
   const advertisement =
-    existing ??
-    (await createReferenceAdvertisement(db, workspaceId, {
-      referenceSourceId: source.id,
-      referenceKey: entry.referenceId,
-      title: entry.title,
-      brand: entry.brand,
-      ...(entry.campaign ? { campaign: entry.campaign } : {}),
-      ...(entry.agency ? { agency: entry.agency } : {}),
-      ...(entry.productionCompany ? { productionCompany: entry.productionCompany } : {}),
-      ...(entry.director ? { director: entry.director } : {}),
-      ...(entry.platform ? { platform: entry.platform } : {}),
-      ...(entry.publicationYear ? { publicationYear: entry.publicationYear } : {}),
-      ...(entry.declaredDurationSeconds
-        ? { declaredDurationSeconds: entry.declaredDurationSeconds }
-        : {}),
-      businessRoles: [...entry.businessRoles],
-      ...(entry.operatorNotes ? { operatorNotes: entry.operatorNotes } : {}),
-      mediaAcquired: entry.rightsClassification !== 'LINK_ONLY',
-    }));
+    existing && options.force
+      ? await updateReferenceDeclaredMetadata(db, workspaceId, existing.id, declared)
+      : (existing ??
+        (await createReferenceAdvertisement(db, workspaceId, {
+          ...declared,
+          referenceKey: entry.referenceId,
+          mediaAcquired: entry.rightsClassification !== 'LINK_ONLY',
+        })));
 
   if (entry.annotation) {
     const { authorId, ...rest } = entry.annotation;

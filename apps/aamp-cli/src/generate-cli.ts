@@ -4,7 +4,6 @@ import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, resolve } from 'node:path';
 
 import { aampCliEnvSchema, type AampCliEnv } from '@combat/config';
-import { createPrismaClient } from '@combat/database';
 import {
   CREATIVE_MEMORY_MODES,
   CreativeMemoryModeSchema,
@@ -31,19 +30,26 @@ import {
   type CreativeMemoryDependencies,
 } from './creative-memory/injection';
 import {
-  resolveEmbedder,
-  resolveQdrant,
-  resolveReranker,
-  type RetrievalCliEnv,
-} from './creative-memory/retrieval-commands';
-import {
   CampaignRequestValidationError,
   loadCampaignRequest,
   type CampaignRequest,
 } from './campaign-request';
 import { planCampaign } from './plan-campaign';
-import { resolveReasoningPolicy, type ReasoningPolicy } from './reasoning-policy';
-import { EXIT_CODES, runDirectoryFor, runSourceCampaign } from './run-source-campaign';
+import { parseExecutionModeFlag, type AampExecutionMode } from './production/aamp-execution-mode';
+import { buildRunProvenance } from './production/campaign-run-provenance';
+import {
+  AampDependencyError,
+  createAampDependencies,
+  type AampDependencies,
+  type AampDependencyFailure,
+} from './production/dependency-factory';
+import { writeRunProvenance } from './production/run-provenance';
+import {
+  EXIT_CODES,
+  runDirectoryFor,
+  runSourceCampaign,
+  type SourceCampaignResult,
+} from './run-source-campaign';
 import {
   describeExecutionMode,
   isFullyReal,
@@ -105,6 +111,21 @@ export interface GenerateCliOptions {
    * before this milestone.
    */
   readonly creativeMemory: CreativeMemoryMode;
+  /**
+   * The **required minimum** infrastructure tier.
+   *
+   * Absent means "require nothing" — the attained tier is still derived from
+   * the dependencies that were actually built and reported everywhere. Present,
+   * it can only cause a refusal: it never promotes a run's label, which is what
+   * stops a local demonstration being filed as a production result.
+   */
+  readonly executionMode?: AampExecutionMode;
+  /**
+   * Set internally when `--creative-memory optional` could not reach retrieval
+   * and the run continued without it. Recorded as the run's `fallbackReason`;
+   * it is never a way to substitute anything.
+   */
+  readonly creativeMemoryDegraded?: boolean;
 }
 
 export function parseGenerateCliArguments(argv: readonly string[]): GenerateCliOptions {
@@ -117,10 +138,22 @@ export function parseGenerateCliArguments(argv: readonly string[]): GenerateCliO
   let planOnly = false;
   let fixtureDemo = false;
   let creativeMemory: CreativeMemoryMode = 'off';
+  let executionMode: AampExecutionMode | undefined;
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     switch (arg) {
+      case '--execution-mode': {
+        const value = argv[++i];
+        const parsed = parseExecutionModeFlag(value);
+        if (!parsed) {
+          throw new Error(
+            `--execution-mode must be one of fixture|local-production|production (got "${value ?? ''}")`,
+          );
+        }
+        executionMode = parsed;
+        break;
+      }
       case '--creative-memory': {
         const value = argv[++i];
         const parsed = CreativeMemoryModeSchema.safeParse(value);
@@ -165,6 +198,9 @@ export function parseGenerateCliArguments(argv: readonly string[]): GenerateCliO
     throw new Error(
       [
         'Usage: aamp:generate --request <campaign-request.json> [--assets <production-assets.json>] [--output-dir <dir>]',
+        '  --execution-mode fixture|local-production|production',
+        '                   the minimum infrastructure tier this run must reach (default: require nothing,',
+        '                   report whatever was attained). Never promotes a label; only refuses.',
         '  --creative-memory required|optional|off',
         '                   whether approved benchmark intelligence may influence this campaign (default: off)',
         '  --fixture-demo   replay committed fixture creative instead of calling a real reasoning model',
@@ -185,6 +221,7 @@ export function parseGenerateCliArguments(argv: readonly string[]): GenerateCliO
     planOnly,
     fixtureDemo,
     creativeMemory,
+    ...(executionMode ? { executionMode } : {}),
   };
 }
 
@@ -569,113 +606,16 @@ async function runLegacyManifestCli(
   return 0;
 }
 
-interface ResolvedCreativeMemory {
-  readonly injector?: CreativeMemoryInjector;
-  readonly dispose: () => Promise<void>;
-  /** Why no injector could be built. Fatal under `required`, a warning under `optional`. */
-  readonly problem?: string;
-}
-
-/**
- * Builds the Creative Memory injector, or explains why it cannot.
- *
- * The composition root is the only place a real `PrismaClient` and a real
- * `QdrantClient` are constructed for this command, and `--creative-memory off`
- * constructs neither — a source-only run must not acquire a database
- * dependency it does not use. Tests inject their collaborators through
- * `context.creativeMemoryDependencies`; no environment variable can select a
- * fake, which is the same discipline `@combat/auth/testing` follows.
- */
-async function resolveCreativeMemory(
-  mode: CreativeMemoryMode,
-  env: AampCliEnv,
-  context: GenerateCliContext,
-  request: CampaignRequest,
-  now: Date,
-  onProgress: (message: string) => void,
-): Promise<ResolvedCreativeMemory> {
-  const noop = async (): Promise<void> => undefined;
-  if (mode === 'off') return { dispose: noop };
-
-  const build = (
-    dependencies: CreativeMemoryDependencies,
-    dispose: () => Promise<void>,
-  ): ResolvedCreativeMemory => ({
-    injector: new CreativeMemoryInjector({
-      mode,
-      dependencies,
-      workspaceId: request.workspaceId,
-      campaignId: request.campaignId,
-      platform: request.platform,
-      now,
-      onProgress,
-    }),
-    dispose,
-  });
-
-  if (context.creativeMemoryDependencies) {
-    return build(context.creativeMemoryDependencies, noop);
-  }
-
-  if (!env.DATABASE_URL) {
-    return {
-      dispose: noop,
-      problem:
-        'DATABASE_URL is not set, so the reference library, its approved annotations and its benchmark governance profiles cannot be read.',
-    };
-  }
-
-  // The retrieval commands take the raw environment shape; this command's
-  // schema has already coerced the numeric fields, so they are put back as
-  // strings here rather than duplicating the resolver for one type difference.
-  const retrievalEnv: RetrievalCliEnv = {
-    CREATIVE_MEMORY_EMBEDDING_PROFILE: env.CREATIVE_MEMORY_EMBEDDING_PROFILE,
-    ...(env.CREATIVE_MEMORY_EMBEDDING_ENDPOINT
-      ? { CREATIVE_MEMORY_EMBEDDING_ENDPOINT: env.CREATIVE_MEMORY_EMBEDDING_ENDPOINT }
-      : {}),
-    ...(env.CREATIVE_MEMORY_RERANKER_ENDPOINT
-      ? { CREATIVE_MEMORY_RERANKER_ENDPOINT: env.CREATIVE_MEMORY_RERANKER_ENDPOINT }
-      : {}),
-    ...(env.CREATIVE_MEMORY_EMBEDDING_API_KEY
-      ? { CREATIVE_MEMORY_EMBEDDING_API_KEY: env.CREATIVE_MEMORY_EMBEDDING_API_KEY }
-      : {}),
-    CREATIVE_MEMORY_TIMEOUT_MS: String(env.CREATIVE_MEMORY_TIMEOUT_MS),
-    QDRANT_URL: env.QDRANT_URL,
-    ...(env.QDRANT_API_KEY ? { QDRANT_API_KEY: env.QDRANT_API_KEY } : {}),
-  };
-
-  let embedder;
-  try {
-    embedder = resolveEmbedder(retrievalEnv);
-  } catch (error) {
-    return { dispose: noop, problem: error instanceof Error ? error.message : String(error) };
-  }
-
-  const qdrant = resolveQdrant(retrievalEnv);
-  if (!(await qdrant.isHealthy())) {
-    return {
-      dispose: noop,
-      problem: `Qdrant is not reachable at ${env.QDRANT_URL}. Start it with: docker compose -f infrastructure/docker-compose.yml up -d qdrant`,
-    };
-  }
-
-  const prisma = createPrismaClient();
-  return build(
-    {
-      db: prisma as unknown as CreativeMemoryDependencies['db'],
-      qdrant,
-      embedder,
-      reranker: resolveReranker(retrievalEnv),
-    },
-    async () => {
-      await prisma.$disconnect();
-    },
-  );
-}
-
 /**
  * The canonical flow: a campaign request, real reasoning, real owned assets, a
  * deterministic render, and a run directory that records every decision.
+ *
+ * Every collaborator now comes from `createAampDependencies` — the one AAMP
+ * composition root. This function no longer constructs a PrismaClient, a Qdrant
+ * client, an embedder or a reasoning provider of its own; it decides *what the
+ * run needs*, asks for it, and is refused with a typed error when it cannot be
+ * had. That is what makes `--execution-mode production` enforceable rather than
+ * advisory.
  */
 async function runCampaignRequestCli(
   options: GenerateCliOptions,
@@ -685,16 +625,7 @@ async function runCampaignRequestCli(
   const requestPath = isAbsolute(options.requestPath!)
     ? options.requestPath!
     : resolve(repositoryRoot, options.requestPath!);
-
-  let env: AampCliEnv;
-  try {
-    env = aampCliEnvSchema.parse(context.env);
-  } catch (error) {
-    context.stderr(
-      `Configuration is invalid:\n${error instanceof Error ? error.message : String(error)}\n`,
-    );
-    return EXIT_CODES.INVALID_CAMPAIGN_REQUEST;
-  }
+  const startedAt = context.now ? context.now() : new Date();
 
   let request: CampaignRequest;
   try {
@@ -721,30 +652,6 @@ async function runCampaignRequestCli(
     };
   }
 
-  // --- reasoning policy: the refusal that makes this milestone mean anything
-  let policy: ReasoningPolicy;
-  try {
-    policy = resolveReasoningPolicy({
-      runMode: options.fixtureDemo ? 'FIXTURE_DEMO' : 'REAL',
-      reasoningProvider: env.REASONING_PROVIDER,
-      reasoningModel: env.REASONING_MODEL,
-      ...(env.ANTHROPIC_API_KEY ? { anthropicApiKey: env.ANTHROPIC_API_KEY } : {}),
-    });
-  } catch (error) {
-    context.stderr(`${error instanceof Error ? error.message : String(error)}\n`);
-    return EXIT_CODES.REAL_REASONING_UNAVAILABLE;
-  }
-
-  context.stderr(
-    policy.runMode === 'REAL'
-      ? `run mode: REAL — reasoning via ${policy.providerName} (${policy.reasoningModel}); prompt sha256 ${request.promptSha256.slice(0, 16)}…\n`
-      : `WARNING: run mode: FIXTURE_DEMO — creative is replayed from committed fixtures and ignores this campaign prompt. Not a campaign result.\n`,
-  );
-
-  const reasoningProvider = policy.useFixtureReasoning
-    ? createFixtureReasoningProvider(12)
-    : await createClaudeReasoningProvider(env.ANTHROPIC_API_KEY!);
-
   const workflowRunId = context.workflowRunId ?? `aamp-cli-${randomUUID()}`;
   const outputRoot = options.outputDirectory
     ? resolve(repositoryRoot, options.outputDirectory)
@@ -755,51 +662,152 @@ async function runCampaignRequestCli(
     if (!options.json) context.stderr(`  ${message}\n`);
   };
 
-  // --- Creative Memory: resolved before any agent runs ----------------------
-  const creativeMemory = await resolveCreativeMemory(
-    options.creativeMemory,
-    env,
-    context,
-    request,
-    now,
-    progress,
-  );
-  if (creativeMemory.problem) {
-    // `required` stops here, with its own exit code, having produced nothing.
-    // `optional` says so loudly and continues — but it never substitutes
-    // fixture creative or generic benchmark text for the missing context.
-    if (options.creativeMemory === 'required') {
-      context.stderr(
-        `Creative Memory is required for this run but is unavailable:\n  ${creativeMemory.problem}\nRefusing to continue. This command will not plan a campaign without the governed benchmark context it was told to use.\n`,
-      );
-      return EXIT_CODES.CREATIVE_MEMORY_UNAVAILABLE;
+  // --- the composition root -------------------------------------------------
+  let dependencies: AampDependencies;
+  try {
+    dependencies = await createAampDependencies({
+      env: context.env,
+      creativeMemoryMode: options.creativeMemory,
+      runMode: options.fixtureDemo ? 'FIXTURE_DEMO' : 'REAL',
+      repositoryRoot,
+      requiresRendering: !options.planOnly,
+      generation: request.generation.source === 'COMFYUI' ? 'COMFYUI' : 'NONE',
+      comfyuiProfile: request.generation.comfyuiProfile,
+      ...(options.executionMode ? { requestedExecutionMode: options.executionMode } : {}),
+      fixtures: {
+        // Supplied by the caller, not imported by the factory, so a production
+        // run refuses them structurally rather than by remembering to check.
+        reasoning: () => createFixtureReasoningProvider(12),
+        videoGeneration: () =>
+          new FixtureVideoGenerationProvider({
+            runner: context.runner ?? new NodeCommandRunner(),
+            binaries: resolveFfmpegBinaries(context.env),
+            outputDirectory: resolve(repositoryRoot, '.aamp-output/generated'),
+          }),
+      },
+      overrides: {
+        ...(context.creativeMemoryDependencies
+          ? { creativeMemoryDependencies: context.creativeMemoryDependencies }
+          : {}),
+        ...(context.runner ? { runner: context.runner } : {}),
+        ...(context.providerOverride ? { videoGenerationProvider: context.providerOverride } : {}),
+      },
+      onProgress: progress,
+    });
+  } catch (error) {
+    if (error instanceof AampDependencyError) {
+      context.stderr(`${error.message}\n`);
+      const retrievalFailure =
+        error.kind === 'VECTOR_STORE_UNAVAILABLE' ||
+        error.kind === 'DATABASE_UNAVAILABLE' ||
+        error.kind === 'EMBEDDING_PROVIDER_UNAVAILABLE';
+
+      if (options.creativeMemory === 'required' && retrievalFailure) {
+        context.stderr(
+          'Refusing to continue. This command will not plan a campaign without the governed benchmark context it was told to use.\n',
+        );
+        return EXIT_CODES.CREATIVE_MEMORY_UNAVAILABLE;
+      }
+      // `optional` Creative Memory is the one dependency failure that is
+      // allowed to degrade — and only when the *absence of retrieval* is what
+      // failed, never when the composition itself did.
+      if (options.creativeMemory === 'optional' && retrievalFailure) {
+        context.stderr(
+          'WARNING: Creative Memory is unavailable and the mode is "optional"; planning will proceed without benchmark context. No fixture creative or generic benchmark text is substituted.\n',
+        );
+        return runCampaignRequestCli(
+          { ...options, creativeMemory: 'off', creativeMemoryDegraded: true },
+          context,
+        );
+      }
+      return DEPENDENCY_EXIT_CODES[error.kind];
     }
-    context.stderr(
-      `WARNING: Creative Memory is unavailable and the mode is "optional"; planning will proceed without benchmark context.\n  ${creativeMemory.problem}\n`,
-    );
+    context.stderr(`${error instanceof Error ? error.message : String(error)}\n`);
+    return EXIT_CODES.DEPENDENCY_UNAVAILABLE;
   }
+
+  const { label, reasoningPolicy: policy } = dependencies;
+  context.stderr(
+    `${label.isRealCampaignRun ? '' : 'WARNING: '}execution mode ${dependencies.executionMode}: ${label.caveat}\n`,
+  );
+  context.stderr(
+    policy.runMode === 'REAL'
+      ? `run mode: REAL — reasoning via ${policy.providerName} (${policy.reasoningModel}); prompt sha256 ${request.promptSha256.slice(0, 16)}…\n`
+      : `WARNING: run mode: FIXTURE_DEMO — creative is replayed from committed fixtures and ignores this campaign prompt. Not a campaign result.\n`,
+  );
   context.stderr(`creative memory: ${options.creativeMemory}\n`);
+
+  // Guarded on the mode as well as on the dependency: `off` must perform no
+  // retrieval, not a retrieval that happens to return nothing.
+  const injector =
+    options.creativeMemory !== 'off' && dependencies.creativeMemory
+      ? new CreativeMemoryInjector({
+          mode: options.creativeMemory,
+          dependencies: dependencies.creativeMemory,
+          workspaceId: request.workspaceId,
+          campaignId: request.campaignId,
+          platform: request.platform,
+          now,
+          onProgress: progress,
+        })
+      : undefined;
+
+  const writeProvenance = async (
+    result: SourceCampaignResult | undefined,
+    failureReason: string | null,
+  ): Promise<string | undefined> => {
+    try {
+      return await writeRunProvenance(
+        runDirectory,
+        buildRunProvenance({
+          request,
+          dependencies,
+          creativeMemoryMode: options.creativeMemory,
+          audits: injector?.audits ?? [],
+          workflowRunId,
+          startedAt,
+          completedAt: context.now ? context.now() : new Date(),
+          ...(result ? { result } : {}),
+          failureReason,
+          fallbackReason: options.creativeMemoryDegraded
+            ? 'Creative Memory was optional and unavailable; the run proceeded with no benchmark context.'
+            : null,
+        }),
+      );
+    } catch (error) {
+      context.stderr(
+        `WARNING: could not write run provenance: ${error instanceof Error ? error.message : String(error)}\n`,
+      );
+      return undefined;
+    }
+  };
 
   try {
     if (options.planOnly) {
       try {
         const plan = await planCampaign({
           request,
-          reasoningProvider,
+          reasoningProvider: dependencies.reasoningProvider,
           workflowRunId,
-          ...(creativeMemory.injector ? { injector: creativeMemory.injector } : {}),
+          ...(injector ? { injector } : {}),
           onProgress: progress,
         });
+        const provenancePath = await writeProvenance(undefined, null);
         context.stdout(
           `${JSON.stringify(
             {
+              executionMode: dependencies.executionMode,
+              isRealCampaignRun: label.isRealCampaignRun,
+              caveat: label.caveat,
               runMode: policy.runMode,
               creativeMemoryMode: options.creativeMemory,
               promptSha256: request.promptSha256,
               agentVersions: plan.agentVersions,
               shots: plan.shots,
               captionLines: plan.captionLines,
-              creativeMemoryRetrievals: creativeMemory.injector?.audits ?? [],
+              creativeMemoryRetrievals: injector?.audits ?? [],
+              providers: dependencies.providers,
+              provenancePath: provenancePath ?? null,
             },
             null,
             2,
@@ -807,7 +815,9 @@ async function runCampaignRequestCli(
         );
         return EXIT_CODES.SUCCESS;
       } catch (error) {
-        context.stderr(`${error instanceof Error ? error.message : String(error)}\n`);
+        const detail = error instanceof Error ? error.message : String(error);
+        context.stderr(`${detail}\n`);
+        await writeProvenance(undefined, detail);
         return error instanceof CreativeMemoryInjectionError
           ? EXIT_CODES.CREATIVE_MEMORY_UNAVAILABLE
           : EXIT_CODES.PLANNING_FAILURE;
@@ -816,37 +826,77 @@ async function runCampaignRequestCli(
 
     const result = await runSourceCampaign({
       request,
-      reasoningProvider,
+      reasoningProvider: dependencies.reasoningProvider,
       reasoningPolicy: policy,
       runDirectory,
       repositoryRoot,
-      binaries: resolveFfmpegBinaries(context.env),
+      binaries: dependencies.binaries,
       workflowRunId,
       now,
       creativeMemoryMode: options.creativeMemory,
-      ...(creativeMemory.injector ? { injector: creativeMemory.injector } : {}),
-      ...(context.runner ? { runner: context.runner } : {}),
+      ...(injector ? { injector } : {}),
+      runner: dependencies.runner,
       onProgress: progress,
     });
-    return reportCampaignResult(result, request, policy, options, context);
+    const provenancePath = await writeProvenance(result, result.failure ?? null);
+    return reportCampaignResult(result, request, dependencies, options, context, provenancePath);
   } finally {
-    await creativeMemory.dispose();
+    await dependencies.close();
   }
 }
 
+/**
+ * Each construction failure gets the exit code that names the *response*, not
+ * merely the fact that something went wrong: an operator who sees 9 approves a
+ * profile, one who sees 11 changes a flag, and one who sees 12 starts a
+ * service.
+ */
+const DEPENDENCY_EXIT_CODES: Readonly<Record<AampDependencyFailure, number>> = {
+  INVALID_CONFIGURATION: EXIT_CODES.INVALID_CAMPAIGN_REQUEST,
+  DATABASE_UNAVAILABLE: EXIT_CODES.CREATIVE_MEMORY_UNAVAILABLE,
+  VECTOR_STORE_UNAVAILABLE: EXIT_CODES.CREATIVE_MEMORY_UNAVAILABLE,
+  EMBEDDING_PROVIDER_UNAVAILABLE: EXIT_CODES.CREATIVE_MEMORY_UNAVAILABLE,
+  REASONING_UNAVAILABLE: EXIT_CODES.REAL_REASONING_UNAVAILABLE,
+  RENDERER_UNAVAILABLE: EXIT_CODES.DEPENDENCY_UNAVAILABLE,
+  GENERATION_UNAVAILABLE: EXIT_CODES.REAL_REASONING_UNAVAILABLE,
+  FIXTURE_PROVIDER_PROHIBITED: EXIT_CODES.EXECUTION_MODE_NOT_ATTAINED,
+  IN_MEMORY_PERSISTENCE_PROHIBITED: EXIT_CODES.EXECUTION_MODE_NOT_ATTAINED,
+  EXECUTION_MODE_NOT_ATTAINED: EXIT_CODES.EXECUTION_MODE_NOT_ATTAINED,
+};
+
 /** Formats the run's outcome. Split out so the run body stays one readable flow. */
 function reportCampaignResult(
-  result: Awaited<ReturnType<typeof runSourceCampaign>>,
+  result: SourceCampaignResult,
   request: CampaignRequest,
-  policy: ReasoningPolicy,
+  dependencies: AampDependencies,
   options: GenerateCliOptions,
   context: GenerateCliContext,
+  provenancePath: string | undefined,
 ): number {
+  const { label, reasoningPolicy: policy } = dependencies;
   if (options.json) {
-    context.stdout(`${JSON.stringify(result, null, 2)}\n`);
+    context.stdout(
+      `${JSON.stringify(
+        {
+          ...result,
+          executionMode: dependencies.executionMode,
+          requestedExecutionMode: dependencies.requestedExecutionMode ?? null,
+          isRealCampaignRun: label.isRealCampaignRun,
+          demonstrationOnly: label.demonstrationOnly,
+          partiallySimulated: label.partiallySimulated,
+          caveat: label.caveat,
+          providers: dependencies.providers,
+          provenancePath: provenancePath ?? null,
+        },
+        null,
+        2,
+      )}\n`,
+    );
   } else if (result.exitCode === EXIT_CODES.SUCCESS || result.exitCode === EXIT_CODES.QA_FAILURE) {
     context.stdout(
       `${[
+        `execution mode:    ${dependencies.executionMode}`,
+        `real campaign run: ${label.isRealCampaignRun ? 'yes' : 'NO'}`,
         `run mode:          ${policy.runMode}`,
         `campaign ID:       ${request.campaignId}`,
         `prompt sha256:     ${request.promptSha256}`,
@@ -865,6 +915,8 @@ function reportCampaignResult(
         `originality risk:  ${result.originality?.riskLevel ?? 'not evaluated'}${
           result.originality?.requiresHumanReview ? ' — requires human review' : ''
         }`,
+        `output sha256:     ${result.outputChecksumSha256 ?? 'none'}`,
+        `provenance:        ${provenancePath ?? 'not written'}`,
         `status:            ${result.exitCode === EXIT_CODES.SUCCESS ? 'RENDERED — REQUIRES HUMAN APPROVAL' : 'REJECTED BY QA'}`,
       ].join('\n')}\n`,
     );
@@ -876,6 +928,12 @@ function reportCampaignResult(
     );
   }
   if (result.failure) context.stderr(`\n${result.failure}\n`);
+  // Repeated after the result, not only before it: a PASS verdict beside a
+  // 1080x1920 path reads as a finished advertisement, and outside PRODUCTION it
+  // is not one.
+  if (!label.isRealCampaignRun && result.exitCode === EXIT_CODES.SUCCESS) {
+    context.stderr(`\nWARNING: ${label.caveat}\n`);
+  }
   if (policy.runMode !== 'REAL' && result.exitCode === EXIT_CODES.SUCCESS) {
     context.stderr(
       '\nWARNING: FIXTURE_DEMO run — the creative ignores this campaign prompt. Do not present this as a campaign result.\n',

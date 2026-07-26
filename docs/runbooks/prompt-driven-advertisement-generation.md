@@ -56,6 +56,10 @@ survive PowerShell quoting.
 | 6    | planning failure (an agent failed, or the timeline could not be built)                               |
 | 7    | rendering failure                                                                                    |
 | 8    | QA failure — a file was produced but it is **not** READY                                             |
+| 9    | Creative Memory required but unavailable (no approved profile, retrieval down, nothing eligible)     |
+| 10   | HIGH originality risk — blocked before any source was selected                                       |
+| 11   | `--execution-mode` named a tier the actual dependencies could not reach                              |
+| 12   | a dependency could not be constructed at all (e.g. no usable FFmpeg under a demanded tier)           |
 
 ## 3. Example campaign request
 
@@ -207,9 +211,113 @@ No prompt in this repository names or imitates an advertising agency. Creative
 intent is expressed as explicit properties — pacing, contrast, framing,
 typography, rhythm — and every planning agent is instructed accordingly.
 
-## 10. Current limitations
+## 10. Infrastructure execution modes and `--execution-mode`
+
+§4's `REAL`/`FIXTURE_DEMO` answers "was the _creative_ real". This answers "was
+the _infrastructure_ real". The two are orthogonal and both are reported.
+
+| Mode               | Requires                                                                                        | Label on the output                                         |
+| ------------------ | ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| `FIXTURE`          | nothing                                                                                         | `DEMONSTRATION ONLY`, `isRealCampaignRun: false`            |
+| `LOCAL_PRODUCTION` | live PostgreSQL, live Qdrant (when Creative Memory is on), real FFmpeg and actual-media QA      | `PARTIALLY SIMULATED`, naming which halves were substituted |
+| `PRODUCTION`       | all of the above **plus** a real reasoning model, real generation where the request asks for it | `isRealCampaignRun: true`                                   |
+
+Two rules make the label worth reading:
+
+- **The mode is derived from the dependencies that were actually built.**
+  `resolveAttainedExecutionMode` never sees what the operator typed, so no flag
+  can promote a run's label.
+- **`--execution-mode` is a floor, not a claim.** It can only cause a refusal.
+  `--execution-mode production` with `--fixture-demo` exits 11 having planned,
+  generated and rendered nothing. Omitting the flag requires nothing and still
+  reports the attained tier.
+
+`PRODUCTION` additionally refuses an in-memory store, fixture generation and any
+injected test collaborator — a run a test could have substituted into is not a
+production run.
+
+## 11. Preflight: `pnpm aamp:doctor`
+
+Read-only. No generation call, no spend, no database write, no render, and the
+reasoning provider is never contacted.
+
+```powershell
+pnpm aamp:doctor `
+  --execution-mode local-production `
+  --creative-memory required `
+  --workspace 6f1d5f6c-6d3a-4a2e-9c5f-0f2a1b3c4d5e `
+  --benchmark-profile combat-reviews-benchmark `
+  --assets apps/aamp-cli/examples/combat-reviews-production-assets.json
+```
+
+Checks configuration, PostgreSQL, Prisma migration status against the migration
+directories on disk, Qdrant, the expected collection name, vector dimensions,
+an approved active benchmark profile per planning role, eligible approved
+references, reasoning configuration, FFmpeg and ffprobe, ComfyUI, production
+asset rights, storage and output-directory writability. Each check is marked
+required or advisory **for the mode being asked about** — Qdrant blocks under
+`--creative-memory required` and is irrelevant under `off`.
+
+Exit codes: `0` READY, `1` DEGRADED, `2` BLOCKED, `3` invalid arguments.
+DEGRADED is non-zero on purpose: it means a run will work while substituting
+something, and a pipeline that treats that as success is how a demonstration
+gets published. `--json` emits the whole report.
+
+## 12. First live local run, end to end
+
+```powershell
+docker compose -f infrastructure/docker-compose.yml up -d postgres qdrant
+$env:FFMPEG_PATH  = "<...>\bin\ffmpeg.exe"      # only if not on PATH
+$env:FFPROBE_PATH = "<...>\bin\ffprobe.exe"
+$ws = "6f1d5f6c-6d3a-4a2e-9c5f-0f2a1b3c4d5e"
+
+pnpm aamp:fixtures                              # synthetic production media
+pnpm aamp:reference workspace-ensure --workspace $ws --name "Combat Reviews"
+node apps/aamp-cli/dist/creative-memory/generate-reference-fixtures.js
+pnpm aamp:reference ingest --manifest apps/aamp-cli/examples/reference-library.manifest.json
+# approve each annotation id reported by `inspect`, then:
+pnpm aamp:reference benchmark-seed --workspace $ws --reviewer <you> --activated-by <you> --name combat-reviews-benchmark
+pnpm aamp:reference index --workspace $ws
+
+pnpm aamp:doctor --execution-mode local-production --creative-memory required --workspace $ws
+pnpm aamp:generate `
+  --request apps/aamp-cli/examples/combat-reviews-weekend.request.json `
+  --execution-mode local-production --creative-memory required --fixture-demo
+```
+
+`workspace-ensure` is idempotent and is the first step of any live setup: every
+other row carries a `workspaceId` with a foreign key onto `workspaces`.
+
+## 13. Run provenance
+
+Every run writes `aamp-run-provenance.json` into its run directory: workspace,
+campaign, an immutable request hash (machine-independent — local paths are
+excluded), prompt hash, requested and attained mode, the dependency evidence,
+every provider's identity/version/capability/simulated flag, Creative Memory
+mode, per-role retrieval evidence, agent prompt versions, the **measured**
+output checksum, QA verdict, originality decision, cost basis, failure and
+fallback reasons, correlation and idempotency identifiers, and
+`requiresHumanApproval: true`. It is canonically serialised and carries its own
+sha256, so an edit is detectable.
+
+It deliberately carries no credential, signed URL, reference media byte,
+transcript, copied advertising copy, agency name or unnecessary local path.
+`assertRunProvenanceSafe` walks it against forbidden keys _and_
+credential-shaped values, and refuses to write rather than emit a leak.
+
+No new Prisma model was added for it: every campaign-lifecycle table is keyed to
+a `Campaign` row only the workflow path creates, and those rows drive the three
+human gates. The record references the PostgreSQL rows that are already
+canonical rather than copying them.
+
+## 14. Current limitations
 
 - Fixture-demo creative ignores the campaign prompt entirely (§4).
+- `PRODUCTION` mode has never executed here — no `ANTHROPIC_API_KEY` is
+  configured. What is proven is that it refuses correctly.
+- Cost is recorded as `NOT_METERED_BY_CLI` with zeros. The CLI reserves no
+  budget and writes no ledger row, and token usage is not plumbed back through
+  `planCampaign`.
 - The acceptance fixture runs in `FIXTURE_DEMO`, so it proves the pipeline, not
   prompt-specificity of copy; the propagation tests cover that separately.
 - Sources are trimmed from their start (`inSeconds: 0`); there is no shot-level
