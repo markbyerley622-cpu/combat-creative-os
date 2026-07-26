@@ -1,3 +1,4 @@
+import { DEFAULT_FFMPEG_BINARIES, type FfmpegBinaries } from './binaries';
 import type { CommandRunner } from './command-runner';
 import { probeMedia } from './ffprobe';
 import { inspectMedia, type InspectMediaInput } from './inspect';
@@ -50,16 +51,19 @@ export interface MediaProvider {
   generateProxy(request: ProxyRequest): Promise<ProxyResult>;
 }
 
-export function createFfmpegMediaProvider(runner: CommandRunner): MediaProvider {
+export function createFfmpegMediaProvider(
+  runner: CommandRunner,
+  binaries: FfmpegBinaries = DEFAULT_FFMPEG_BINARIES,
+): MediaProvider {
   return {
     name: 'ffmpeg',
 
-    probe: (input) => inspectMedia(runner, input),
+    probe: (input) => inspectMedia(runner, input, { ffprobePath: binaries.ffprobe }),
 
     async generateThumbnail(request: ThumbnailRequest): Promise<ThumbnailResult> {
       const timestampSeconds = request.timestampSeconds ?? 1;
       const width = request.widthPx ?? 640;
-      const result = await runner.run('ffmpeg', [
+      const result = await runner.run(binaries.ffmpeg, [
         '-y',
         '-ss',
         String(timestampSeconds),
@@ -74,7 +78,9 @@ export function createFfmpegMediaProvider(runner: CommandRunner): MediaProvider 
       if (result.exitCode !== 0) {
         throw new CorruptMediaError(result.stderr.trim() || 'ffmpeg thumbnail generation failed');
       }
-      const probe = await probeMedia(runner, request.outputPath);
+      const probe = await probeMedia(runner, request.outputPath, {
+        ffprobePath: binaries.ffprobe,
+      });
       if (probe.mediaType !== 'IMAGE') {
         throw new CorruptMediaError('ffmpeg thumbnail output was not a still image');
       }
@@ -83,7 +89,7 @@ export function createFfmpegMediaProvider(runner: CommandRunner): MediaProvider 
 
     async generateProxy(request: ProxyRequest): Promise<ProxyResult> {
       const width = PROXY_PROFILE_WIDTHS[request.profile];
-      const result = await runner.run('ffmpeg', [
+      const result = await runner.run(binaries.ffmpeg, [
         '-y',
         '-i',
         request.sourcePath,
@@ -100,7 +106,9 @@ export function createFfmpegMediaProvider(runner: CommandRunner): MediaProvider 
       if (result.exitCode !== 0) {
         throw new CorruptMediaError(result.stderr.trim() || 'ffmpeg proxy generation failed');
       }
-      const probe = await probeMedia(runner, request.outputPath);
+      const probe = await probeMedia(runner, request.outputPath, {
+        ffprobePath: binaries.ffprobe,
+      });
       if (probe.mediaType !== 'VIDEO') {
         throw new CorruptMediaError('ffmpeg proxy output was not a video');
       }

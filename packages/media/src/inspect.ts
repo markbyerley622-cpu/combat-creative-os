@@ -1,5 +1,5 @@
 import type { CommandRunner } from './command-runner';
-import { probeMedia } from './ffprobe';
+import { probeMedia, type ProbeOptions } from './ffprobe';
 import {
   MediaTooLargeError,
   MediaTypeMismatchError,
@@ -35,12 +35,13 @@ export interface InspectMediaInput {
 export async function inspectMedia(
   runner: CommandRunner,
   input: InspectMediaInput,
+  options: ProbeOptions = {},
 ): Promise<MediaProbeResult> {
   if (input.actualSizeBytes > input.maxBytes) {
     throw new MediaTooLargeError(input.actualSizeBytes, input.maxBytes);
   }
 
-  const result = await probeMedia(runner, input.filePath);
+  const result = await probeMedia(runner, input.filePath, options);
 
   if (result.mediaType !== input.declaredMediaType) {
     throw new MediaTypeMismatchError(input.declaredMediaType, result.mediaType);

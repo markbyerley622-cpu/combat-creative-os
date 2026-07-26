@@ -2071,6 +2071,115 @@ Final QA still performs no licensing check (§7.2 item 1).
 
 ---
 
+### AAMP real-media vertical slice 1 — real FFmpeg advertisement rendering (2026-07-26)
+
+The first milestone that produces bytes. It implements the AAMP-4 (§9 of
+`docs/aamp-architecture.md`) composition and actual-media-QA path far enough to
+produce **one playable, downloadable 1080×1920 MP4 from a single manifest**, and
+deliberately stops there: no ComfyUI, no Creative Memory, no publishing, no
+analytics.
+
+**What changed.**
+
+- **`packages/media` gained a render surface.** `render/manifest.ts` is a
+  versioned, `.strict()` Zod contract — sources with licensing metadata, ordered
+  scenes with trim/framing/motion/transitions, overlays, caption cues, branding,
+  CTA, audio tracks with a loudness target, and the exact expected output
+  specification. Cross-field rules reject a dangling `sourceId`, a still with a
+  trim range, a CTA past the end of the cut, and — the important one — a
+  timeline whose scene durations minus transition overlaps do not land exactly
+  on the requested duration. `render/source-resolution.ts` is the licensing
+  gate: only `OWNED` and `LICENSED_FOR_OUTPUT` resolve, expiry is checked
+  against a caller-supplied instant, and an `ANALYSIS_ONLY` reference is refused
+  with a typed error **before the filesystem is touched or ffprobe is invoked**.
+  `render/filter-graph.ts` is a pure function from manifest plus resolved
+  sources to the complete argv. `render/renderer.ts` executes it in a
+  job-scoped temporary directory and places the result according to what QA
+  measured.
+- **`CommandRunner` became production-shaped.** `spawn` rather than `execFile`,
+  so a render has a hard timeout, is cancellable mid-encode from an
+  `AbortSignal`, and keeps a bounded stderr _tail_ instead of buffering an
+  unbounded progress log. Binary locations are configurable
+  (`FFMPEG_PATH`/`FFPROBE_PATH`, read via `resolveFfmpegBinaries(env)` — the
+  environment is an argument, never a `process.env` read in library code).
+- **Motion, not a slideshow.** `zoompan` push-ins/push-outs/pans driven by the
+  output frame index (so a move lands where it was aimed rather than drifting);
+  a layered parallax treatment for app screenshots — a blurred, darkened
+  backplate zooming under a bezelled foreground drifting at a different rate;
+  `xfade` transitions mapped per kind (`circleopen` for a masked UI reveal,
+  `smoothleft` for a whip pan, `fadewhite` for an impact cut); animated
+  typography via ASS `\fad`, `\move` and `\t` scale transforms.
+- **Two structural safety rules in the graph.** No operator- or agent-authored
+  string ever becomes filter grammar: captions, overlay copy and CTA text all
+  travel in one ASS file, so only numbers and validated enum values are
+  interpolated. And FFmpeg runs with its working directory set to the job
+  directory, referencing that file by bare filename — a Windows `C:\…` path
+  inside a filter argument collides with the `:` option separator and has no
+  portable escaping.
+- **`ActualMediaQaService`, measured not asserted.** Container, codecs,
+  dimensions, display aspect ratio, frame rate, duration and pixel format come
+  from ffprobe on the produced file; blank-frame, CTA-presence, CTA-copy and
+  caption checks come from arithmetic over RGB frames extracted from it. The
+  caption checks measure an **outlined-type signature** — a near-white pixel
+  with a near-black one within three pixels — at native resolution rather than a
+  bright-pixel count, because bright footage defeats the latter (it did, on the
+  first fixture render, and that is why the check is what it is). A report with
+  any failed binding check sends the file to `rejected/` with
+  `ingestionStatus: FAILED`; the deliverable path is reachable only through a
+  passing report.
+- **`FfmpegMotionGraphicsProvider`** implements the existing
+  `MotionGraphicsProvider` interface unchanged. The provider-neutral
+  `MotionGraphicsTimeline` has no vocabulary for captions, licensing, audio or a
+  CTA, so the `RenderManifest` travels in the interface's existing
+  `dataBindings` slot. `submitRender` starts the encode and returns, as a hosted
+  render API would; a QA failure reaches `FAILED`, never `SUCCEEDED`, and
+  `fetchRenderOutput` refuses to describe a file that failed a binding check.
+- **New dependency edge: `providers` → `media`.** The renderer lives in
+  `packages/media`; the adapter that presents it as a `MotionGraphicsProvider`
+  lives in `packages/providers`. This is the direction §9's "existing components
+  reused / new components" list implies, and it keeps `packages/media`
+  vendor-neutral and free of any provider interface. `packages/media` still
+  depends on nothing else in the workspace (it gained only `zod`), and
+  `packages/domain` and `packages/media` continue not to depend on each other —
+  `RenderManifest`'s output block is kept _structurally_ compatible with
+  `DeliveryProfile`/`VERTICAL_SHORT_FORM_V1`, the same arrangement
+  `MediaMetadataSchema` already uses in the other direction.
+- **Usable surface.** `pnpm aamp:render --manifest <path>` validates, resolves,
+  renders, measures and prints exactly six facts. `pnpm aamp:fixtures`
+  regenerates the synthetic media the checked-in fixture manifest refers to,
+  entirely from FFmpeg `lavfi` sources — no downloaded footage and no
+  copyrighted material enters the repository. `.aamp-output/` and
+  `packages/media/fixtures/generated/` are git-ignored; generated video is never
+  committed.
+
+**Proven by measurement.** The 15-second fixture renders to 1080×1920, 9:16,
+30 fps, H.264 High + AAC in MP4, yuv420p, faststart, at exactly 15.000 s, with
+all 20 binding QA checks passing. Two independent encodes of the same manifest
+into different output roots produce byte-identical files, so the content-address
+reuse is sound rather than assumed. Representative frames were inspected by eye
+at the opening, the middle and the CTA.
+
+**Deliberately not done.** No ComfyUI or any real video-generation adapter; no
+Creative Memory; no publishing or analytics. No Temporal Activity or `apps/api`
+route calls the renderer yet — the CLI is the entry point this milestone
+delivers, and wiring the compositing Activity to the new provider is the natural
+next composition step. The asset and provenance records are produced as
+structured JSON beside the master rather than written to Postgres, because no
+application process is pointed at a live database (unchanged from AAMP-1 step 2)
+and database work was out of scope here. Loudness is normalised in a single
+`loudnorm` pass with fixed parameters and is **not** measured back out of the
+file, so the ±1 LU acceptance criterion in §9.3 is not yet proven; nor are
+`blackdetect`/`freezedetect`, `astats` clipping, safe-area geometry, brand-colour
+sampling or export-integrity checksums. Caption _timing_ is verified as a
+cue-versus-gap comparison, not per-cue to ±2 frames. CI still never invokes real
+FFmpeg: the live integration test detects the binary and skips loudly when it is
+absent.
+
+**Next milestone: ComfyUI video generation integration behind
+`VideoGenerationProvider`.**
+
+---
+
 ## 9. What this document deliberately does not do
 
 Per instructions, no application code, no package.json, no Prisma schema file, and

@@ -43,3 +43,11 @@ Thumbs.db
 
 # MinIO / Postgres local volumes (if bind-mounted during local dev)
 infrastructure/.data/
+
+# AAMP render output — generated MP4s, QA reports, asset records and job temp
+# directories. Never commit generated video.
+.aamp-output/
+
+# Synthetic render fixtures, rebuilt with `pnpm aamp:fixtures`. The manifest
+# that references them is committed; the media it generates is not.
+packages/media/fixtures/generated/

@@ -14,6 +14,8 @@
     "test": "turbo run test",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "aamp:fixtures": "pnpm --filter @combat/media run build && node packages/media/dist/cli/generate-fixtures.js",
+    "aamp:render": "pnpm --filter @combat/media run build && node packages/media/dist/cli/render-cli.js",
     "db:generate": "pnpm --filter @combat/database run generate",
     "db:migrate": "pnpm --filter @combat/database run migrate",
     "db:validate": "pnpm --filter @combat/database run validate"

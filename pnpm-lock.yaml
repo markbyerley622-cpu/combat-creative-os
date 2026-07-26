@@ -274,7 +274,14 @@ importers:
         version: 2.1.9(@types/node@22.20.1)(supports-color@8.1.1)(terser@5.49.0)
 
   packages/media:
+    dependencies:
+      zod:
+        specifier: ^3.23.8
+        version: 3.25.76
     devDependencies:
+      '@types/node':
+        specifier: ^22.7.4
+        version: 22.20.1
       typescript:
         specifier: ^5.5.4
         version: 5.9.3
@@ -327,7 +334,13 @@ importers:
       '@aws-sdk/s3-request-presigner':
         specifier: ^3.1093.0
         version: 3.1093.0
+      '@combat/media':
+        specifier: workspace:*
+        version: link:../media
     devDependencies:
+      '@types/node':
+        specifier: ^22.7.4
+        version: 22.20.1
       typescript:
         specifier: ^5.5.4
         version: 5.9.3

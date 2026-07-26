@@ -10,8 +10,11 @@
     "lint": "eslint \"src/**/*.ts\"",
     "test": "vitest run"
   },
-  "dependencies": {},
+  "dependencies": {
+    "zod": "^3.23.8"
+  },
   "devDependencies": {
+    "@types/node": "^22.7.4",
     "typescript": "^5.5.4",
     "vitest": "^2.1.1"
   }

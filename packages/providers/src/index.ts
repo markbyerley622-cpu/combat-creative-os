@@ -6,6 +6,7 @@ export * from './design';
 export * from './design.mock';
 export * from './motion-graphics';
 export * from './motion-graphics.mock';
+export * from './motion-graphics.ffmpeg';
 export * from './motion-graphics-profiles';
 export * from './review';
 export * from './review.mock';

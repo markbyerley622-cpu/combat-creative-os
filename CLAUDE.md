@@ -18,9 +18,53 @@ AAMP-1 step 1 entry.
 
 **AAMP-1 step 2 (verified Clerk authentication) is done** — see
 `docs/adr/0006-clerk-identity-with-postgresql-authorization.md` and
-`docs/architecture.md` §8's AAMP-1 step 2 entry. **The next milestone is AAMP-1
-step 3, the `SERIALIZABLE` budget transaction** (`docs/aamp-architecture.md` §6
-task 5). No other AAMP work has started.
+`docs/architecture.md` §8's AAMP-1 step 2 entry.
+
+**AAMP real-media vertical slice 1 (real FFmpeg advertisement rendering) is
+done** — the system produces a genuine playable 1080×1920 MP4 from a render
+manifest. See the "Real media rendering" section below and
+`docs/architecture.md` §8's vertical-slice-1 entry. **The next milestone is
+ComfyUI video generation integration behind `VideoGenerationProvider`.** AAMP-1
+step 3 (the `SERIALIZABLE` budget transaction, `docs/aamp-architecture.md` §6
+task 5) remains outstanding and unstarted.
+
+## Real media rendering — permanent rules (vertical slice 1)
+
+- **The render manifest is the only input.** `packages/media`'s versioned
+  `RenderManifestV1Schema` is `.strict()` and validates cross-field rules,
+  including that scene durations minus transition overlaps land **exactly** on
+  the requested output duration. A new requirement is a new manifest version,
+  never an edit to v1.
+- **Licensing is enforced at source resolution, before FFmpeg exists.** Only
+  `OWNED` and `LICENSED_FOR_OUTPUT` resolve; expiry is checked against a
+  caller-supplied instant. An `ANALYSIS_ONLY` reference is refused with a typed
+  error before the filesystem is touched or ffprobe is invoked. There is no
+  other way for the renderer to learn a file path.
+- **No authored string ever becomes filter grammar.** Captions, overlay copy and
+  CTA text travel in a generated ASS file; only numbers and validated enum
+  values are interpolated into `filter_complex`. FFmpeg runs with `cwd` set to
+  the job directory and references that file by **bare filename** — a Windows
+  `C:\…` path inside a filter argument collides with the `:` option separator.
+- **Every binding QA fact is measured from the produced file** — ffprobe for
+  container/codecs/geometry/duration, extracted RGB frames for blankness, CTA
+  presence and caption presence. Never report a manifest value as a
+  measurement. A report with any failed binding check sends the file to
+  `rejected/` with `ingestionStatus: FAILED`; the deliverable path is reachable
+  only through a passing report.
+- **`packages/media` stays vendor-neutral and workspace-independent** (its only
+  dependency is `zod`). The `MotionGraphicsProvider` adapter lives in
+  `packages/providers`, which depends on `@combat/media` — that edge is
+  deliberate and documented. `packages/domain` and `packages/media` still do not
+  depend on each other; `RenderManifest`'s output block is kept _structurally_
+  compatible with `VERTICAL_SHORT_FORM_V1`.
+- **Never commit generated video, fixtures or copyrighted footage.**
+  `.aamp-output/` and `packages/media/fixtures/generated/` are git-ignored.
+  Fixture media is regenerated from FFmpeg `lavfi` sources with
+  `pnpm aamp:fixtures`; the manifest that references it is committed, the media
+  is not.
+- **CI never invokes real FFmpeg.** The live integration test detects the binary
+  and skips loudly when it is absent. Commands: `pnpm aamp:fixtures`, then
+  `pnpm aamp:render --manifest packages/media/fixtures/combat-reviews-15s.manifest.json`.
 
 ## Authentication — permanent rules (AAMP-1 step 2, ADR-0006)
 

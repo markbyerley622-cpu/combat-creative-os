@@ -1,9 +1,17 @@
+import { DEFAULT_FFMPEG_BINARIES, DEFAULT_PROBE_TIMEOUT_MS } from './binaries';
 import type { CommandRunner } from './command-runner';
 import { CorruptMediaError, type MediaProbeResult } from './types';
 
-interface FfprobeStream {
+export interface ProbeOptions {
+  readonly ffprobePath?: string;
+  readonly timeoutMs?: number;
+  readonly signal?: AbortSignal;
+}
+
+export interface FfprobeStream {
   codec_type?: string;
   codec_name?: string;
+  profile?: string;
   width?: number;
   height?: number;
   r_frame_rate?: string;
@@ -13,19 +21,26 @@ interface FfprobeStream {
   nb_frames?: string;
   color_space?: string;
   pix_fmt?: string;
+  display_aspect_ratio?: string;
+  sample_aspect_ratio?: string;
+  duration?: string;
+  bit_rate?: string;
 }
 
-interface FfprobeFormat {
+export interface FfprobeFormat {
   format_name?: string;
   duration?: string;
+  size?: string;
+  bit_rate?: string;
+  nb_streams?: number;
 }
 
-interface FfprobeOutput {
+export interface FfprobeOutput {
   streams?: FfprobeStream[];
   format?: FfprobeFormat;
 }
 
-function parseFrameRate(value: string | undefined): number {
+export function parseFrameRate(value: string | undefined): number {
   if (!value) return 0;
   const [numerator, denominator] = value.split('/').map(Number);
   const safeNumerator = numerator ?? 0;
@@ -43,29 +58,9 @@ function parseFrameRate(value: string | undefined): number {
 export async function probeMedia(
   runner: CommandRunner,
   filePath: string,
+  options: ProbeOptions = {},
 ): Promise<MediaProbeResult> {
-  const result = await runner.run('ffprobe', [
-    '-v',
-    'error',
-    '-print_format',
-    'json',
-    '-show_format',
-    '-show_streams',
-    filePath,
-  ]);
-
-  if (result.exitCode !== 0) {
-    throw new CorruptMediaError(
-      result.stderr.trim() || `ffprobe exited with code ${result.exitCode}`,
-    );
-  }
-
-  let parsed: FfprobeOutput;
-  try {
-    parsed = JSON.parse(result.stdout) as FfprobeOutput;
-  } catch {
-    throw new CorruptMediaError('ffprobe output was not valid JSON');
-  }
+  const parsed = await probeRaw(runner, filePath, options);
 
   const videoStream = parsed.streams?.find((s) => s.codec_type === 'video');
   const audioStream = parsed.streams?.find((s) => s.codec_type === 'audio');
@@ -112,4 +107,35 @@ export async function probeMedia(
     channels: audioStream?.channels ?? 0,
     sampleRateHz: Number(audioStream?.sample_rate ?? 0),
   };
+}
+
+/**
+ * The unreduced ffprobe view. `probeMedia` collapses this into the small
+ * ingestion-shaped `MediaProbeResult`; actual-media QA needs the fields that
+ * collapse discards — `pix_fmt`, `profile`, `display_aspect_ratio`,
+ * `format_name`, per-stream durations — and every one of them must come from
+ * the produced file rather than from what was requested.
+ */
+export async function probeRaw(
+  runner: CommandRunner,
+  filePath: string,
+  options: ProbeOptions = {},
+): Promise<FfprobeOutput> {
+  const result = await runner.run(
+    options.ffprobePath ?? DEFAULT_FFMPEG_BINARIES.ffprobe,
+    ['-v', 'error', '-print_format', 'json', '-show_format', '-show_streams', filePath],
+    { timeoutMs: options.timeoutMs ?? DEFAULT_PROBE_TIMEOUT_MS, signal: options.signal },
+  );
+
+  if (result.exitCode !== 0) {
+    throw new CorruptMediaError(
+      result.stderr.trim() || `ffprobe exited with code ${result.exitCode}`,
+    );
+  }
+
+  try {
+    return JSON.parse(result.stdout) as FfprobeOutput;
+  } catch {
+    throw new CorruptMediaError('ffprobe output was not valid JSON');
+  }
 }
