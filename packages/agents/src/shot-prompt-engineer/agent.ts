@@ -5,7 +5,7 @@ import {
   defineAgent,
 } from '@combat/agent-runtime';
 import { ShotPromptEngineerInputSchema, ShotPromptEngineerResultSchema } from './schema';
-import { V4 } from './prompts/v4';
+import { V5 } from './prompts/v5';
 
 export const shotPromptEngineerAgent = defineAgent({
   name: 'shot-prompt-engineer',
@@ -15,7 +15,7 @@ export const shotPromptEngineerAgent = defineAgent({
   disabledByDefault: false,
   inputSchema: ShotPromptEngineerInputSchema,
   resultSchema: ShotPromptEngineerResultSchema,
-  promptVersion: V4,
+  promptVersion: V5,
   modelPolicy: DEFAULT_MODEL_POLICY,
   tokenBudget: DEFAULT_TOKEN_BUDGET,
   toolPolicy: NO_TOOL_POLICY,

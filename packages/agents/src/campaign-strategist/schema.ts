@@ -3,6 +3,7 @@ import {
   CreativeDivergenceRecordSchema,
   CreativeMemoryContextSchema,
   DeliveryPlatformSchema,
+  ProductLaunchBriefSchema,
 } from '@combat/domain';
 
 export const CampaignStrategistInputSchema = z.object({
@@ -38,6 +39,15 @@ export const CampaignStrategistInputSchema = z.object({
    * choose which to lead on and may not contradict or invent alongside them.
    */
   factualConstraints: z.array(z.string().min(1)).default([]),
+  /**
+   * The product-launch brief, when this campaign is a PRODUCT_LAUNCH.
+   *
+   * Optional so every existing caller keeps compiling; supplied verbatim by
+   * `aamp:launch`, never summarised. Its `prohibitedClaims` are binding on
+   * every agent that receives it — a prohibition paraphrased into advice is
+   * not a prohibition.
+   */
+  productLaunch: ProductLaunchBriefSchema.optional(),
   /**
    * Bounded, governed benchmark craft context for this role — audience
    * tension, positioning, hook strategy, CTA strategy. Resolved by the

@@ -5,7 +5,7 @@ import {
   defineAgent,
 } from '@combat/agent-runtime';
 import { CreativeDirectorInputSchema, CreativeDirectorResultSchema } from './schema';
-import { V3 } from './prompts/v3';
+import { V4 } from './prompts/v4';
 
 export const creativeDirectorAgent = defineAgent({
   name: 'creative-director',
@@ -15,7 +15,7 @@ export const creativeDirectorAgent = defineAgent({
   disabledByDefault: false,
   inputSchema: CreativeDirectorInputSchema,
   resultSchema: CreativeDirectorResultSchema,
-  promptVersion: V3,
+  promptVersion: V4,
   modelPolicy: { ...DEFAULT_MODEL_POLICY, effort: 'high' },
   tokenBudget: DEFAULT_TOKEN_BUDGET,
   toolPolicy: NO_TOOL_POLICY,

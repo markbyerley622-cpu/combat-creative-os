@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { dirname, isAbsolute, resolve } from 'node:path';
 
-import { DeliveryPlatformSchema } from '@combat/domain';
+import { DeliveryPlatformSchema, ProductLaunchBriefSchema } from '@combat/domain';
 import { z } from 'zod';
 
 /**
@@ -135,8 +135,27 @@ const CampaignRequestObjectSchema = z
     cta: RequestCtaSchema,
     brandKit: BrandKitSchema,
 
+    /**
+     * Present exactly when this is a PRODUCT_LAUNCH campaign, and the only
+     * thing that makes `aamp:launch` willing to run.
+     *
+     * Optional so every existing request keeps parsing byte for byte: a request
+     * without this block is what it always was, and `aamp:generate` behaves
+     * identically. What it adds is the launch-specific constraint set — the
+     * positioning, the perception target, the prohibited claims, the approved
+     * reviewers and the budget ceiling — none of which the generic campaign
+     * contract had anywhere to put.
+     */
+    productLaunch: ProductLaunchBriefSchema.optional(),
+
     /** Path to the production asset manifest. Resolved relative to the request file. */
     sourceAssetManifest: z.string().min(1),
+    /**
+     * Path to the approved product-capture session produced by
+     * `aamp:capture-app`. Resolved relative to the request file; overridable by
+     * the launch CLI's `--captures` flag.
+     */
+    captureManifest: z.string().min(1).optional(),
     /** Run directory root. Resolved relative to the repository root. */
     outputDirectory: z.string().min(1).default('.aamp-output/runs'),
 
@@ -204,6 +223,8 @@ export interface CampaignRequest extends Omit<
   /** Lowercase hex sha256 of the resolved prompt. Recorded in provenance; the prompt itself is not a secret. */
   readonly promptSha256: string;
   readonly sourceAssetManifestPath: string;
+  /** Absolute, and present only when the request declared a capture manifest. */
+  readonly captureManifestPath?: string;
   readonly requestPath: string;
 }
 
@@ -293,6 +314,15 @@ export async function loadCampaignRequest(requestPath: string): Promise<Campaign
       requestDir,
       'sourceAssetManifest',
     ),
+    ...(parsed.captureManifest
+      ? {
+          captureManifestPath: resolveContainedPath(
+            parsed.captureManifest,
+            requestDir,
+            'captureManifest',
+          ),
+        }
+      : {}),
     requestPath: resolve(requestPath),
   };
 }
@@ -309,6 +339,27 @@ export function formatFactualConstraints(request: CampaignRequest): string[] {
     ...request.eventFacts.map(
       (fact) =>
         `EVENT — ${fact.label}: ${fact.detail}${fact.startsAt ? ` (starts ${fact.startsAt})` : ''}`,
+    ),
+  ];
+}
+
+/**
+ * The same constraints, each carrying its own id.
+ *
+ * The launch path needs this and the generate path does not: a launch concept
+ * must cite the fact that makes each of its claims true, and it cannot cite an
+ * identifier it was never shown. Kept as a separate function rather than a
+ * change to the shared one, because the shared format is described verbatim in
+ * a frozen prompt version and every existing caller's output would move.
+ */
+export function formatFactualConstraintsWithIds(request: CampaignRequest): string[] {
+  return [
+    ...request.productFacts.map((fact) => `PRODUCT [${fact.id}] — ${fact.label}: ${fact.detail}`),
+    ...request.eventFacts.map(
+      (fact) =>
+        `EVENT [${fact.id}] — ${fact.label}: ${fact.detail}${
+          fact.startsAt ? ` (starts ${fact.startsAt})` : ''
+        }`,
     ),
   ];
 }

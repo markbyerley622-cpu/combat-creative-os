@@ -1,15 +1,10 @@
-import { randomUUID } from 'node:crypto';
-
-import { AGENT_REGISTRY } from '@combat/agents';
 import type {
   CampaignStrategistResult,
   CreativeDirectorResult,
   ScriptTimingDirectorResult,
   ShotPromptEngineerResult,
 } from '@combat/agents';
-import { executeAgent, type AgentDefinition } from '@combat/agent-runtime';
 import type {
-  AgentInput,
   CreativeDivergenceRecord,
   CreativeMemoryAgentRole,
   CreativeMemoryContext,
@@ -17,6 +12,7 @@ import type {
 } from '@combat/domain';
 import type { ReasoningProvider } from '@combat/providers';
 
+import { AgentInvocationError, invokeAgent } from './agent-invocation';
 import { formatFactualConstraints, type CampaignRequest } from './campaign-request';
 import type { CreativeMemoryInjector } from './creative-memory/injection';
 import type { ScriptedShot } from './source-selection';
@@ -46,6 +42,21 @@ export interface CampaignPlanOptions {
   readonly workflowRunId: string;
   /** Absent in `--creative-memory off`, which is the pre-injection baseline. */
   readonly injector?: CreativeMemoryInjector;
+  /**
+   * A strategy and a concept that were decided earlier and approved.
+   *
+   * Set by the product-launch path after a named reviewer selected one concept
+   * from a competing set. When present the Campaign Strategist and Creative
+   * Director are **not** invoked again: re-running them would produce a
+   * different concept from the one a human approved, which is the one failure a
+   * concept gate exists to prevent. Everything downstream — script, shots,
+   * captions, Creative Memory for those two roles — runs exactly as it does on
+   * the ordinary path.
+   */
+  readonly preplanned?: {
+    readonly strategy: CampaignStrategistResult;
+    readonly concept: CreativeDirectorResult;
+  };
   readonly onProgress?: (message: string) => void;
 }
 
@@ -78,57 +89,27 @@ export class CampaignPlanningError extends Error {
   }
 }
 
-function envelope<T>(
-  input: T,
-  options: { workflowRunId: string; campaignId: string; stage: string; promptVersion: string },
-): AgentInput<T> {
-  return {
-    invocationId: randomUUID(),
-    workflowRunId: options.workflowRunId,
-    stage: options.stage,
-    promptVersion: options.promptVersion,
-    input,
-    context: {
-      campaignId: options.campaignId,
-      priorArtifactRefs: [],
-      // The CLI reserves no budget of its own; that machinery belongs to the
-      // Activity, and duplicating it here would write ledger rows for a run
-      // the workflow never saw.
-      budgetRemainingCents: 0,
-    },
-  };
-}
-
 async function runOne<TInput, TResult>(
   agentName: string,
   input: TInput,
   options: CampaignPlanOptions & { stage: string; agentVersions: string[] },
 ): Promise<TResult> {
-  const registry: Readonly<Record<string, AgentDefinition<unknown, unknown>>> = AGENT_REGISTRY;
-  const definition = registry[agentName] as AgentDefinition<TInput, TResult> | undefined;
-  if (!definition) throw new CampaignPlanningError(agentName, 'not present in AGENT_REGISTRY');
-
-  options.onProgress?.(`agent ${agentName} (prompt v${definition.promptVersion.version})`);
-  options.agentVersions.push(`${agentName}@v${definition.promptVersion.version}`);
-
-  const run = await executeAgent(
-    definition,
-    envelope(input, {
+  try {
+    const invocation = await invokeAgent<TInput, TResult>(agentName, input, {
+      reasoningProvider: options.reasoningProvider,
       workflowRunId: options.workflowRunId,
       campaignId: options.request.campaignId,
       stage: options.stage,
-      promptVersion: String(definition.promptVersion.version),
-    }),
-    { reasoningProvider: options.reasoningProvider },
-  );
-
-  if (run.status !== 'SUCCEEDED' || run.result === null) {
-    throw new CampaignPlanningError(
-      agentName,
-      run.failure ? `${run.failure.reason}: ${run.failure.message}` : 'returned no result',
-    );
+      ...(options.onProgress ? { onProgress: options.onProgress } : {}),
+    });
+    options.agentVersions.push(invocation.agentVersion);
+    return invocation.result;
+  } catch (error) {
+    if (error instanceof AgentInvocationError) {
+      throw new CampaignPlanningError(error.agentName, error.detail);
+    }
+    throw error;
   }
-  return run.result;
 }
 
 /**
@@ -173,8 +154,21 @@ export function buildPlanningInputs(request: CampaignRequest): {
       priorLearnings: [],
       campaignPrompt: request.campaignPrompt,
       factualConstraints,
+      ...launchBriefFor(request),
     },
   };
+}
+
+/**
+ * The launch brief, as the field every planning agent receives.
+ *
+ * One helper rather than four spread expressions, so the four agents cannot
+ * drift into disagreeing about whether a prohibited claim applies to them.
+ */
+export function launchBriefFor(request: CampaignRequest): {
+  productLaunch?: CampaignRequest['productLaunch'];
+} {
+  return request.productLaunch ? { productLaunch: request.productLaunch } : {};
 }
 
 /** The retrieval inputs available before any agent has run. */
@@ -214,13 +208,22 @@ export async function planCampaign(options: CampaignPlanOptions): Promise<Campai
     });
   };
 
-  const strategyContext = await injector?.contextFor('CAMPAIGN_STRATEGIST', retrievalInputs);
-  const strategy = await runOne<unknown, CampaignStrategistResult>(
-    'campaign-strategist',
-    { ...strategist, ...(strategyContext ? { creativeMemory: strategyContext } : {}) },
-    { ...shared, stage: 'STRATEGY' },
-  );
-  record('CAMPAIGN_STRATEGIST', strategyContext, strategy.creativeMemoryDivergence);
+  // The two upstream roles are skipped entirely when a human already approved
+  // their output. No context is retrieved for them either: retrieval that
+  // cannot influence anything is spend with no effect on the campaign.
+  const strategyContext = options.preplanned
+    ? undefined
+    : await injector?.contextFor('CAMPAIGN_STRATEGIST', retrievalInputs);
+  const strategy =
+    options.preplanned?.strategy ??
+    (await runOne<unknown, CampaignStrategistResult>(
+      'campaign-strategist',
+      { ...strategist, ...(strategyContext ? { creativeMemory: strategyContext } : {}) },
+      { ...shared, stage: 'STRATEGY' },
+    ));
+  if (!options.preplanned) {
+    record('CAMPAIGN_STRATEGIST', strategyContext, strategy.creativeMemoryDivergence);
+  }
 
   retrievalInputs = {
     ...retrievalInputs,
@@ -232,27 +235,34 @@ export async function planCampaign(options: CampaignPlanOptions): Promise<Campai
     },
   };
 
-  const conceptContext = await injector?.contextFor('CREATIVE_DIRECTOR', retrievalInputs);
-  const concept = await runOne<unknown, CreativeDirectorResult>(
-    'creative-director',
-    {
-      brandName: request.brandName,
-      strategy: {
-        positioning: strategy.strategy.positioning,
-        targetAudienceSummary: strategy.strategy.targetAudienceSummary,
-        keyMessages: strategy.strategy.keyMessages,
-        toneGuidelines: strategy.strategy.toneGuidelines,
+  const conceptContext = options.preplanned
+    ? undefined
+    : await injector?.contextFor('CREATIVE_DIRECTOR', retrievalInputs);
+  const concept =
+    options.preplanned?.concept ??
+    (await runOne<unknown, CreativeDirectorResult>(
+      'creative-director',
+      {
+        brandName: request.brandName,
+        strategy: {
+          positioning: strategy.strategy.positioning,
+          targetAudienceSummary: strategy.strategy.targetAudienceSummary,
+          keyMessages: strategy.strategy.keyMessages,
+          toneGuidelines: strategy.strategy.toneGuidelines,
+        },
+        mandatories: request.mandatories,
+        durationsSeconds: durations,
+        priorLearnings: [],
+        campaignPrompt: request.campaignPrompt,
+        factualConstraints,
+        ...launchBriefFor(request),
+        ...(conceptContext ? { creativeMemory: conceptContext } : {}),
       },
-      mandatories: request.mandatories,
-      durationsSeconds: durations,
-      priorLearnings: [],
-      campaignPrompt: request.campaignPrompt,
-      factualConstraints,
-      ...(conceptContext ? { creativeMemory: conceptContext } : {}),
-    },
-    { ...shared, stage: 'CONCEPT' },
-  );
-  record('CREATIVE_DIRECTOR', conceptContext, concept.creativeMemoryDivergence);
+      { ...shared, stage: 'CONCEPT' },
+    ));
+  if (!options.preplanned) {
+    record('CREATIVE_DIRECTOR', conceptContext, concept.creativeMemoryDivergence);
+  }
 
   retrievalInputs = {
     ...retrievalInputs,
@@ -276,6 +286,7 @@ export async function planCampaign(options: CampaignPlanOptions): Promise<Campai
       frameRate: 30,
       campaignPrompt: request.campaignPrompt,
       factualConstraints,
+      ...launchBriefFor(request),
       ...(scriptContext ? { creativeMemory: scriptContext } : {}),
     },
     { ...shared, stage: 'SCRIPT' },
@@ -314,6 +325,7 @@ export async function planCampaign(options: CampaignPlanOptions): Promise<Campai
         providerId: request.generation.source === 'COMFYUI' ? 'comfyui' : 'source-library',
         campaignPrompt: request.campaignPrompt,
         factualConstraints,
+        ...launchBriefFor(request),
         ...(shotContext ? { creativeMemory: shotContext } : {}),
       },
       { ...shared, stage: 'SHOT_PROMPTS' },

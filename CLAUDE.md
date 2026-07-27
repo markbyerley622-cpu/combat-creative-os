@@ -163,8 +163,93 @@ contacted** — no key is configured here, so all five adapters carry
 been downloaded. See the "Media acquisition" rules below and
 `docs/runbooks/premium-media-acquisition.md`.
 
+**Agent-led product-launch creative orchestration is done** — `pnpm aamp:launch`
+lets the existing specialist agents develop, compete, assess and refine
+product-launch concepts behind a mandatory human concept gate, then hands the
+approved one to the existing script, shot, render and QA path unchanged.
+**Proven offline, with no paid call:** three to five structured concepts from the
+existing Creative Director; the campaign prompt, the id-carrying factual
+constraints and the prohibited claims present in every planning invocation's
+input; role-specific Creative Memory under an approved profile with references
+staying analysis-only; a duplicating provider's set refused as
+`INSUFFICIENTLY_DISTINCT`; `render` before selection exiting 15; a revision
+writing v2 while v1 stays byte-identical; superseded, stale-brief,
+cross-workspace and unapproved-reviewer selections each refused with their own
+code; an inspection-only required capture and an `ANALYSIS_ONLY` asset refused
+before any agent ran; and, with FFmpeg present, an ffprobe-verified 1080×1920
+MP4 at 15 s with QA `PASS`. **Not proven:** creative quality — every test runs
+against a deterministic launch fixture provider, and no paid model has produced
+a launch concept in this repository. See the "Product-launch orchestration"
+rules below and `docs/runbooks/agent-led-product-launch.md`.
+
 **The next milestone is AAMP-1 step 4** — `apps/worker` against a live Temporal
 server (`docs/aamp-architecture.md` §6 task 6).
+
+## Product-launch orchestration — permanent rules
+
+- **The agents own the creative; application code owns the constraints; a named
+  human owns the decision.** No concept, title, hook, caption, beat plan or
+  timing literal may exist in `apps/aamp-cli/src/launch/` —
+  `launch-source-hygiene.test.ts` asserts it, and a template assigned to a
+  creative field must interpolate its input. A "temporary" default concept added
+  to unblock a demo is the system writing the advertisement again.
+- **`CAMPAIGN_MODES` lists only what is implemented.** `PRODUCT_LAUNCH` is the
+  single member. Event promotion, paid direct response, creator distribution and
+  UGC get their mode when they get the behaviour that makes it mean something; a
+  discriminator every check accepts is decoration.
+- **Distinctness is deterministic and explainable.** Seven closed-vocabulary
+  axes compared by equality plus the central idea by content-word overlap; every
+  pair must differ on at least 3 of 8 and the set must vary on at least 4. No
+  embedding threshold — a number nobody can justify is not a governance rule.
+  The report names every pair and every axis, because a refusal a person cannot
+  argue with is one they work around.
+- **The competition's only cross-candidate influence is the agent's own
+  output.** `occupiedStructuralPositions` is built from what earlier slots
+  emitted. Application code never states what a concept should be, only that
+  this one must not repeat the last one.
+- **A claim cites a supplied product fact or it is an invented claim.** The
+  launch path formats constraints as `PRODUCT [id] — Label: detail` so the agent
+  can cite the id; `formatFactualConstraints` stays untouched because a frozen
+  prompt version describes its exact format. A concept that fails validation is
+  rejected with a reason, never repaired — repairing it would mean writing it.
+- **An assessment says what it rests on.** Four dimensions are craft judgements
+  and carry `HUMAN_JUDGEMENT_REQUIRED` with verdict `NOT_ASSESSED`; the schema
+  refuses any other verdict for them. Nothing predicts conversion or
+  performance, and `agencyGradeClaim` has exactly one value. A concept is
+  unselectable only for a stated prohibited claim, an inventory that cannot
+  produce it, or a HIGH originality verdict — never for taste.
+- **A concept version is written once.** A revision is version N+1 with
+  `supersedesVersion`, produced by re-invoking the Creative Director through
+  `revisionFeedback`. No route, CLI or helper edits concept JSON. Version N stays
+  on disk exactly as the reviewer read it.
+- **Nothing renders without a recorded selection.** `requireSelection` is the
+  only way to obtain one, and there is no flag, default or "latest concept"
+  fallback. The selection pins the reviewer, the instant and the checksum of the
+  approved bytes; a concept edited afterwards is refused at render.
+- **`inspect`, `select` and `reject` construct no provider.** They never call
+  `createAampDependencies`, so a reviewer approving a concept cannot spend money
+  — a property of the object graph, not a promise.
+- **The handoff re-runs nothing upstream.** The approved strategy and concept
+  reach `planCampaign` as `preplanned`. Re-running the Strategist or Creative
+  Director would produce a different concept from the one a human approved,
+  which is the failure a concept gate exists to prevent.
+- **Only the merged, capture-substituted manifest reaches production**, and it is
+  re-parsed through `parseProductionAssetManifest`, so an analysis-only,
+  unknown-rights or inspection-only asset cannot enter it. A required capture
+  that is inspection-only is refused **by name**; a capture the run never needed
+  is recorded as refused rather than silently dropped.
+- **The budget ceiling is enforced, not recorded.** A paid run computes a maximum
+  from operator-declared rates and refuses above the ceiling; with no declared
+  rates there is no ceiling, so the run is refused rather than authorised against
+  an unknown number.
+- **A fixture launch run is a demonstration everywhere it travels.**
+  `isRealCampaignRun: false`, `FIXTURE`, `DEMONSTRATION ONLY`, and
+  `--execution-mode production` refuses it. The launch fixture provider derives
+  everything from its input and lives outside `packages/providers`, so no worker
+  configuration can select it.
+- **Variant rendering is out of scope for this milestone.**
+  `requiredVariants` is recorded and assessed; only the master is rendered, and
+  no artefact implies otherwise.
 
 ## Media acquisition — permanent rules
 

@@ -296,6 +296,17 @@ flowchart LR
     WRK[apps/worker / activities / agents] -.->|structurally forbidden| SIG
 ```
 
+The product-launch CLI (`pnpm aamp:launch`, `docs/runbooks/agent-led-product-launch.md`)
+adds a fourth human decision that lives **outside** this workflow boundary and
+does not weaken it. It is a concept-selection gate over a competing set of
+agent-authored concepts, recorded in the run directory rather than as a
+`HumanApproval` row — those rows are keyed to a `Campaign` the workflow path
+creates, and a CLI run that invented one would be claiming a campaign lifecycle
+it is not part of. The three workflow gates above remain exactly as they are:
+the launch gate authorises planning and rendering for one concept, never
+publication, and every launch artefact still carries `requiresHumanApproval:
+true`.
+
 ### 4.6 Performance-learning feedback loop
 
 ```mermaid

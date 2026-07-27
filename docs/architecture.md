@@ -3215,6 +3215,114 @@ still as a 0.04-second video. A fixture-only suite would not have surfaced this.
 
 ---
 
+### Agent-led product-launch creative orchestration (2026-07-28)
+
+**What changed.** `pnpm aamp:launch` lets the existing specialist agents
+develop, compete, assess and refine product-launch concepts before anything is
+rendered, behind a mandatory human concept gate. Full runbook:
+`docs/runbooks/agent-led-product-launch.md`.
+
+Six subcommands over one run directory — `plan`, `inspect`, `revise`, `select`,
+`reject`, `render`. They are deliberately not one pipeline: the step between
+`inspect` and `select` is a person choosing between competing ideas.
+
+**The division of labour is the milestone.** The agents author every creative
+decision; application code owns the brief, the approved inventory, the
+governance, the deterministic comparison and the persistence; a named human owns
+which concept proceeds. `launch-source-hygiene.test.ts` asserts the first half
+against the source itself — no concept title, hook, caption, beat plan or timing
+literal exists anywhere in `apps/aamp-cli/src/launch/`, and a template assigned
+to a creative field must interpolate its input.
+
+**Campaign mode.** No campaign-type discriminator existed. `CAMPAIGN_MODES` adds
+exactly one member, `PRODUCT_LAUNCH`, carried on an optional `productLaunch`
+block on the existing campaign request. Event promotion, paid direct response,
+creator distribution and UGC are deliberately absent rather than listed as
+values nothing implements — a discriminator every check accepts is decoration.
+
+**Boundaries.** `packages/domain/src/schemas/launch-*.ts` holds the launch
+brief, the structured concept, the pure distinctness comparison, the assessment
+contract and the gate records and guard. `packages/agents` gains one optional
+input field on all four planning agents (`productLaunch`), one more on the
+Creative Director (`launchDirective`), one optional result field
+(`launchConcept`) and four new prompt versions composed from the frozen earlier
+ones. `apps/aamp-cli/src/launch/` holds the competition, the assessment, the
+immutable store, the gate and the CLI. No new agent, no new campaign model, no
+second renderer, and no new Prisma model — the run directory is the state, for
+the reason the composition-root milestone recorded.
+
+**The concept contract is what makes a competition comparable.** Seven
+structural axes carry a value from a closed vocabulary _and_ the agent's own
+direction for it. The vocabulary exists so distinctness is decided
+deterministically rather than by an arbitrary embedding threshold: every pair
+must differ on at least 3 of 8 axes (the seven values plus the central idea,
+compared by content-word overlap), and the set must vary on at least 4. The
+report names every pair and every axis, so a refusal is explainable to whoever
+wrote the concepts.
+
+**Assessment says what it is.** Ten dimensions, each carrying a `basis`. Six are
+decided from things that exist — the approved asset and capture inventories, the
+platform, the durations, the concept's own cited facts, the originality
+evaluator's verdict. Four are craft judgements, and are reported as
+`HUMAN_JUDGEMENT_REQUIRED` with verdict `NOT_ASSESSED`; the schema refuses any
+other verdict for them. `agencyGradeClaim` is a literal with one value.
+
+**The gate is immutable and attributed.** A concept version is written once; a
+revision is version N+1 with `supersedesVersion`, produced by re-invoking the
+Creative Director with the reviewer's feedback in its existing
+`revisionFeedback` field. No code path edits concept JSON. A selection pins the
+reviewer, the instant and the checksum of the approved bytes; nine typed
+refusals cover superseded, stale-brief, cross-workspace, wrong-campaign,
+unapproved-reviewer, unselectable and already-selected. `render` without a
+selection exits 15.
+
+**The handoff reuses the existing path entirely.** The approved strategy and
+concept are passed to `planCampaign` as `preplanned`, so the Script & Timing
+Director, Shot Prompt Engineer, deterministic source selection, render-manifest
+builder, FFmpeg renderer and actual-media QA run unchanged, and the two upstream
+agents are not re-run — re-running them would produce a different concept from
+the one a human approved. The manifest handed downstream is the merged one:
+the approved library with output-eligible product captures substituted by id
+through the existing `mergeCapturedAssets`, re-parsed through
+`parseProductionAssetManifest`, so an analysis-only, unknown-rights or
+inspection-only asset cannot reach it.
+
+**Proven, offline, with no paid call.** Three to five structured concepts from
+the existing agent; the campaign prompt, the id-carrying factual constraints and
+the prohibited claims present in every planning invocation's input; role-specific
+Creative Memory under an approved profile with distinct retrieval plans per role
+and no reference id, path or URL reaching the asset library; a duplicating
+provider's set refused as `INSUFFICIENTLY_DISTINCT`; a provider that returns no
+structured concept refused with fewer than three candidates; per-concept
+assessment and originality persisted; `render` before selection exiting 15;
+revision writing v2 while v1 stays byte-identical; superseded, stale-prompt,
+cross-workspace and unapproved-reviewer selections refused with their own codes;
+an inspection-only required capture refused by name; an `ANALYSIS_ONLY` asset
+refused before any agent ran; and `--execution-mode production` refusing a
+fixture run. With FFmpeg present, the full chain ends in an ffprobe-verified
+1080×1920 h264 MP4 at 15 s with QA `PASS` and `requiresHumanApproval: true`.
+
+**Not proven.** Creative quality, in any form. Every test runs against a
+deterministic launch fixture provider that derives its output from its input; it
+demonstrates the mechanism and says nothing about how a real model would use the
+brief or the benchmark context. No paid model has produced a launch concept in
+this repository, and no artefact claims one has. Variant rendering is out of
+scope: `requiredVariants` is recorded and assessed, and only the master is
+rendered.
+
+**Defect found and fixed while building.** The launch path formats factual
+constraints as `PRODUCT [id] — Label: detail`. Without the id the concept
+contract was unsatisfiable in principle: it requires every claim to cite the
+product fact that makes it true, and the agents were never shown the ids. The
+existing `formatFactualConstraints` is left untouched — its exact format is
+described in a frozen prompt version — and the launch path uses a separate
+formatter, with the convention stated in the new prompt section.
+
+**Next milestone: AAMP-1 step 4 — `apps/worker` against a live Temporal server**
+(`docs/aamp-architecture.md` §6 task 6).
+
+---
+
 ## 9. What this document deliberately does not do
 
 Per instructions, no application code, no package.json, no Prisma schema file, and

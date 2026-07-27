@@ -28,7 +28,7 @@ import {
   type CreativeMemoryInjector,
 } from './creative-memory/injection';
 import { buildOriginalityEntries } from './creative-memory/originality-inputs';
-import { CampaignPlanningError, planCampaign } from './plan-campaign';
+import { CampaignPlanningError, planCampaign, type CampaignPlanOptions } from './plan-campaign';
 import { parseProductionAssetManifest, ProductionAssetManifestError } from './production-assets';
 import type { ReasoningPolicy } from './reasoning-policy';
 import {
@@ -106,6 +106,24 @@ export interface SourceCampaignOptions {
   readonly runner?: CommandRunner;
   /** Absent when `--creative-memory off`, which is the pre-injection baseline. */
   readonly injector?: CreativeMemoryInjector;
+  /**
+   * A strategy and concept a named reviewer already approved, from the
+   * product-launch gate. Passed straight through to `planCampaign`, which then
+   * does not re-invoke the two upstream agents — see its own documentation for
+   * why re-running them would defeat the gate.
+   */
+  readonly preplanned?: CampaignPlanOptions['preplanned'];
+  /**
+   * Directories, besides the repository root and the manifest's own directory,
+   * that assets may canonicalise inside.
+   *
+   * The launch path needs this and nothing else does: its manifest is the
+   * *merged* one written into the run directory, while the files it points at
+   * still live beside the original library. Containment is still enforced — the
+   * caller states the extra roots explicitly, rather than the resolver relaxing
+   * for a path it has not been told about.
+   */
+  readonly additionalSourceRoots?: readonly string[];
   readonly creativeMemoryMode: CreativeMemoryMode;
   /**
    * Stop after the render manifest is written, without invoking FFmpeg.
@@ -183,7 +201,11 @@ export async function runSourceCampaign(
     assets = await resolveProductionAssets({
       manifest,
       manifestDir: dirname(request.sourceAssetManifestPath),
-      allowedRoots: [options.repositoryRoot, dirname(request.sourceAssetManifestPath)],
+      allowedRoots: [
+        options.repositoryRoot,
+        dirname(request.sourceAssetManifestPath),
+        ...(options.additionalSourceRoots ?? []),
+      ],
       binaries: options.binaries,
       now: options.now,
       ...(options.runner ? { runner: options.runner } : {}),
@@ -231,6 +253,7 @@ export async function runSourceCampaign(
       reasoningProvider: options.reasoningProvider,
       workflowRunId: options.workflowRunId,
       ...(options.injector ? { injector: options.injector } : {}),
+      ...(options.preplanned ? { preplanned: options.preplanned } : {}),
       ...(onProgress ? { onProgress } : {}),
     });
   } catch (error) {
@@ -399,6 +422,7 @@ export async function runSourceCampaign(
         options.repositoryRoot,
         runDirectory,
         dirname(request.sourceAssetManifestPath),
+        ...(options.additionalSourceRoots ?? []),
       ],
       outputRoot: runDirectory,
       binaries: options.binaries,

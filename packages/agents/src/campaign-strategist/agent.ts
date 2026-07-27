@@ -5,7 +5,7 @@ import {
   defineAgent,
 } from '@combat/agent-runtime';
 import { CampaignStrategistInputSchema, CampaignStrategistResultSchema } from './schema';
-import { V3 } from './prompts/v3';
+import { V4 } from './prompts/v4';
 
 export const campaignStrategistAgent = defineAgent({
   name: 'campaign-strategist',
@@ -15,7 +15,7 @@ export const campaignStrategistAgent = defineAgent({
   disabledByDefault: false,
   inputSchema: CampaignStrategistInputSchema,
   resultSchema: CampaignStrategistResultSchema,
-  promptVersion: V3,
+  promptVersion: V4,
   modelPolicy: { ...DEFAULT_MODEL_POLICY, effort: 'high' },
   tokenBudget: DEFAULT_TOKEN_BUDGET,
   toolPolicy: NO_TOOL_POLICY,

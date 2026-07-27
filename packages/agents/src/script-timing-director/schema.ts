@@ -1,5 +1,9 @@
 import { z } from 'zod';
-import { CreativeDivergenceRecordSchema, CreativeMemoryContextSchema } from '@combat/domain';
+import {
+  CreativeDivergenceRecordSchema,
+  CreativeMemoryContextSchema,
+  ProductLaunchBriefSchema,
+} from '@combat/domain';
 
 /** Which beat of the ad structure a shot belongs to (hook/promise/feature/CTA). */
 export const ShotBeatSchema = z.enum(['HOOK', 'PROMISE', 'FEATURE', 'CTA']);
@@ -20,6 +24,8 @@ export const ScriptTimingDirectorInputSchema = z.object({
   campaignPrompt: z.string().min(1).max(8000).optional(),
   /** Binding product/event facts as `PRODUCT — …` / `EVENT — …` lines. */
   factualConstraints: z.array(z.string().min(1)).default([]),
+  /** The product-launch brief, verbatim. See `CampaignStrategistInputSchema`. */
+  productLaunch: ProductLaunchBriefSchema.optional(),
   /**
    * Bounded, governed benchmark timing context for this role — opening-hook
    * latency, beat density, transition timing, CTA timing. The measurements are

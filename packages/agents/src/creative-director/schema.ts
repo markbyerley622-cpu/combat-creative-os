@@ -1,5 +1,11 @@
 import { z } from 'zod';
-import { CreativeDivergenceRecordSchema, CreativeMemoryContextSchema } from '@combat/domain';
+import {
+  CreativeDivergenceRecordSchema,
+  CreativeMemoryContextSchema,
+  LaunchConceptDirectiveSchema,
+  LaunchConceptSchema,
+  ProductLaunchBriefSchema,
+} from '@combat/domain';
 
 export const CreativeDirectorInputSchema = z.object({
   brandName: z.string().min(1),
@@ -26,6 +32,17 @@ export const CreativeDirectorInputSchema = z.object({
   campaignPrompt: z.string().min(1).max(8000).optional(),
   /** Binding product/event facts as `PRODUCT — …` / `EVENT — …` lines. */
   factualConstraints: z.array(z.string().min(1)).default([]),
+  /** The product-launch brief, verbatim. See `CampaignStrategistInputSchema`. */
+  productLaunch: ProductLaunchBriefSchema.optional(),
+  /**
+   * Which candidate of a competing set this invocation is producing, and which
+   * structural positions the earlier candidates already took.
+   *
+   * Orchestration, not creative direction: the occupied positions are values
+   * this agent itself emitted on earlier slots in the same run. Present only
+   * alongside `productLaunch`, and the result must then carry `launchConcept`.
+   */
+  launchDirective: LaunchConceptDirectiveSchema.optional(),
   /**
    * Bounded, governed benchmark craft context for this role — attention
    * pattern, visual hierarchy, pacing philosophy, brand treatment. See
@@ -48,5 +65,17 @@ export const CreativeDirectorResultSchema = z.object({
   narrativeArc: z.string().min(1),
   referenceNotes: z.array(z.string().min(1)).default([]),
   creativeMemoryDivergence: CreativeDivergenceRecordSchema.optional(),
+  /**
+   * The structured product-launch concept, returned when `launchDirective` was
+   * supplied.
+   *
+   * Additive rather than a replacement: `logline`, `visualDirection` and
+   * `narrativeArc` remain the fields the Script Director consumes, so a
+   * selected launch concept flows into the existing planning chain unchanged
+   * and every non-launch caller is untouched. What this adds is everything a
+   * reviewer needs in order to *choose between* concepts, which the three
+   * prose fields alone cannot carry.
+   */
+  launchConcept: LaunchConceptSchema.optional(),
 });
 export type CreativeDirectorResult = z.infer<typeof CreativeDirectorResultSchema>;
