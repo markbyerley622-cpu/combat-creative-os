@@ -1,0 +1,17 @@
+{
+  "_comment": "TEMPLATE — not a declaration. Every TODO must be replaced by a person who knows the answer and is willing to be named. Reaching a page over HTTP establishes that it is public and nothing else. Delete this _comment field before use; the schema is strict and will refuse it.",
+  "declarationVersion": 1,
+  "declaringEntity": "TODO — the company or team asserting these rights",
+  "declaredBy": "TODO — the named person making the assertion",
+  "declaredAt": "TODO — ISO-8601 instant, e.g. 2026-07-27T09:00:00Z",
+  "approvedHost": "TODO — the exact host being captured, e.g. globalfight.onrender.com",
+  "basis": "TODO — OWNED_UI_CAPTURE if you own the interface, LICENSED_UI_CAPTURE if you licensed it",
+  "uiOwnershipConfirmed": true,
+  "thirdPartyImagery": "TODO — NONE_PRESENT | LICENSED_FOR_OUTPUT | REMOVED_OR_MASKED",
+  "thirdPartyImageryConfirmed": true,
+  "approvedOutputChannels": ["TODO — e.g. TIKTOK", "TODO — e.g. INSTAGRAM_REELS"],
+  "territory": "TODO — e.g. WORLDWIDE, or a named territory",
+  "expiresAt": "TODO — ISO-8601 instant, or remove this field entirely for a perpetual grant",
+  "evidenceReference": "TODO — where the signed approval lives: a ticket id, a contract reference, a file path",
+  "notes": "TODO — optional. Anything a reviewer would need to know."
+}

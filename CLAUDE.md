@@ -127,8 +127,93 @@ code. **Not proven:** creative quality — a human made those judgements, and th
 example runs against synthetic `lavfi` media. See the "Zero-cost footage-first
 preview" rules below and `docs/runbooks/zero-cost-footage-first-preview.md`.
 
+**Read-only Combat Reviews live-UI capture and production-asset ingestion is
+done** — `pnpm aamp:capture-app` photographs approved public screens with a
+read-only Chromium, redacts identity and community writing, converts the images
+into content-addressed, rights-controlled production assets, and merges them
+over the synthetic UI stills so the existing footage-first preview renders from
+real product screens. **Proven live:** three real screens captured from
+`globalfight.onrender.com` at exactly 1080×1920 (`LIVE_CAPTURE_PROVEN`), with
+the disabled discussion screen skipped and four cross-origin requests refused.
+**Proven against the local fixture site:** GET/HEAD-only enforcement with the
+server independently confirming no mutation arrived, a page that tries to
+submit its own form three ways failing to, cross-origin and non-anchor
+navigation refusal, byte-identical screenshots across runs, required-redaction
+failure, duplicate-content refusal, and the whole chain ending in an
+ffprobe-verified 1080×1920 MP4 at 15.000 s with QA `PASS`. **Not proven:** that
+any rights declaration is _true_ — the tool enforces its host, term and version
+and cannot verify the claim; and nothing here touches private pages, because
+there is no login path. See the "Live-UI capture" rules below and
+`docs/runbooks/combat-reviews-live-ui-capture.md`.
+
 **The next milestone is AAMP-1 step 4** — `apps/worker` against a live Temporal
 server (`docs/aamp-architecture.md` §6 task 6).
+
+## Live-UI capture — permanent rules
+
+- **A URL is not a licence, and the code says so structurally.** Without an
+  `AppCaptureRightsDeclaration` every captured asset is `REVIEW_REQUIRED`,
+  carries a `null` rights classification, and `mergeCapturedAssets` **refuses**
+  it by name rather than skipping it. Never add a path that infers rights from
+  reachability, and never let a skip stand in for a refusal.
+- **`OWNED_UI_CAPTURE` and `LICENSED_UI_CAPTURE` are declaration bases, not
+  rights classes.** They project onto the existing `OWNED` /
+  `LICENSED_FOR_OUTPUT` vocabulary, and the production manifest never learns a
+  capture was involved. Adding a capture-shaped class to the production rights
+  enum would mean every existing check had to learn about it, and the one that
+  forgot would be the hole.
+- **Read-only is a property of the object graph.** One route handler over every
+  request continues GET and HEAD and aborts the rest; the same handler enforces
+  the host allowlist. `FOLLOW_LINK` never clicks — it reads the anchor's `href`,
+  verifies it, and navigates. An init script cancels `submit` in the capture
+  phase and neutralises `HTMLFormElement.submit`, `requestSubmit`,
+  `window.open` and `navigator.sendBeacon`. Never add a click, a `fill`, a
+  `press`, or a step kind that could express one.
+- **The `page` event fires for our own `newPage()`.** Popup detection must
+  discriminate on `opener()`. Without that check the adapter closes its own
+  page and every navigation dies with `ERR_ABORTED` — found the hard way.
+- **Control detection matches whole path segments, never substrings.** A
+  substring rule refuses `/events/post-fight-analysis` for containing "post",
+  and a deny-list that fires on ordinary content is one operators work around.
+  The accessible name is matched as prose; the `href` never is.
+- **`APP_DISCUSSION_SANITISED` is off unless enabled by name.** `enabled` is
+  optional precisely so its absence is a decision. An enabled discussion screen
+  must declare at least one required redaction selector — "sanitised" is a
+  claim about identifiers having been removed, and an unenforced claim is not
+  one.
+- **A required redaction selector that matched nothing fails the screen.** The
+  page changed shape and something that had to be hidden was not. Deleting the
+  selector to clear the error is deleting the check.
+- **No raw DOM, ever.** No artefact holds page text, markup, headers, cookies or
+  storage. `assertCaptureArtefactSafe` walks every artefact before it is
+  written and fails closed on emails, bearer tokens, JWTs, credential query
+  strings and a forbidden-key list that includes `html`, `outerHTML` and
+  `textContent`. Keep both lists exhaustive when adding a field.
+- **Query strings are dropped, never filtered.** A filter needs a list of the
+  parameter names that carry secrets, and that list is always one deployment
+  behind. Provenance records a pathname and a `queryPresent` boolean.
+- **Screenshots are content-addressed and never silently overwritten.**
+  `<assetId>-<first 16 of sha256>.png`; an existing file is verified to hold
+  those bytes before it is reused. Empty, undersized, undecodable and
+  duplicate-content screenshots are refused — a page that failed to render is
+  still a valid, tiny PNG, and two screens with identical bytes are usually one
+  screen that never changed.
+- **The merge replaces by id and preserves plan bindings.** `role`, `beats` and
+  `tags` come from the manifest; `path`, `checksum` and measured dimensions come
+  from the capture. It never appends: an id no beat references would change the
+  library without changing the advertisement. The merged document is re-parsed
+  through `parseProductionAssetManifest`, so it faces exactly the same rules as
+  a hand-written one.
+- **Nothing on this path constructs a provider.** No reasoning provider, no
+  generation provider, no database client, no paid call. The integration test
+  runs with `REASONING_PROVIDER=claude` and no API key.
+- **CI never contacts the deployed site.** Every browser-side guarantee is
+  proven against `src/capture/fixture-site.ts`. The live test is opt-in
+  (`AAMP_LIVE_CAPTURE=1`), reports `LIVE_CAPTURE_PROVEN` only after capturing
+  the configured real host, and names its exact blocker otherwise. It runs
+  inspection-only.
+- **TLS verification, CSP and certificate checking are never relaxed**, and no
+  credential, cookie or browser profile is ever accepted, stored or persisted.
 
 ## Zero-cost footage-first preview — permanent rules
 

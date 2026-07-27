@@ -56,6 +56,9 @@ importers:
       '@combat/providers':
         specifier: workspace:*
         version: link:../../packages/providers
+      playwright:
+        specifier: ^1.47.2
+        version: 1.61.1
       zod:
         specifier: ^3.23.8
         version: 3.25.76

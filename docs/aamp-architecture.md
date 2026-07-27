@@ -25,9 +25,26 @@ creative-benchmark-runner entries, and `docs/runbooks/creative-benchmark.md`.
 done** — `checkAndReserveBudget`'s compensating guard is removed and every
 applicable policy is now reserved inside one PostgreSQL `SERIALIZABLE`
 transaction, proven against a live database. See `docs/architecture.md` §8's
-AAMP-1 step 3 entry and `docs/runbooks/database-migrations.md` §8. The next step
-in this document's own plan is **AAMP-1 step 4: `apps/worker` against a live
-Temporal server** (§6 task 6).
+AAMP-1 step 3 entry and `docs/runbooks/database-migrations.md` §8.
+
+Two further vertical slices have since been delivered against §3's invariants:
+a **zero-cost footage-first creative preview**, in which a person authors the
+creative as a validated plan and the pipeline executes it with no reasoning or
+generation provider constructed at all; and **read-only Combat Reviews live-UI
+capture**, which turns approved public product screens into rights-controlled
+production assets. The second one supplies what the first was missing — real
+product footage — and does so without adding a render path: capture terminates
+at `captured-assets.json`, a deterministic merge produces an ordinary
+`ProductionAssetManifest`, and the existing preflight and renderer take it from
+there unchanged. Its rights bases (`OWNED_UI_CAPTURE`, `LICENSED_UI_CAPTURE`)
+project onto the existing `OWNED` / `LICENSED_FOR_OUTPUT` vocabulary, so §3's
+licensing invariant is inherited rather than reimplemented, and a capture taken
+without a human-authored rights declaration is `REVIEW_REQUIRED` and refused
+entry to a manifest by name. See `docs/architecture.md` §8's live-UI-capture
+entry and `docs/runbooks/combat-reviews-live-ui-capture.md`.
+
+The next step in this document's own plan is **AAMP-1 step 4: `apps/worker`
+against a live Temporal server** (§6 task 6).
 Date: 2026-07-26. Baseline: `ad3d241` (post-M14 foundation audit repair).
 
 This document is the delivery blueprint for turning the completed M0–M14

@@ -3,7 +3,21 @@
   "compilerOptions": {
     "outDir": "dist",
     "rootDir": "src",
-    "types": ["node"]
+    "types": ["node"],
+    /*
+     * This package ships functions that execute in a browser page.
+     *
+     * `src/capture/redaction.ts` and `src/capture/playwright-capture.ts`
+     * contain code serialised across the CDP boundary and evaluated in
+     * Chromium's realm, where `document` and `Element` genuinely exist. DOM is
+     * added so that code is type-checked rather than written blind as a
+     * string — the redaction pass is the privacy-critical part of the capture
+     * path, and it is the last place that should lose its types.
+     *
+     * This declares a second target environment; it weakens no check. Every
+     * strictness flag in tsconfig.base.json still applies.
+     */
+    "lib": ["ES2022", "DOM"]
   },
   "include": ["src/**/*.ts"]
 }

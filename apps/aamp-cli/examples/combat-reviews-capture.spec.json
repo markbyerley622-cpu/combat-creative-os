@@ -1,0 +1,78 @@
+{
+  "specificationVersion": 1,
+  "name": "combat-reviews-public-screens",
+  "baseUrl": "https://globalfight.onrender.com",
+  "allowedHosts": ["globalfight.onrender.com"],
+  "library": "Combat Reviews public UI capture",
+  "screens": [
+    {
+      "assetId": "screen-scorecards",
+      "path": "/events",
+      "role": "APP_EVENT_LIST",
+      "viewport": "PHONE_PORTRAIT_1080X1920",
+      "description": "Public events list — this weekend's cards across every covered promotion",
+      "readinessSelector": "section[aria-label=\"Recent events\"]",
+      "redactionSelectors": [],
+      "requiredRedactionSelectors": [],
+      "navigation": [],
+      "timeoutMs": 60000,
+      "settleMs": 1500,
+      "required": true
+    },
+    {
+      "assetId": "screen-predictions",
+      "path": "/leaderboard",
+      "role": "APP_PREDICTION",
+      "viewport": "PHONE_PORTRAIT_1080X1920",
+      "description": "Public prediction leaderboard",
+      "readinessSelector": "#main",
+      "redactionSelectors": [],
+      "requiredRedactionSelectors": [],
+      "navigation": [],
+      "timeoutMs": 60000,
+      "settleMs": 1500,
+      "required": true
+    },
+    {
+      "assetId": "screen-fight-card",
+      "path": "/events",
+      "role": "APP_FIGHT_CARD",
+      "viewport": "PHONE_PORTRAIT_1080X1920",
+      "description": "Public event detail — fight order and event details for the first listed card",
+      "readinessSelector": "#card",
+      "redactionSelectors": [],
+      "requiredRedactionSelectors": [],
+      "navigation": [
+        {
+          "kind": "FOLLOW_LINK",
+          "selector": "section[aria-label=\"Recent events\"] a[href^=\"/events/\"]",
+          "expectPathPrefix": "/events/"
+        }
+      ],
+      "timeoutMs": 60000,
+      "settleMs": 1500,
+      "required": true
+    },
+    {
+      "assetId": "screen-card-talk",
+      "path": "/events",
+      "role": "APP_DISCUSSION_SANITISED",
+      "viewport": "PHONE_PORTRAIT_1080X1920",
+      "description": "Public card-talk region. Disabled: community writing is off unless enabled by name.",
+      "readinessSelector": "#card-talk",
+      "cropSelector": "#card-talk",
+      "redactionSelectors": [],
+      "requiredRedactionSelectors": ["[aria-label=\"Account menu\"]"],
+      "navigation": [
+        {
+          "kind": "FOLLOW_LINK",
+          "selector": "section[aria-label=\"Recent events\"] a[href^=\"/events/\"]",
+          "expectPathPrefix": "/events/"
+        }
+      ],
+      "timeoutMs": 60000,
+      "settleMs": 1500,
+      "required": false
+    }
+  ]
+}

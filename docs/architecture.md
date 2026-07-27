@@ -3041,6 +3041,96 @@ The example plan and the synthetic asset root demonstrate the mechanism against
 `lavfi`-generated material, not against real Combat Reviews footage. Nothing
 here is evidence about autonomous reasoning, which this mode does not use.
 
+**Next milestone: read-only Combat Reviews live-UI capture** — see the entry
+below.
+
+---
+
+### Read-only Combat Reviews live-UI capture and production-asset ingestion (2026-07-27)
+
+**Why.** The zero-cost preview proved the pipeline can cut a real
+advertisement, but the product screens in it were `lavfi` rectangles. The
+Combat Reviews UI is already deployed at a public URL, and it is the single
+highest-value source of genuine, zero-cost, rights-clean product footage
+available — provided two things are true that are _not_ implied by the page
+being reachable: that somebody owns or licensed the interface for output, and
+that no individual's identity or writing travels into an advertisement with it.
+This milestone builds the path and makes both of those structural.
+
+**What was built.** `apps/aamp-cli/src/capture/`: versioned strict Zod
+contracts (`AppCaptureSpecification`, `AppCaptureScreen`,
+`AppCaptureRightsDeclaration`, `AppCaptureSession`, `CapturedAppAsset`,
+`CaptureRedactionReport`, `CaptureFailure`); a read-only Playwright adapter; a
+redaction pass; a rights evaluator; content-addressed ingestion; and a
+deterministic manifest merge. `pnpm aamp:capture-app` is the command, with a
+`merge` subcommand.
+
+**The boundary this adds, and where it sits.** Capture is a _new source of
+production assets_, not a new kind of asset. It terminates at
+`captured-assets.json`; the merge turns that into an ordinary
+`ProductionAssetManifest`, which is then re-parsed through the existing
+`parseProductionAssetManifest` and handed to the existing
+`runAssetRootPreflight` and the existing renderer. **No render-path code was
+changed by this milestone.** `OWNED_UI_CAPTURE` / `LICENSED_UI_CAPTURE` are
+declaration _bases_ that project onto the existing `OWNED` /
+`LICENSED_FOR_OUTPUT` classifications, so the rights vocabulary was not widened
+and every existing rights check applies unaltered. The only structural
+additions are the new `capture/` module inside `apps/aamp-cli` and a
+`playwright` dependency on that app; `packages/media` gained nothing.
+
+**Read-only, structurally.** One route handler over every request continues GET
+and HEAD and aborts everything else, and enforces the host allowlist. There is
+no click: `FOLLOW_LINK` reads an anchor's `href`, proves it is same-origin
+under a declared prefix, refuses controls by whole path segment and by
+accessible name, and navigates directly, so no page handler runs. An init
+script cancels `submit` in the capture phase and neutralises
+`HTMLFormElement.submit`, `requestSubmit`, `window.open` and
+`navigator.sendBeacon`. A fresh context per screen, no `userDataDir`, no
+`storageState`, downloads refused, service workers blocked, TLS and CSP left at
+their defaults. The browser closes in a `finally`.
+
+**Privacy.** No raw DOM is ever written. Account identity is redacted on every
+screen; user-written content is redacted on every screen except one whose role
+is `APP_DISCUSSION_SANITISED`, which is disabled unless a specification enables
+it by name. A _required_ redaction selector that matches nothing fails the
+screen. `assertCaptureArtefactSafe` walks every artefact and fails closed on
+emails, bearer tokens, JWTs, credential query strings and a forbidden-key list
+including `html`/`outerHTML`/`textContent`. Query strings are dropped rather
+than filtered.
+
+**Proven live.** `AAMP_LIVE_CAPTURE=1 pnpm --filter aamp-cli run
+test:live-capture` reported `LIVE_CAPTURE_PROVEN` against
+`globalfight.onrender.com`: three screens (`screen-scorecards`,
+`screen-predictions`, `screen-fight-card`) at exactly 1080×1920, the
+`APP_DISCUSSION_SANITISED` screen skipped as disabled, four cross-origin
+requests refused by the host allowlist — which is also what removes third-party
+promo imagery from the frame — and the session recorded `INSPECTION_ONLY`, so
+none of it is output-eligible.
+
+**Proven offline.** Against `src/capture/fixture-site.ts`, which reproduces the
+observed shapes of the real site including a page that POSTs on load: GET/HEAD
+enforcement with the fixture server independently confirming no mutation ever
+arrived; a page that calls `submit()`, `requestSubmit()` and dispatches a
+`submit` event on load failing to leave the page; cross-origin subresource
+refusal; non-anchor and off-host navigation refusal; control-route refusal;
+readiness failure; required-redaction failure; byte-identical screenshots
+across two runs; duplicate-content and undersized-screenshot refusal;
+inspection-only assets refused by the merge; and the full chain — capture →
+redact → declare → merge → existing preflight → existing render — producing an
+ffprobe-verified 1080×1920 h264/AAC MP4 at 15.000 s with QA `PASS`, under
+`REASONING_PROVIDER=claude` with no API key.
+
+**Not proven.** That a rights declaration is _true_: the system enforces its
+host, term and version, and cannot verify the claim behind it. Private pages
+are out of scope — there is no login flow, no credential store and no path that
+accepts one. Creative quality remains a human judgement: the preview this feeds
+is still `HUMAN_ASSISTED_PREVIEW`.
+
+**Defect found and fixed during implementation.** `BrowserContext`'s `page`
+event fires for pages created by `context.newPage()`, not only for popups, so
+the popup guard was closing the adapter's own page and every navigation failed
+with `net::ERR_ABORTED`. Popup detection now discriminates on `page.opener()`.
+
 **Next milestone: AAMP-1 step 4 — `apps/worker` against a live Temporal server**
 (`docs/aamp-architecture.md` §6 task 6), confirming every name in
 `activity-name-contract.ts` is registered against a real server.

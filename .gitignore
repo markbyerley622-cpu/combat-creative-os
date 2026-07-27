@@ -58,6 +58,19 @@ packages/media/fixtures/generated/
 # committed; the manifest and the creative plan that describe it are.
 packages/media/fixtures/preview-asset-root/
 
+# Read-only UI capture output — screenshots of a live application, their
+# reports, and any merged manifest that points at them. Screenshots are
+# operator media governed by a rights declaration, not repository content, and
+# a capture of a live site is never reproducible from the tree. The
+# specification and the rights-declaration template are committed; nothing a
+# browser produced ever is.
+.aamp-capture/
+capture-session.json
+capture-report.json
+redaction-report.json
+captured-assets.json
+capture-contact-sheet.png
+
 # Creative Memory analysis output — proxies, extracted frames, scene clips,
 # transcripts and FiftyOne projections derived from reference advertisements.
 # Reference material is analysis-only and third-party; none of it is ever
