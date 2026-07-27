@@ -21,6 +21,7 @@
     "aamp:benchmark": "pnpm --filter aamp-cli run build && node --env-file-if-exists=.env apps/aamp-cli/dist/benchmark/benchmark-main.js",
     "aamp:reference": "pnpm --filter aamp-cli run build && node --env-file-if-exists=.env apps/aamp-cli/dist/creative-memory/reference-cli-main.js",
     "aamp:capture-app": "pnpm --filter aamp-cli run build && node --env-file-if-exists=.env apps/aamp-cli/dist/capture/capture-main.js",
+    "aamp:media": "pnpm --filter aamp-cli run build && node --env-file-if-exists=.env apps/aamp-cli/dist/media/media-main.js",
     "db:generate": "pnpm --filter @combat/database run generate",
     "db:migrate": "pnpm --filter @combat/database run migrate",
     "db:validate": "pnpm --filter @combat/database run validate"

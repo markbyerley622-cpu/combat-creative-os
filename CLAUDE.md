@@ -146,8 +146,117 @@ and cannot verify the claim; and nothing here touches private pages, because
 there is no login path. See the "Live-UI capture" rules below and
 `docs/runbooks/combat-reviews-live-ui-capture.md`.
 
+**Premium licensed media acquisition is done** — `pnpm aamp:media` searches,
+evaluates, acquires and ingests legally usable footage, images and audio through
+official provider APIs only, and emits a production-asset manifest the existing
+generator accepts unchanged. **Proven offline:** the full chain against a
+deterministic fixture server and FFmpeg `lavfi` media, producing a manifest the
+existing `parseProductionAssetManifest` accepts; the approval gate refusing a
+skipped station, an expired approval, a wrong-run approval and an over-reaching
+one; a 200 response that cannot be measured leaving zero assets;
+`INTERNAL_EVALUATION` refused by name from a campaign manifest. **Proven
+read-only against the operator's real external candidate library:** 115 of 115
+SHA-256 checksums recalculated and agreeing, zero mismatches, zero candidates
+above `RIGHTS_REVIEW_REQUIRED`. **Not proven: no live provider API has ever been
+contacted** — no key is configured here, so all five adapters carry
+`responseContractStatus: DOCUMENTED_NOT_EXECUTED`, and no third-party media has
+been downloaded. See the "Media acquisition" rules below and
+`docs/runbooks/premium-media-acquisition.md`.
+
 **The next milestone is AAMP-1 step 4** — `apps/worker` against a live Temporal
 server (`docs/aamp-architecture.md` §6 task 6).
+
+## Media acquisition — permanent rules
+
+- **Acquisition grants no output rights, and neither does a download.** A
+  candidate becomes usable only through a named human approval recorded against
+  that specific item. `AUTOMATICALLY_ELIGIBLE` means "the policy raises no
+  objection" — it is not permission, and the reason text says so. No flag, no
+  environment variable and no code path fabricates, defaults or infers an
+  approval; `buildApprovalTemplate` emits `TODO` in every prose field precisely
+  so an unedited template is not one.
+- **No lifecycle station may be skipped.** `RIGHTS_REVIEW_REQUIRED` is mandatory
+  rather than a branch — even a CC0 item passes through it, because the record
+  that somebody looked at _this item's_ rights is the artefact, not the outcome.
+  `DOWNLOADED` and `INSPECTED` are separate because bytes arriving says nothing
+  about what is in them. `assertLifecycleTransition` names what was skipped.
+- **Measurements beat declarations, including about what the file _is_.** A
+  catalogue row saying `video` over a JPEG made the profile refuse 60 real files
+  for carrying the `mjpeg` codec. `detectedMediaKind` comes from the probe and
+  governs the evaluation; `declaredMediaKindMismatch` records the disagreement.
+  Still detection is by **container** (`image2`, `*_pipe`) — ffprobe gives a JPEG
+  a synthetic 0.04 s duration and no `nb_frames`, so a frame-count heuristic
+  reads it as a video.
+- **Rejection is absolute, review is sticky, eligibility is the residue.** A
+  refused licence ends the evaluation; one review trigger makes the whole
+  decision `REVIEW_REQUIRED` however many clean facts sit beside it. There is no
+  scoring, no threshold and no majority — "two of three risk fields are fine" is
+  not a rights position.
+- **`CC_BY_SA` is review-required, never refused and never automatic.**
+  Share-alike binds the _finished advertisement_, and how this repository's
+  output is licensed is not a decision code makes.
+- **DVIDS is public domain only when the item says so at item level.** It hosts
+  separately copyrighted contractor and commercial material too, so silence is
+  ambiguous and ambiguity is refused. A commercial credit line outranks a
+  public-domain field. Every DVIDS item carries the non-endorsement obligation
+  and forces human review, always.
+- **Openverse aggregates, so downloads are restricted to known upstream hosts.**
+  Its `url` points at whichever third party holds the file; following it blindly
+  would turn a search response into arbitrary outbound requests. It has **no
+  video**, and a video request is refused by name rather than returning an empty
+  page — an empty page would misrepresent the catalogue.
+- **Adapters are thin and make no policy.** They translate one provider's shape
+  into the normalized contracts and nothing else. Rights decisions and quality
+  scores live above them, once, so five providers cannot become five policies.
+- **Never claim a contract is verified when it is not.**
+  `responseContractStatus` is `DOCUMENTED_NOT_EXECUTED` until an opt-in live test
+  passes against the real API. CI never contacts a provider and never spends a
+  quota; the fixture server is not evidence about a live API.
+- **Never integrate YouTube, TikTok, Instagram, Facebook, UFC, ONE, DAZN, the
+  Internet Archive or a social-media mirror**, and never install `yt-dlp`,
+  `gallery-dl`, a browser scraper or an unofficial downloader. `REFUSED_SOURCES`
+  states each refusal as data so an operator gets the reason, not "unknown
+  provider".
+- **Every provider URL is untrusted input.** Host allowlists per provider and per
+  purpose, redirects followed by hand and re-validated at every hop, no literal
+  addresses, no loopback outside a test, no credentials in a URL, bodies bounded
+  while streaming, and bytes sniffed — a `.mp4` that is an HTML quota page is a
+  failure, not a video.
+- **No artefact holds a credential, a signed URL or a local path.** Two of the
+  three keyed providers authenticate by **query parameter**, so no artefact ever
+  holds a URL with a query string; provenance keeps a host and a pathname.
+  `assertMediaArtefactSafe` walks everything before it is written and fails
+  closed. `private-provenance.json` is the only file permitted local absolute
+  paths, and it is still walked for credentials.
+- **The external pack is read-only, and its paths are untrusted.** Nothing is
+  written, renamed, moved or deleted. Every path is resolved _and_ `realpath`-ed
+  and re-checked for containment; checksums are recalculated, never read;
+  `references/` is refused as production media by **location**, before any rights
+  column is consulted. Never hardcode a user-specific pack path into application
+  logic.
+- **`INTERNAL_EVALUATION` is a different kind of permission, not a weaker
+  grade.** It is refused **by name** from a campaign manifest — never filtered —
+  and produces a demonstration labelled in both the library name and every
+  affected asset's restrictions.
+- **Licence families project onto the existing rights vocabulary.** CC0 becomes
+  `LICENSED_FOR_OUTPUT`; there is no acquisition-shaped rights class. Adding one
+  would mean every existing check had to learn about it, and the one that forgot
+  would be the hole. The production manifest never learns an acquisition was
+  involved.
+- **Acquired production media is never indexed into Creative Memory.**
+  `mediaAcquisitionGrantsNoReferenceUse` is total over the provider enum; keep it
+  total. Pexels footage is not a benchmark advertisement.
+- **The source-footage benchmark and the creative benchmark are different
+  things.** This profile measures resolution, frame rate, codec, black/freeze,
+  crop safety and edit utility. It reports **no** cinematic-quality score,
+  because no reliable machine measurement of one exists; `humanChecksRequired`
+  names what a person must judge, on every item.
+- **The gallery makes no network request on its own.** Remote previews are links
+  a person clicks; only local media is embedded. No script, no server, and every
+  third-party string escaped.
+- **Nothing on this path constructs a provider.** No reasoning provider, no
+  generation provider, no database client, no paid call. `paidProviderCalls: 0`
+  is a fact about the object graph, written explicitly rather than inferred.
 
 ## Live-UI capture — permanent rules
 

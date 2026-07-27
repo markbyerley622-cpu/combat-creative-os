@@ -4,12 +4,23 @@
   "private": true,
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "default": "./dist/testing.js"
+    }
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint \"src/**/*.ts\"",
     "test": "vitest run",
-    "test:comfyui": "vitest run src/comfyui/comfyui-real-integration.test.ts"
+    "test:comfyui": "vitest run src/comfyui/comfyui-real-integration.test.ts",
+    "test:media-live": "vitest run src/media-acquisition/live-providers.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",

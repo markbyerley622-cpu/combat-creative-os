@@ -318,6 +318,48 @@ export const assetEnvSchema = z.object({
   ASSET_DOWNLOAD_URL_EXPIRY_SECONDS: z.coerce.number().int().positive().default(3600),
 });
 
+/**
+ * Premium licensed media acquisition.
+ *
+ * Every key is optional and there is no default for any of them, which is the
+ * design rather than an oversight: an unset key means that provider is
+ * `NOT_CONFIGURED` and contributes nothing to a search. Nothing falls back to
+ * scraping a web page, and nothing substitutes a synthetic catalogue entry — an
+ * empty search that says which key is missing is a usable answer, and a
+ * fabricated candidate with an invented licence is not.
+ *
+ * Wikimedia Commons and Openverse need no key at all; they are absent here for
+ * that reason, not by omission.
+ *
+ * These values are read only through this schema and are redacted by
+ * `createLogger`'s pino configuration. Two of the three providers take their
+ * key as a *query parameter* rather than a header, so every request URL
+ * contains a live credential — which is why no acquisition artefact ever holds
+ * a URL with a query string (`assertMediaArtefactSafe` refuses one).
+ */
+export const mediaAcquisitionEnvSchema = z.object({
+  PEXELS_API_KEY: z.string().optional(),
+  PIXABAY_API_KEY: z.string().optional(),
+  DVIDS_API_KEY: z.string().optional(),
+  /** Per-request deadline. Search is metadata; a slow provider is a broken one. */
+  MEDIA_ACQUISITION_TIMEOUT_MS: z.coerce.number().int().positive().default(20_000),
+  /** Ceiling for one downloaded file. A 4K master is large; a 4 GB one is a mistake. */
+  MEDIA_ACQUISITION_MAX_DOWNLOAD_BYTES: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(512 * 1024 * 1024),
+  /**
+   * Wikimedia's User-Agent policy makes a descriptive, contactable agent a
+   * condition of access, and the others treat it as good manners. The default
+   * identifies this client; override it to add your own contact.
+   */
+  MEDIA_ACQUISITION_USER_AGENT: z.string().min(1).optional(),
+  /** Where acquired media lands. Repository-relative unless absolute; git-ignored. */
+  MEDIA_ACQUISITION_OUTPUT_DIR: z.string().min(1).default('.aamp-output/acquired-assets'),
+});
+export type MediaAcquisitionEnvConfig = z.infer<typeof mediaAcquisitionEnvSchema>;
+
 export const observabilityEnvSchema = z.object({
   OTEL_EXPORTER_OTLP_ENDPOINT: z
     .string()

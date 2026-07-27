@@ -3131,6 +3131,84 @@ event fires for pages created by `context.newPage()`, not only for popups, so
 the popup guard was closing the adapter's own page and every navigation failed
 with `net::ERR_ABORTED`. Popup detection now discriminates on `page.opener()`.
 
+---
+
+### Premium licensed media acquisition and production-asset promotion (2026-07-27)
+
+**What changed.** `pnpm aamp:media` searches, evaluates, acquires and ingests
+legally usable premium footage, images and audio through official provider APIs
+only, and emits a production-asset manifest the existing generator accepts
+unchanged. Full runbook: `docs/runbooks/premium-media-acquisition.md`.
+
+Seven commands over one run — `search`, `import-pack`, `inspect`, `gallery`,
+`approve`, `acquire`, `build-manifest`, plus `providers`. They are deliberately
+not one pipeline: the step between `inspect` and `approve` is a person reading a
+licence, and a single end-to-end command would have to either stop and wait or
+skip it.
+
+**Boundaries.** `packages/providers/src/media-acquisition/` holds the vendor-
+neutral contracts, the seven-method `MediaAcquisitionProvider` seam, the licence
+policy, the HTTP boundary and five thin adapters (Pexels, Pixabay, DVIDS,
+Wikimedia Commons, Openverse). Adapters make no rights decision and compute no
+score — those live above them, once, so five providers cannot become five
+policies. `apps/aamp-cli/src/media/` holds the run store, the external-pack
+importer, the source-quality profile, approval, the gallery, acquisition, the
+manifest builder and the evidence reports. No new Prisma model, no new renderer,
+no duplicate of `aamp:generate`, and one additive optional block on
+`MediaQualityMeasurements`.
+
+**The lifecycle is the enforcement.** `DISCOVERED → METADATA_VERIFIED →
+RIGHTS_REVIEW_REQUIRED → APPROVED_FOR_DOWNLOAD → DOWNLOADED → INSPECTED →
+OUTPUT_ELIGIBLE`, and `assertLifecycleTransition` refuses a skip by name.
+`RIGHTS_REVIEW_REQUIRED` is mandatory rather than a branch — even a CC0 item
+passes through it, because the record that somebody looked at _this item's_
+rights is the artefact, not the outcome.
+
+**Proven, offline, with zero network and zero paid calls.** The full chain
+search → policy → gallery → approval → acquire → measure → promote → manifest,
+against a deterministic loopback fixture server and FFmpeg `lavfi` media: a real
+3840×2160 h264 clip measured at `frameRate: 30`, `blackRatio: 0`,
+`verticalCropWidthPx: 1215`, producing a manifest the **existing**
+`parseProductionAssetManifest` accepts. The approval gate refuses a skipped
+station, an expired approval, a mis-targeted approval, an approval written
+against a different run, and one claiming a usage the policy did not leave open.
+A download that returns 200 with a plausible file but cannot be measured leaves
+zero assets and does not promote the candidate. `INTERNAL_EVALUATION` material is
+refused **by name** from a campaign manifest and its demonstration is labelled in
+both the library name and every affected asset's restrictions. No fixture API key
+reaches any artefact. 96 provider tests and 81 CLI tests.
+
+**Proven against the operator's real external candidate library**, read-only,
+writing only under `.aamp-output/`: 537 candidate rows, 135 acquisition rows, 115
+media files located, **115 of 115 SHA-256 checksums recalculated from the bytes
+and agreeing with `acquisition-log.csv`**, zero mismatches, zero missing media,
+42 licence-evidence files counted and never copied, and zero candidates above
+`RIGHTS_REVIEW_REQUIRED`. The 135-versus-115 gap is fully explained: 20
+candidates carry two download rows each, each reported with both line numbers.
+
+**Not proven.** **No live provider API has ever been contacted** — no key is
+configured on this machine, so all five adapters carry
+`responseContractStatus: DOCUMENTED_NOT_EXECUTED`: their schemas are a reading of
+published documentation, verified against a fixture server and not against a live
+API. The opt-in live test (`MEDIA_LIVE_TEST=1 pnpm --filter @combat/providers
+test:media-live`) is written and has never run. No third-party media has been
+downloaded. Creative quality is neither measured nor claimed. No rights
+declaration is verified to be _true_ — the policy enforces the terms it is told
+about. Watermark, burned-in-caption and logo presence are human checks by design.
+
+**Defect found by the real-library calibration, and fixed.** The first
+calibration refused 60 files with _"the video codec `mjpeg` is not one the
+renderer accepts"_ — a confident, precise, wrong answer. Those files are
+catalogued as `media_kind: video` and are actually JPEGs, so the profile was
+applying the video floor to a still: a declaration treated as a measurement,
+which is the one thing this profile exists not to do. `measureSourceMedia` now
+derives `detectedMediaKind` from the probe and the evaluation runs against that,
+with `declaredMediaKindMismatch` recorded on all 60 affected items. Detecting it
+needed the container name rather than the frame count — ffprobe reports a JPEG as
+`image2` with a synthetic 0.04-second duration, a `25/1` frame rate and no
+`nb_frames`, so the conventional "one frame and zero duration" heuristic reads a
+still as a 0.04-second video. A fixture-only suite would not have surfaced this.
+
 **Next milestone: AAMP-1 step 4 — `apps/worker` against a live Temporal server**
 (`docs/aamp-architecture.md` §6 task 6), confirming every name in
 `activity-name-contract.ts` is registered against a real server.
