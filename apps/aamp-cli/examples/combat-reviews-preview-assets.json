@@ -1,0 +1,208 @@
+{
+  "manifestVersion": 1,
+  "library": "Combat Reviews external asset root (synthetic; regenerate with pnpm aamp:fixtures)",
+  "assets": [
+    {
+      "id": "logo-primary",
+      "path": "../../../packages/media/fixtures/preview-asset-root/brand/logo.png",
+      "kind": "IMAGE",
+      "role": "LOGO",
+      "description": "Combat Reviews primary logo lockup",
+      "rights": {
+        "classification": "OWNED",
+        "owner": "Combat Reviews",
+        "permittedOutputUse": true,
+        "restrictions": []
+      },
+      "tags": ["logo", "brand"]
+    },
+    {
+      "id": "brand-card",
+      "path": "../../../packages/media/fixtures/preview-asset-root/brand/brand-card.png",
+      "kind": "IMAGE",
+      "role": "BRAND_CARD",
+      "description": "Combat Reviews designed end card",
+      "rights": {
+        "classification": "OWNED",
+        "owner": "Combat Reviews",
+        "permittedOutputUse": true,
+        "restrictions": []
+      },
+      "beats": ["CTA"],
+      "tags": ["brand", "cta", "download"]
+    },
+    {
+      "id": "clip-gym-session",
+      "path": "../../../packages/media/fixtures/preview-asset-root/combat-clips/gym-session.mp4",
+      "kind": "VIDEO",
+      "role": "SOURCE_CLIP",
+      "description": "Owned gym-session footage — four distinct sections across twenty seconds",
+      "rights": {
+        "classification": "OWNED",
+        "owner": "Combat Reviews",
+        "permittedOutputUse": true,
+        "restrictions": []
+      },
+      "beats": ["HOOK", "EVENT_DETAIL"],
+      "tags": ["gym", "training", "combat", "fight", "energy"]
+    },
+    {
+      "id": "clip-ring-walk",
+      "path": "../../../packages/media/fixtures/preview-asset-root/combat-clips/ring-walk.mp4",
+      "kind": "VIDEO",
+      "role": "SOURCE_CLIP",
+      "description": "Owned ring-walk footage — two sections across twelve seconds",
+      "rights": {
+        "classification": "OWNED",
+        "owner": "Combat Reviews",
+        "permittedOutputUse": true,
+        "restrictions": []
+      },
+      "beats": ["EVENT_DETAIL"],
+      "tags": ["ring", "walkout", "events", "weekend", "card"]
+    },
+    {
+      "id": "screen-fight-card",
+      "path": "../../../packages/media/fixtures/preview-asset-root/app-ui/fight-card.png",
+      "kind": "IMAGE",
+      "role": "APP_SCREENSHOT",
+      "description": "Combat Reviews app — this weekend's fight card and event details screen",
+      "rights": {
+        "classification": "OWNED",
+        "owner": "Combat Reviews",
+        "permittedOutputUse": true,
+        "restrictions": []
+      },
+      "beats": ["EVENT_DETAIL", "INFORMATION"],
+      "tags": ["events", "card", "details", "schedule", "weekend"]
+    },
+    {
+      "id": "screen-predictions",
+      "path": "../../../packages/media/fixtures/preview-asset-root/app-ui/predictions.png",
+      "kind": "IMAGE",
+      "role": "APP_SCREENSHOT",
+      "description": "Combat Reviews app — community predictions and fighter rankings screen",
+      "rights": {
+        "classification": "OWNED",
+        "owner": "Combat Reviews",
+        "permittedOutputUse": true,
+        "restrictions": []
+      },
+      "beats": ["PREDICTION"],
+      "tags": ["predictions", "rankings", "picks", "community"]
+    },
+    {
+      "id": "screen-scorecards",
+      "path": "../../../packages/media/fixtures/preview-asset-root/app-ui/scorecards.png",
+      "kind": "IMAGE",
+      "role": "APP_SCREENSHOT",
+      "description": "Combat Reviews app — round-by-round scorecards and post-fight discussion screen",
+      "rights": {
+        "classification": "OWNED",
+        "owner": "Combat Reviews",
+        "permittedOutputUse": true,
+        "restrictions": []
+      },
+      "beats": ["DISCUSSION", "INFORMATION"],
+      "tags": ["discussion", "scorecard", "reviews", "rounds"]
+    },
+    {
+      "id": "music-bed",
+      "path": "../../../packages/media/fixtures/preview-asset-root/audio/music-bed.wav",
+      "kind": "AUDIO",
+      "role": "MUSIC",
+      "description": "Commissioned percussive music bed, cleared for paid media",
+      "rights": {
+        "classification": "COMMISSIONED",
+        "owner": "Combat Reviews",
+        "permittedOutputUse": true,
+        "restrictions": []
+      },
+      "tags": ["music", "percussion"]
+    },
+    {
+      "id": "sfx-fight-bell",
+      "path": "../../../packages/media/fixtures/preview-asset-root/audio/sfx-fight-bell.wav",
+      "kind": "AUDIO",
+      "role": "MUSIC",
+      "description": "Commissioned fight-bell cue",
+      "rights": {
+        "classification": "COMMISSIONED",
+        "owner": "Combat Reviews",
+        "permittedOutputUse": true,
+        "restrictions": []
+      },
+      "tags": ["sfx", "bell"]
+    },
+    {
+      "id": "sfx-crowd",
+      "path": "../../../packages/media/fixtures/preview-asset-root/audio/sfx-crowd.wav",
+      "kind": "AUDIO",
+      "role": "MUSIC",
+      "description": "Commissioned crowd atmosphere bed",
+      "rights": {
+        "classification": "COMMISSIONED",
+        "owner": "Combat Reviews",
+        "permittedOutputUse": true,
+        "restrictions": []
+      },
+      "tags": ["sfx", "crowd"]
+    },
+    {
+      "id": "sfx-impact",
+      "path": "../../../packages/media/fixtures/preview-asset-root/audio/sfx-impact.wav",
+      "kind": "AUDIO",
+      "role": "MUSIC",
+      "description": "Commissioned low impact transient",
+      "rights": {
+        "classification": "COMMISSIONED",
+        "owner": "Combat Reviews",
+        "permittedOutputUse": true,
+        "restrictions": []
+      },
+      "tags": ["sfx", "impact"]
+    },
+    {
+      "id": "sfx-ui-click",
+      "path": "../../../packages/media/fixtures/preview-asset-root/audio/sfx-ui-click.wav",
+      "kind": "AUDIO",
+      "role": "MUSIC",
+      "description": "Commissioned interface click",
+      "rights": {
+        "classification": "COMMISSIONED",
+        "owner": "Combat Reviews",
+        "permittedOutputUse": true,
+        "restrictions": []
+      },
+      "tags": ["sfx", "ui"]
+    },
+    {
+      "id": "sfx-confirmation-pulse",
+      "path": "../../../packages/media/fixtures/preview-asset-root/audio/sfx-confirmation-pulse.wav",
+      "kind": "AUDIO",
+      "role": "MUSIC",
+      "description": "Commissioned confirmation pulse",
+      "rights": {
+        "classification": "COMMISSIONED",
+        "owner": "Combat Reviews",
+        "permittedOutputUse": true,
+        "restrictions": []
+      },
+      "tags": ["sfx", "confirmation"]
+    },
+    {
+      "id": "sfx-cta-emphasis",
+      "path": "../../../packages/media/fixtures/preview-asset-root/audio/sfx-cta-emphasis.wav",
+      "kind": "AUDIO",
+      "role": "MUSIC",
+      "description": "Commissioned end-card emphasis swell",
+      "rights": {
+        "classification": "COMMISSIONED",
+        "owner": "Combat Reviews",
+        "permittedOutputUse": true,
+        "restrictions": []
+      },
+      "tags": ["sfx", "cta"]
+    }
+  ]
+}

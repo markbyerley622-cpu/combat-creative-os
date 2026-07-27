@@ -23,6 +23,21 @@ export const AAMP_EXECUTION_MODES = [
    */
   'FIXTURE',
   /**
+   * The creative decisions were made by a person and supplied as a validated
+   * plan file; no reasoning model and no generation provider was called at all.
+   *
+   * This is a genuinely different claim from either neighbour, which is why it
+   * is its own mode rather than a flag on one of them. A FIXTURE run replays
+   * canned creative that ignores the campaign prompt entirely. A
+   * LOCAL_PRODUCTION run had a model make the decisions. This one had a *human*
+   * make them, for this campaign, and then executed them deterministically —
+   * so it is worth more than a fixture demonstration and is not a production
+   * campaign result. `isRealCampaignRun` stays false: the pipeline did not
+   * originate the creative, and saying otherwise would be the exact
+   * overstatement this module exists to prevent.
+   */
+  'HUMAN_ASSISTED_PREVIEW',
+  /**
    * Live local PostgreSQL, live local Qdrant and a real FFmpeg toolchain.
    * Fixture *reasoning* is still permitted here — but only when the operator
    * asked for it by name — and the output says exactly which halves were real.
@@ -40,12 +55,33 @@ export type AampExecutionMode = (typeof AAMP_EXECUTION_MODES)[number];
 /** Rank, so "at least LOCAL_PRODUCTION" is expressible. */
 const MODE_RANK: Readonly<Record<AampExecutionMode, number>> = {
   FIXTURE: 0,
-  LOCAL_PRODUCTION: 1,
-  PRODUCTION: 2,
+  HUMAN_ASSISTED_PREVIEW: 1,
+  LOCAL_PRODUCTION: 2,
+  PRODUCTION: 3,
 };
 
 export function executionModeRank(mode: AampExecutionMode): number {
   return MODE_RANK[mode];
+}
+
+/**
+ * Whether an attained mode satisfies a requested floor.
+ *
+ * Rank alone is not enough for `HUMAN_ASSISTED_PREVIEW`. It sits above FIXTURE
+ * because a human made the decisions for this campaign, but it is not a weaker
+ * LOCAL_PRODUCTION — it is a different kind of run, and an operator who asked
+ * for a human-assisted preview and silently got a model-planned one has been
+ * given something they did not ask for. So that mode is matched exactly, while
+ * the others keep the ordinary "at least this tier" meaning.
+ */
+export function satisfiesExecutionFloor(
+  requested: AampExecutionMode,
+  attained: AampExecutionMode,
+): boolean {
+  if (requested === 'HUMAN_ASSISTED_PREVIEW' || attained === 'HUMAN_ASSISTED_PREVIEW') {
+    return requested === attained;
+  }
+  return executionModeRank(attained) >= executionModeRank(requested);
 }
 
 /** Accepts the CLI's kebab-case spelling; returns `undefined` for anything else. */
@@ -53,6 +89,8 @@ export function parseExecutionModeFlag(value: string | undefined): AampExecution
   switch ((value ?? '').trim().toLowerCase()) {
     case 'fixture':
       return 'FIXTURE';
+    case 'human-assisted-preview':
+      return 'HUMAN_ASSISTED_PREVIEW';
     case 'local-production':
       return 'LOCAL_PRODUCTION';
     case 'production':
@@ -91,7 +129,16 @@ export const VECTOR_SEARCH_KINDS = [
 ] as const;
 export type VectorSearchKind = (typeof VECTOR_SEARCH_KINDS)[number];
 
-export const REASONING_KINDS = ['REAL_MODEL', 'FIXTURE_REPLAY'] as const;
+/**
+ * `HUMAN_SUPPLIED_PLAN` is a third thing, not a variety of the other two.
+ *
+ * No reasoning provider was constructed, so none could have been called: the
+ * creative arrived as a validated plan file written by a person. Folding it
+ * into `FIXTURE_REPLAY` would claim the campaign prompt was ignored, which is
+ * false; folding it into `REAL_MODEL` would claim a model produced it, which
+ * is worse.
+ */
+export const REASONING_KINDS = ['REAL_MODEL', 'FIXTURE_REPLAY', 'HUMAN_SUPPLIED_PLAN'] as const;
 export type ReasoningKind = (typeof REASONING_KINDS)[number];
 
 export const GENERATION_KINDS = ['COMFYUI_LIVE', 'FIXTURE_TEST_PATTERN', 'NOT_REQUIRED'] as const;
@@ -140,13 +187,31 @@ const REQUIREMENTS: Readonly<
     rendering: [...RENDERING_KINDS],
     qa: [...QA_KINDS],
   },
+  HUMAN_ASSISTED_PREVIEW: {
+    // The infrastructure axes are deliberately unconstrained: what defines
+    // this mode is *where the creative came from*, and a preview is just as
+    // legitimate against an in-memory store as against live PostgreSQL. The
+    // label still lists every substituted component, so nothing is hidden.
+    persistence: [...PERSISTENCE_KINDS],
+    vectorSearch: [...VECTOR_SEARCH_KINDS],
+    // The one axis that is pinned. A run that called a model is not a
+    // human-assisted preview, whatever else was true of it.
+    reasoning: ['HUMAN_SUPPLIED_PLAN'],
+    // Zero generation calls is a promise this mode makes to the operator, so
+    // it is enforced structurally rather than documented.
+    videoGeneration: ['NOT_REQUIRED'],
+    rendering: [...RENDERING_KINDS],
+    qa: [...QA_KINDS],
+  },
   LOCAL_PRODUCTION: {
     persistence: ['PRISMA_POSTGRESQL', 'NOT_REQUIRED'],
     vectorSearch: ['QDRANT_LIVE', 'NOT_REQUIRED'],
     // Fixture reasoning is deliberately permitted here. It is the one
     // substitution a local operator legitimately wants — it needs no paid key
-    // — and the label says so loudly rather than pretending otherwise.
-    reasoning: [...REASONING_KINDS],
+    // — and the label says so loudly rather than pretending otherwise. A
+    // human-supplied plan is *not* permitted: it has its own mode, and letting
+    // it resolve here would erase the distinction.
+    reasoning: ['REAL_MODEL', 'FIXTURE_REPLAY'],
     videoGeneration: [...GENERATION_KINDS],
     rendering: ['FFMPEG_REAL', 'NOT_REQUIRED'],
     qa: ['ACTUAL_MEDIA', 'NOT_REQUIRED'],
@@ -197,6 +262,13 @@ export function shortfallsFor(
  * mislabelled PRODUCTION, because nothing that could mislabel it is in scope.
  */
 export function resolveAttainedExecutionMode(evidence: DependencyEvidence): AampExecutionMode {
+  // Checked before the infrastructure tiers because it is decided by a
+  // different axis: only a human-supplied plan can reach it, and nothing else
+  // can. The order therefore cannot cause a model-planned run to be labelled a
+  // preview, or the reverse.
+  if (shortfallsFor('HUMAN_ASSISTED_PREVIEW', evidence).length === 0) {
+    return 'HUMAN_ASSISTED_PREVIEW';
+  }
   if (shortfallsFor('PRODUCTION', evidence).length === 0) return 'PRODUCTION';
   if (shortfallsFor('LOCAL_PRODUCTION', evidence).length === 0) return 'LOCAL_PRODUCTION';
   return 'FIXTURE';

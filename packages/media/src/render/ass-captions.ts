@@ -1,4 +1,5 @@
 import type { CaptionCue, CaptionStyle } from './manifest';
+import { captionEntranceOverride, type CaptionEntranceKey } from './motion-treatments';
 
 /**
  * Burned-in captions are rendered from an Advanced SubStation Alpha file via
@@ -69,6 +70,15 @@ export interface BuildAssInput {
   readonly heightPx: number;
   /** Per-cue fade, in milliseconds — the "animated typography" requirement applied to captions. */
   readonly fadeMs?: number;
+  /**
+   * Catalogue entrance applied to every cue.
+   *
+   * Absent leaves the plain per-cue fade untouched, so a manifest that does
+   * not ask for an entrance produces byte-identical typography to the one it
+   * produced before the catalogue existed. Only a manifest that asks gets the
+   * anchored, animated form.
+   */
+  readonly entrance?: CaptionEntranceKey;
 }
 
 const DEFAULT_CUE_FADE_MS = 120;
@@ -123,6 +133,18 @@ export function buildAssSubtitleFile(input: BuildAssInput): string {
     'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
   ];
 
+  // Alignment 2 with these coordinates is exactly where the style's own
+  // bottom-centre margins already place a cue, so an entrance changes how the
+  // line arrives without changing where it settles.
+  const override = input.entrance
+    ? captionEntranceOverride(input.entrance, {
+        xPx: input.widthPx / 2,
+        yPx: input.heightPx - style.marginBottomPx,
+        alignment: 2,
+        fadeMs,
+      })
+    : `{\\fad(${fadeMs},${fadeMs})}`;
+
   const events = input.cues.map((cue) => {
     const text = style.uppercase ? cue.text.toUpperCase() : cue.text;
     return [
@@ -135,7 +157,7 @@ export function buildAssSubtitleFile(input: BuildAssInput): string {
       '0',
       '0',
       '',
-      `{\\fad(${fadeMs},${fadeMs})}${escapeAssText(text)}`,
+      `${override}${escapeAssText(text)}`,
     ].join(',');
   });
 

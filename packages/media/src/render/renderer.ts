@@ -9,7 +9,12 @@ import {
   type FfmpegBinaries,
 } from '../binaries';
 import type { CommandRunner } from '../command-runner';
-import { failedChecks, runActualMediaQa, type ActualMediaQaReport } from '../qa/actual-media-qa';
+import {
+  failedChecks,
+  runActualMediaQa,
+  type ActualMediaQaReport,
+  type StoryboardExpectation,
+} from '../qa/actual-media-qa';
 import { buildRenderPlan, type RenderPlan } from './filter-graph';
 import type { RenderManifest } from './manifest';
 import { assertReadableNonEmptyFile, assertWritableOutputPath } from './paths';
@@ -124,6 +129,19 @@ export interface RenderRequest {
   readonly idempotencyKey?: string;
   /** Default true: an identical completed render short-circuits instead of re-encoding. */
   readonly reuseExisting?: boolean;
+  /**
+   * Extra binding checks the caller can hold this render to.
+   *
+   * A storyboard and a set of resolved source checksums are things only the
+   * composition root knows — this package has no idea what a run promised
+   * before it called in. Passing them through rather than having QA go looking
+   * keeps QA a function of the file plus what it was told, and keeps
+   * `@combat/media` free of any opinion about where a run keeps its artefacts.
+   */
+  readonly qa?: {
+    readonly storyboard?: StoryboardExpectation;
+    readonly expectedSourceChecksums?: readonly string[];
+  };
 }
 
 const REJECTED_SUBDIRECTORY = 'rejected';
@@ -192,6 +210,10 @@ export async function renderAdvertisement(
       timeoutMs: request.probeTimeoutMs ?? DEFAULT_PROBE_TIMEOUT_MS,
       signal: request.signal,
       measuredAt: request.now,
+      ...(request.qa?.storyboard ? { storyboard: request.qa.storyboard } : {}),
+      ...(request.qa?.expectedSourceChecksums
+        ? { expectedSourceChecksums: request.qa.expectedSourceChecksums }
+        : {}),
     });
 
     const passed = qaReport.verdict === 'PASS';

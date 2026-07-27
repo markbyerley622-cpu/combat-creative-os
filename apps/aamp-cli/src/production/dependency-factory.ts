@@ -33,6 +33,7 @@ import {
   describeExecutionEvidence,
   executionModeRank,
   resolveAttainedExecutionMode,
+  satisfiesExecutionFloor,
   shortfallsFor,
   type AampExecutionMode,
   type DependencyEvidence,
@@ -144,7 +145,14 @@ export interface AampDependencies {
   readonly logger: Logger;
   readonly runner: CommandRunner;
   readonly binaries: FfmpegBinaries;
-  readonly reasoningProvider: ReasoningProvider;
+  /**
+   * Absent in `HUMAN_ASSISTED` mode, and absent for a structural reason rather
+   * than a stylistic one: when a person supplied the plan there is no
+   * reasoning to do, so no provider is constructed and there is therefore
+   * nothing any downstream code could call. That is what makes "zero reasoning
+   * calls" a property of the object graph instead of a promise.
+   */
+  readonly reasoningProvider?: ReasoningProvider;
   readonly reasoningPolicy: ReasoningPolicy;
   /** Present only when Creative Memory is on. A source-only run acquires no database. */
   readonly db?: ReferenceDataSource;
@@ -158,6 +166,27 @@ export interface AampDependencies {
   readonly storageRoot: string;
   /** Idempotent. Safe to call on success, on failure and from a signal handler. */
   readonly close: () => Promise<void>;
+}
+
+/**
+ * The reasoning provider, for a path that genuinely needs one.
+ *
+ * Throws rather than returning `undefined`, because every caller of this is a
+ * flow that plans with agents — and reaching it without a provider is a wiring
+ * defect (a human-assisted run routed into the agent path), not a
+ * configuration problem an operator can fix.
+ */
+export function requireReasoningProvider(dependencies: AampDependencies): ReasoningProvider {
+  if (!dependencies.reasoningProvider) {
+    throw new AampDependencyError(
+      'REASONING_UNAVAILABLE',
+      [
+        `no reasoning provider was constructed (run mode ${dependencies.reasoningPolicy.runMode}), but this path plans with agents`,
+      ],
+      ['This is a wiring defect: a human-assisted run must not reach the agent planning path.'],
+    );
+  }
+  return dependencies.reasoningProvider;
 }
 
 /** A resource and how to release it, so a partial construction can unwind. */
@@ -348,8 +377,14 @@ export async function createAampDependencies(
       );
     }
 
-    let reasoningProvider: ReasoningProvider;
-    if (reasoningPolicy.useFixtureReasoning) {
+    let reasoningProvider: ReasoningProvider | undefined;
+    if (reasoningPolicy.runMode === 'HUMAN_ASSISTED') {
+      // Deliberately nothing. Not a fixture provider, not a stub — a run whose
+      // creative came from a person has no reasoning to do, and constructing a
+      // provider "just in case" would create the very call path this mode
+      // promises does not exist.
+      reasoningProvider = undefined;
+    } else if (reasoningPolicy.useFixtureReasoning) {
       const factory = input.fixtures?.reasoning;
       if (!factory) {
         throw new AampDependencyError(
@@ -371,7 +406,11 @@ export async function createAampDependencies(
       capability:
         reasoningPolicy.runMode === 'REAL'
           ? 'campaign-specific reasoning over the supplied brief'
-          : 'replays committed golden fixtures; ignores the campaign prompt',
+          : reasoningPolicy.runMode === 'HUMAN_ASSISTED'
+            ? 'no reasoning provider was constructed; the creative decisions arrived as a validated human-authored plan'
+            : 'replays committed golden fixtures; ignores the campaign prompt',
+      // Not simulated: a human-authored plan is not a substitute for reasoning,
+      // it is a different and entirely real source of creative decisions.
       simulated: reasoningPolicy.useFixtureReasoning,
     });
 
@@ -667,7 +706,12 @@ export async function createAampDependencies(
     const evidence: DependencyEvidence = {
       persistence,
       vectorSearch,
-      reasoning: reasoningPolicy.useFixtureReasoning ? 'FIXTURE_REPLAY' : 'REAL_MODEL',
+      reasoning:
+        reasoningPolicy.runMode === 'HUMAN_ASSISTED'
+          ? 'HUMAN_SUPPLIED_PLAN'
+          : reasoningPolicy.useFixtureReasoning
+            ? 'FIXTURE_REPLAY'
+            : 'REAL_MODEL',
       videoGeneration,
       rendering,
       // QA is only as real as the file it measured, so it tracks the renderer
@@ -684,7 +728,7 @@ export async function createAampDependencies(
     };
 
     const executionMode = resolveAttainedExecutionMode(evidence);
-    if (requested && executionModeRank(executionMode) < executionModeRank(requested)) {
+    if (requested && !satisfiesExecutionFloor(requested, executionMode)) {
       throw new AampDependencyError(
         'EXECUTION_MODE_NOT_ATTAINED',
         [
@@ -705,7 +749,7 @@ export async function createAampDependencies(
       logger,
       runner,
       binaries,
-      reasoningProvider,
+      ...(reasoningProvider ? { reasoningProvider } : {}),
       reasoningPolicy,
       ...(db ? { db } : {}),
       ...(creativeMemory ? { creativeMemory } : {}),

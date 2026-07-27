@@ -1,0 +1,70 @@
+{
+  "requestVersion": 1,
+  "name": "combat-reviews-preview",
+  "workspaceId": "6f1d5f6c-6d3a-4a2e-9c5f-0f2a1b3c4d5e",
+  "campaignId": "3c9b7a24-8f61-4d0e-9a37-5b2c8e14d7f0",
+  "brandName": "Combat Reviews",
+  "promptFile": "./combat-reviews-weekend.prompt.txt",
+  "objective": "Drive free app installs from fans planning their combat-sports weekend",
+  "targetAudience": "Combat sports fans aged 18-34 who follow multiple promotions and argue about scorecards after every card",
+  "platform": "TIKTOK",
+  "targetDurationSeconds": 15,
+  "productFacts": [
+    {
+      "id": "coverage",
+      "label": "Coverage",
+      "detail": "Combat Reviews covers every major combat-sports promotion in one app — MMA, boxing and kickboxing."
+    },
+    {
+      "id": "event-details",
+      "label": "Event details",
+      "detail": "Every card shows full fight order, start times in the viewer's own timezone, and broadcaster."
+    },
+    {
+      "id": "predictions",
+      "label": "Predictions",
+      "detail": "Users submit predictions before each card and see aggregated community picks per bout."
+    },
+    {
+      "id": "discussion",
+      "label": "Discussion",
+      "detail": "Round-by-round scorecards and post-fight discussion threads let fans settle disputed decisions with data."
+    },
+    {
+      "id": "price",
+      "label": "Price",
+      "detail": "The app is free to download and free to use; no subscription is required for event data or discussion."
+    }
+  ],
+  "eventFacts": [
+    {
+      "id": "weekend-count",
+      "label": "Events this weekend",
+      "detail": "12 combat-sports events are scheduled across all covered promotions this weekend."
+    }
+  ],
+  "keyMessages": [
+    "12 events this weekend, all in one app",
+    "Predictions before the card, scorecards after it"
+  ],
+  "mandatories": ["End on the Download Free call to action", "Logo visible throughout"],
+  "cta": {
+    "headline": "Download Free",
+    "subline": "Every event. Every round.",
+    "durationSeconds": 3
+  },
+  "brandKit": {
+    "logoAssetId": "logo-primary",
+    "primaryColorHex": "#0B0B0F",
+    "accentColorHex": "#FF3B30",
+    "captionFontFamily": "Arial",
+    "safeAreaTopPx": 220,
+    "safeAreaBottomPx": 420
+  },
+  "sourceAssetManifest": "./combat-reviews-preview-assets.json",
+  "outputDirectory": ".aamp-output/human-assisted-preview",
+  "generation": {
+    "source": "SOURCE_ONLY",
+    "generatedShotCount": 0
+  }
+}

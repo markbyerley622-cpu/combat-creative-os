@@ -9,7 +9,7 @@ import type { CampaignRequest } from '../campaign-request';
 import { ContextAwareFixtureReasoningProvider } from '../creative-memory/context-aware-fixture-reasoning';
 import { CreativeMemoryInjector } from '../creative-memory/injection';
 import { buildRunProvenance } from '../production/campaign-run-provenance';
-import type { AampDependencies } from '../production/dependency-factory';
+import { requireReasoningProvider, type AampDependencies } from '../production/dependency-factory';
 import { writeRunProvenance } from '../production/run-provenance';
 import { EXIT_CODES, runSourceCampaign } from '../run-source-campaign';
 import { buildComparisonReport, collectArmFacts, type ComparisonReport } from './comparison';
@@ -141,7 +141,7 @@ async function reasoningFor(
   }
   if (paidProviders.authorised) {
     return {
-      provider: dependencies.reasoningProvider,
+      provider: requireReasoningProvider(dependencies),
       profile: `${paidProviders.providerName}/${paidProviders.model}`,
       deterministic: false,
     };

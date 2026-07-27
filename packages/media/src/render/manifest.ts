@@ -1,14 +1,32 @@
 import { z } from 'zod';
 
+import {
+  CAPTION_ENTRANCE_KEYS,
+  CTA_ENTRANCE_KEYS,
+  DECORATION_TREATMENT_KEYS,
+  SCENE_TREATMENT_KEYS,
+  sceneTreatmentAccepts,
+} from './motion-treatments';
+
 /**
  * The render manifest — the complete, validated description of one
  * advertisement, and the only input the FFmpeg renderer accepts.
  *
- * Versioned by a literal discriminator rather than a loose number so a v2
- * manifest fails parsing here instead of being half-understood by a v1
- * renderer. A changed requirement is a new version, never an edit to this
- * one — the same versioned-immutable discipline `DeliveryProfile` and
- * `RoughEditSpecification` follow in `@combat/domain`.
+ * Versioned by an explicit version literal so a manifest is never
+ * half-understood by a renderer that predates it. A changed requirement is a
+ * new version, never an edit to an existing one — the same
+ * versioned-immutable discipline `DeliveryProfile` and `RoughEditSpecification`
+ * follow in `@combat/domain`.
+ *
+ * **v2 is strictly additive, and v1 is unchanged.** Every field v2 introduces
+ * — scene motion treatments, decorations, caption entrances, the CTA hold and
+ * the audio design block — is optional, and `manifestVersion: 1` continues to
+ * *refuse* all of them by name. That is why there is one schema object rather
+ * than two: a duplicated v1 would drift, whereas a single object plus an
+ * explicit "this field needs version 2" rule cannot. A v1 manifest written
+ * before this milestone parses to exactly what it parsed to before, and a v1
+ * manifest that tries to use a v2 feature is told which field and which
+ * version, instead of hitting a `.strict()` "unrecognized key".
  *
  * Defined in `@combat/media` rather than `@combat/domain` for the same
  * reason `@combat/domain`'s `MediaMetadataSchema` is defined there rather
@@ -148,6 +166,57 @@ export const TrimSchema = z
     message: 'trim.outSeconds must be greater than trim.inSeconds',
   });
 
+export const SceneTreatmentKeySchema = z.enum(SCENE_TREATMENT_KEYS);
+export type SceneTreatmentKeyValue = z.infer<typeof SceneTreatmentKeySchema>;
+
+/**
+ * **v2 only.** Selects a motion treatment from the catalogue by key.
+ *
+ * When present it supersedes `motion`/`motionIntensity` entirely, which is why
+ * it is a separate field rather than more values in `SceneMotionSchema`: the
+ * catalogue owns treatments the v1 motion enum has no vocabulary for (a
+ * bounded speed ramp, an impact freeze, a bezelled UI frame), and a manifest
+ * should say which of the two systems it is using rather than leaving a
+ * reader to infer it from an intensity value.
+ */
+export const SceneTreatmentSchema = z
+  .object({
+    key: SceneTreatmentKeySchema,
+    intensity: z.number().min(0).max(1).default(0.5),
+  })
+  .strict();
+export type SceneTreatment = z.infer<typeof SceneTreatmentSchema>;
+
+export const DecorationKeySchema = z.enum(DECORATION_TREATMENT_KEYS);
+
+/**
+ * **v2 only.** A brand-colour callout or accent outline over a region of a
+ * scene, in output pixels. Geometry and colour only — a callout carries no
+ * text, because text belongs in the generated subtitle file where it can never
+ * become filter grammar.
+ */
+export const SceneDecorationSchema = z
+  .object({
+    id: z.string().min(1),
+    key: DecorationKeySchema,
+    colorHex: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'colour must be #RRGGBB'),
+    opacity: z.number().min(0).max(1).default(1),
+    xPx: z.number().int().min(0).max(1080),
+    yPx: z.number().int().min(0).max(1920),
+    widthPx: z.number().int().positive().max(1080),
+    heightPx: z.number().int().positive().max(1920),
+    /** Outline thickness; ignored by the filled callout. */
+    thicknessPx: z.number().int().min(1).max(40).default(6),
+    /** Window on the *output* timeline, not on the scene's own clock. */
+    startSeconds: z.number().min(0),
+    endSeconds: z.number().positive(),
+  })
+  .strict()
+  .refine((decoration) => decoration.endSeconds > decoration.startSeconds, {
+    message: 'decoration endSeconds must be greater than startSeconds',
+  });
+export type SceneDecoration = z.infer<typeof SceneDecorationSchema>;
+
 export const SceneSchema = z
   .object({
     id: z.string().min(1),
@@ -160,6 +229,10 @@ export const SceneSchema = z
     motion: SceneMotionSchema.default('STATIC'),
     /** 0 is imperceptible, 1 is the strongest move the profile allows. */
     motionIntensity: z.number().min(0).max(1).default(0.5),
+    /** **v2 only.** Catalogue treatment; supersedes `motion` when present. */
+    treatment: SceneTreatmentSchema.optional(),
+    /** **v2 only.** Brand-colour callouts and accent outlines over this scene. */
+    decorations: z.array(SceneDecorationSchema).optional(),
     /** Absent on the first scene; required on every later one. */
     transitionIn: SceneTransitionInSchema.optional(),
     /** Whether this scene's own audio is contributed to the mix. */
@@ -256,10 +329,14 @@ export const CaptionStyleSchema = z
   .strict();
 export type CaptionStyle = z.infer<typeof CaptionStyleSchema>;
 
+export const CaptionEntranceSchema = z.enum(CAPTION_ENTRANCE_KEYS);
+
 export const CaptionsSchema = z
   .object({
     style: CaptionStyleSchema.default({}),
     cues: z.array(CaptionCueSchema).min(1),
+    /** **v2 only.** Catalogue entrance animation applied to every cue. */
+    entrance: CaptionEntranceSchema.optional(),
   })
   .strict();
 
@@ -293,6 +370,15 @@ export const CallToActionSchema = z
     /** Optional logo lockup on the card. */
     logoSourceId: z.string().min(1).optional(),
     logoWidthPx: z.number().int().positive().max(1080).default(420),
+    /** **v2 only.** Catalogue entrance animation for the headline. */
+    entrance: z.enum(CTA_ENTRANCE_KEYS).optional(),
+    /**
+     * **v2 only.** How long the finished card must sit fully settled at the
+     * end of the cut. QA measures this against the produced file: a CTA that
+     * animates in and is gone before a viewer can act on it is the failure
+     * this field exists to make visible.
+     */
+    holdSeconds: z.number().min(0).max(10).optional(),
   })
   .strict()
   .refine((cta) => cta.endSeconds > cta.startSeconds, {
@@ -329,6 +415,82 @@ export const LoudnessTargetSchema = z
   })
   .strict();
 
+/**
+ * What a one-shot audio event is *for*.
+ *
+ * A closed vocabulary rather than free tags, for the same reason `StoryBeat`
+ * is closed: the mix rules below are chosen per role, and matching arbitrary
+ * strings would make "why is this bell 4 dB down?" unanswerable.
+ */
+export const AUDIO_CUE_ROLES = [
+  'FIGHT_BELL',
+  'CROWD',
+  'IMPACT',
+  'UI_CLICK',
+  'CONFIRMATION_PULSE',
+  'CTA_EMPHASIS',
+] as const;
+export const AudioCueRoleSchema = z.enum(AUDIO_CUE_ROLES);
+export type AudioCueRole = z.infer<typeof AudioCueRoleSchema>;
+
+/** **v2 only.** A single placed sound event. */
+export const AudioCueSchema = z
+  .object({
+    id: z.string().min(1),
+    sourceId: z.string().min(1),
+    role: AudioCueRoleSchema,
+    /** Where the event lands on the output timeline. */
+    atSeconds: z.number().min(0),
+    /** Offset into the source file. */
+    sourceOffsetSeconds: z.number().min(0).default(0),
+    /** Trim the event to this length. Absent plays the source out. */
+    durationSeconds: z.number().positive().max(30).optional(),
+    gainDb: z.number().min(-60).max(12).default(0),
+    fadeInSeconds: z.number().min(0).max(3).default(0.01),
+    fadeOutSeconds: z.number().min(0).max(3).default(0.08),
+    /** Whether the music bed ducks under this event. */
+    ducksMusic: z.boolean().default(false),
+  })
+  .strict();
+export type AudioCue = z.infer<typeof AudioCueSchema>;
+
+/**
+ * **v2 only.** The deterministic mix rules.
+ *
+ * Every value here is a decision the renderer applies literally — there is no
+ * adaptive gain staging and nothing consults the material. That is deliberate:
+ * a mix that reacts to its inputs is a mix two runs of the same manifest can
+ * disagree about, and the whole point of this pipeline is that they cannot.
+ * What *is* measured is the result, from the produced file, by QA.
+ */
+export const AudioDesignSchema = z
+  .object({
+    cues: z.array(AudioCueSchema).default([]),
+    /** Gain applied to every scene's own audio before it enters the mix. */
+    sourceAudioGainDb: z.number().min(-60).max(12).default(-12),
+    /** How far MUSIC drops under a cue that declares `ducksMusic`. */
+    cueDuckingDb: z.number().min(0).max(40).default(6),
+    /**
+     * Equal-power crossfade between two successive music beds.
+     *
+     * Applies only when exactly two MUSIC tracks are supplied — the case where
+     * one bed hands over to another partway through a cut. It is deliberately
+     * not a fix for a *looped* bed's seam: a loop point is a property of the
+     * source file, and pretending a mix parameter can hide one would be a
+     * claim this renderer cannot keep.
+     */
+    musicCrossfadeSeconds: z.number().min(0).max(3).default(0.25),
+    /**
+     * Peak protection. A brick-wall limiter ahead of loudness normalisation,
+     * so a stacked impact and bell cannot clip the master even though each cue
+     * on its own is well under the ceiling.
+     */
+    peakCeilingDbtp: z.number().min(-9).max(-0.1).default(-1.5),
+    limiterEnabled: z.boolean().default(true),
+  })
+  .strict();
+export type AudioDesign = z.infer<typeof AudioDesignSchema>;
+
 export const AudioSchema = z
   .object({
     tracks: z.array(AudioTrackSchema).min(1),
@@ -339,6 +501,8 @@ export const AudioSchema = z
      * actual speech envelope rather than a guessed schedule.
      */
     musicDuckingDb: z.number().min(0).max(40).default(12),
+    /** **v2 only.** Placed sound events and the deterministic mix rules. */
+    design: AudioDesignSchema.optional(),
   })
   .strict();
 
@@ -364,11 +528,15 @@ export const OutputSpecificationSchema = z
   .strict();
 export type OutputSpecification = z.infer<typeof OutputSpecificationSchema>;
 
+/** The original version. Still accepted, still exactly as strict as it was. */
 export const RENDER_MANIFEST_VERSION = 1 as const;
+/** The version that understands motion treatments, decorations and audio design. */
+export const LATEST_RENDER_MANIFEST_VERSION = 2 as const;
+export const RENDER_MANIFEST_VERSIONS = [1, 2] as const;
 
 const RenderManifestObjectSchema = z
   .object({
-    manifestVersion: z.literal(RENDER_MANIFEST_VERSION),
+    manifestVersion: z.union([z.literal(1), z.literal(2)]),
     /** Stable name for this cut; becomes part of the deterministic output filename. */
     name: z
       .string()
@@ -395,10 +563,32 @@ const RenderManifestObjectSchema = z
  * add up to the requested duration, a CTA scheduled past the end of the cut.
  * All of them are cheaper as parse errors than as a wasted encode.
  */
-export const RenderManifestV1Schema = RenderManifestObjectSchema.superRefine((manifest, ctx) => {
+export const RenderManifestSchema = RenderManifestObjectSchema.superRefine((manifest, ctx) => {
   const addIssue = (message: string, path: (string | number)[]): void => {
     ctx.addIssue({ code: z.ZodIssueCode.custom, message, path });
   };
+
+  // ---- version gating ------------------------------------------------------
+  // A v1 manifest refuses every v2 field by name. Reporting the field and the
+  // version it needs is far more useful than a bare "unrecognized key", and it
+  // is what keeps v1's meaning frozen rather than quietly widening.
+  if (manifest.manifestVersion === 1) {
+    const requiresV2 = (label: string, path: (string | number)[]): void => {
+      addIssue(`${label} requires manifestVersion 2`, path);
+    };
+    manifest.scenes.forEach((scene, index) => {
+      if (scene.treatment) requiresV2('scene.treatment', ['scenes', index, 'treatment']);
+      if (scene.decorations) requiresV2('scene.decorations', ['scenes', index, 'decorations']);
+    });
+    if (manifest.captions?.entrance) {
+      requiresV2('captions.entrance', ['captions', 'entrance']);
+    }
+    if (manifest.cta?.entrance) requiresV2('cta.entrance', ['cta', 'entrance']);
+    if (manifest.cta?.holdSeconds !== undefined) {
+      requiresV2('cta.holdSeconds', ['cta', 'holdSeconds']);
+    }
+    if (manifest.audio?.design) requiresV2('audio.design', ['audio', 'design']);
+  }
 
   const sourceIds = new Set<string>();
   manifest.sources.forEach((source, index) => {
@@ -469,6 +659,27 @@ export const RenderManifestV1Schema = RenderManifestObjectSchema.superRefine((ma
     if (scene.motion === 'PARALLAX' && source?.kind !== 'IMAGE') {
       addIssue('PARALLAX motion requires a still-image source', ['scenes', index, 'motion']);
     }
+
+    // A treatment the source kind cannot carry is caught here rather than by
+    // FFmpeg, twenty seconds into an encode.
+    if (scene.treatment && source && source.kind !== 'AUDIO') {
+      const accepts = sceneTreatmentAccepts(scene.treatment.key);
+      if (!accepts.includes(source.kind)) {
+        addIssue(
+          `treatment ${scene.treatment.key} accepts ${accepts.join(' or ')} sources, but "${source.id}" is ${source.kind}`,
+          ['scenes', index, 'treatment', 'key'],
+        );
+      }
+      // The catalogue enforces the exact frame-based bound; this is the cheap
+      // version of the same rule, caught at parse time.
+      const minimumFreezeSeconds = 4 / manifest.output.frameRate;
+      if (scene.treatment.key === 'IMPACT_FREEZE' && scene.durationSeconds < minimumFreezeSeconds) {
+        addIssue(
+          `IMPACT_FREEZE needs a scene of at least ${minimumFreezeSeconds.toFixed(3)}s so there is motion before the hold`,
+          ['scenes', index, 'durationSeconds'],
+        );
+      }
+    }
   });
 
   // Exact-duration contract: scenes butt up against each other, transitions
@@ -529,10 +740,29 @@ export const RenderManifestV1Schema = RenderManifestObjectSchema.superRefine((ma
     });
   }
 
+  // Decorations are scheduled on the output timeline, so they are bounded by
+  // the cut rather than by the scene they decorate.
+  manifest.scenes.forEach((scene, sceneIndex) => {
+    scene.decorations?.forEach((decoration, index) => {
+      withinCut(
+        decoration.endSeconds,
+        ['scenes', sceneIndex, 'decorations', index, 'endSeconds'],
+        `decoration "${decoration.id}"`,
+      );
+    });
+  });
+
   if (manifest.cta) {
-    withinCut(manifest.cta.endSeconds, ['cta', 'endSeconds'], 'cta');
-    if (manifest.cta.logoSourceId) {
-      requireSource(manifest.cta.logoSourceId, 'IMAGE', ['cta', 'logoSourceId']);
+    const cta = manifest.cta;
+    withinCut(cta.endSeconds, ['cta', 'endSeconds'], 'cta');
+    if (cta.logoSourceId) {
+      requireSource(cta.logoSourceId, 'IMAGE', ['cta', 'logoSourceId']);
+    }
+    if (cta.holdSeconds !== undefined && cta.holdSeconds > cta.endSeconds - cta.startSeconds) {
+      addIssue(
+        `cta.holdSeconds is ${cta.holdSeconds}s but the card is only on screen for ${(cta.endSeconds - cta.startSeconds).toFixed(3)}s`,
+        ['cta', 'holdSeconds'],
+      );
     }
   }
 
@@ -548,6 +778,21 @@ export const RenderManifestV1Schema = RenderManifestObjectSchema.superRefine((ma
       trackIds.add(track.id);
       requireSource(track.sourceId, 'AUDIO', ['audio', 'tracks', index, 'sourceId']);
     });
+
+    const cueIds = new Set<string>();
+    manifest.audio.design?.cues.forEach((cue, index) => {
+      if (cueIds.has(cue.id)) {
+        addIssue(`duplicate audio cue id "${cue.id}"`, ['audio', 'design', 'cues', index, 'id']);
+      }
+      cueIds.add(cue.id);
+      requireSource(cue.sourceId, 'AUDIO', ['audio', 'design', 'cues', index, 'sourceId']);
+      if (cue.atSeconds > manifest.output.durationSeconds + 1e-6) {
+        addIssue(
+          `audio cue "${cue.id}" starts at ${cue.atSeconds}s, past the ${manifest.output.durationSeconds}s cut`,
+          ['audio', 'design', 'cues', index, 'atSeconds'],
+        );
+      }
+    });
   } else if (manifest.output.audioCodec !== null) {
     const sceneAudio = manifest.scenes.some((scene) => scene.useSourceAudio);
     if (!sceneAudio) {
@@ -559,7 +804,7 @@ export const RenderManifestV1Schema = RenderManifestObjectSchema.superRefine((ma
   }
 });
 
-export type RenderManifest = z.infer<typeof RenderManifestV1Schema>;
+export type RenderManifest = z.infer<typeof RenderManifestSchema>;
 
 export class ManifestValidationError extends Error {
   constructor(
@@ -582,7 +827,7 @@ export class ManifestValidationError extends Error {
  * at once rather than the first.
  */
 export function parseRenderManifest(value: unknown, manifestPath?: string): RenderManifest {
-  const result = RenderManifestV1Schema.safeParse(value);
+  const result = RenderManifestSchema.safeParse(value);
   if (result.success) return result.data;
   throw new ManifestValidationError(
     result.error.issues.map((issue) => ({

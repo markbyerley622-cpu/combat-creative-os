@@ -113,8 +113,84 @@ still unexercised. See the "Budget enforcement" rules below,
 `docs/architecture.md` §8's AAMP-1 step 3 entry and
 `docs/runbooks/database-migrations.md` §9.
 
+**The zero-cost footage-first creative preview is done** — a person authors the
+creative decisions as a validated plan and the pipeline executes them
+deterministically, with **no reasoning provider and no generation provider
+constructed at all**. **Proven live:** an ffprobe-verified 1080×1920 h264/AAC
+MP4 at exactly 15.000 s passing all 37 binding QA checks, measured at −13.8
+LUFS against a −14 target with zero clipped samples; the run succeeds in an
+environment where `REASONING_PROVIDER=claude` is set with no API key (a
+campaign run exits 3 there); two runs of the same plan produce a byte-identical
+master; real black/freeze/scene detection drove a non-zero, black-avoiding
+in-point; and a QA failure sent the master to `rejected/` with a non-zero exit
+code. **Not proven:** creative quality — a human made those judgements, and the
+example runs against synthetic `lavfi` media. See the "Zero-cost footage-first
+preview" rules below and `docs/runbooks/zero-cost-footage-first-preview.md`.
+
 **The next milestone is AAMP-1 step 4** — `apps/worker` against a live Temporal
 server (`docs/aamp-architecture.md` §6 task 6).
+
+## Zero-cost footage-first preview — permanent rules
+
+- **`HUMAN_ASSISTED_PREVIEW` is decided by where the creative came from, not by
+  how much infrastructure ran.** Its evidence value `HUMAN_SUPPLIED_PLAN` is
+  permitted by no other mode, and it permits no other reasoning value — so a
+  model-planned run can never be labelled a preview and a preview can never be
+  labelled PRODUCTION. It also requires `videoGeneration: NOT_REQUIRED`.
+  `satisfiesExecutionFloor` matches it **exactly**, never by rank: it is a
+  different kind of run, not a weaker tier.
+- **No reasoning provider is constructed in this mode — not even a fixture
+  one.** `AampDependencies.reasoningProvider` is optional and a path that needs
+  one calls `requireReasoningProvider`. "Zero reasoning calls" is a property of
+  the object graph: there is nothing to call. Never add a provider here "just in
+  case", and never route the preview into the agent planning path.
+- **A plan is bound to one brief or it does not run.** `campaignPromptSha256`,
+  `campaignId`, `workspaceId`, the duration, the CTA duration and the logo must
+  all match the request. A plan that validates but was written for a different
+  prompt would render perfectly and be the wrong advertisement.
+- **A plan is attributable.** `authoredBy` is required, because the mode's
+  entire claim is that a person made these decisions. Never add a default.
+- **The template is a skeleton, never a runnable plan.** Every prose field says
+  `TODO`. A template that rendered as-is would make the claim untrue on first
+  use.
+- **The plan carries the imitation prohibition**, because in this mode there is
+  no prompt to carry it.
+- **Preflight canonicalises before it trusts.** Resolve _and_ `realpath`, so a
+  symlink inside the asset root pointing outside it is refused. Anything under
+  `references/` is counted and refused entry to the production manifest
+  whatever its declared rights say — that is the structural half of
+  "analysis-only can never reach an output". Preflight is all-or-nothing.
+- **In-points come from measurement, never from zero.** A window over measured
+  black, frozen or already-used footage is _rejected_, not scored down;
+  transition handles are required; a pinned in-point is verified, not
+  overridden. Selection is pure, needs no model or network, and records every
+  rejected alternative — a list of winners with no losers is not an explanation.
+- **The motion-treatment catalogue is the single producer of motion grammar.**
+  The filter graph builds none of its own, and v1 manifests compile through the
+  same catalogue. Changing a treatment's filters is a
+  `MOTION_TREATMENT_CATALOGUE_VERSION` bump, not an edit in place. Numbers reach
+  filter text only through `num`, colours only through `hexToFfmpegColor*`.
+- **Render manifest v2 is strictly additive and v1 is frozen.** One schema
+  object, two versions: every v2 field is optional and `manifestVersion: 1`
+  refuses each of them _by name_. Never widen v1.
+- **The mix is data, not judgement.** Per-role gain clamps, trim ceilings,
+  ducking permissions and fades are stated once in `CUE_MIX_RULES`. A role that
+  never ducks cannot be talked into ducking by a plan. What is _measured_ is the
+  finished master.
+- **The storyboard is written before the render**, so a reviewer sees the
+  intended cut and QA has something independent to compare the file against.
+  `assertStoryboardSafe` fails closed on credentials, absolute paths and
+  reference-analysis paths; `storyboard.html` opens with no server, no network
+  and no script, and authored copy is escaped.
+- **An unmeasurable binding property is not a satisfied one.** A QA check that
+  could not be taken carries `notMeasuredReason` and is never a `PASS`. Never
+  fabricate a measurement, and never report a manifest value as one.
+- **The black/freeze walk skips what the manifest declared still.** A dip to
+  black is black on purpose and a held end card is held on purpose; flagging
+  either would make the check something operators learn to ignore.
+- **A preview is never a campaign result.** `isRealCampaignRun: false`,
+  `paidProviderCalls: 0`, `requiresHumanApproval: true` and the caveat are
+  written explicitly into every artefact rather than left to be inferred.
 
 ## Budget enforcement — permanent rules (AAMP-1 step 3)
 

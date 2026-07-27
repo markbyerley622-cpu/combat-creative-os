@@ -11,6 +11,17 @@ import {
 } from './motion-graphics.ffmpeg';
 import { MotionGraphicsProviderError, type MotionGraphicsTimeline } from './motion-graphics';
 
+/**
+ * Windows releases a child process's file handles asynchronously, so a
+ * directory removal issued immediately after the last FFmpeg exits can see
+ * `ENOTEMPTY` even though every file was unlinked. Actual-media QA now spawns
+ * roughly ten probes per render — a frame walk, the caption and safe-area
+ * crops, the CTA hold and the audio decode — which widens that window
+ * considerably on a loaded machine. `fs.rm`'s retry options exist for exactly
+ * this case; they are the documented API, not a retry hiding a defect.
+ */
+const CLEANUP = { recursive: true, force: true, maxRetries: 10, retryDelay: 50 } as const;
+
 const FIXTURE_MANIFEST_PATH = resolve(
   __dirname,
   '..',
@@ -131,7 +142,7 @@ function fakeRunner(options: { squareOutput?: boolean } = {}): CommandRunner & {
 
       if (args.includes('rawvideo')) {
         const vf = args[args.indexOf('-vf') + 1] ?? '';
-        const crop = /^crop=(\d+):(\d+)/.exec(vf);
+        const crop = /^crop=(\d+):(\d+):(\d+):(\d+)/.exec(vf);
         const scale = /^scale=(\d+):(\d+)/.exec(vf);
         const width = Number(crop?.[1] ?? scale?.[1] ?? 270);
         const height = Number(crop?.[2] ?? scale?.[2] ?? 480);
@@ -142,11 +153,15 @@ function fakeRunner(options: { squareOutput?: boolean } = {}): CommandRunner & {
         // type; the CTA window instead reads as the end card's own colour
         // with a band of copy on it. Painting the frame the way the timeline
         // actually looks is what lets the provider's QA gate be exercised.
+        // Shifted with the timeline: real footage differs frame to frame, and
+        // a fake that painted the identical pattern at every moment would read
+        // as frozen picture to the freeze check.
+        const phase = Math.round(timeSeconds * 7) % 8;
         const stripe = (from: number, to: number): void => {
           for (let y = from; y < to; y += 1) {
             for (let x = 0; x < width; x += 1) {
               const offset = (y * width + x) * 3;
-              const on = y % 8 < 3;
+              const on = (y + phase) % 8 < 3;
               pixels[offset] = on ? 250 : 4;
               pixels[offset + 1] = on ? 250 : 4;
               pixels[offset + 2] = on ? 250 : 4;
@@ -156,14 +171,25 @@ function fakeRunner(options: { squareOutput?: boolean } = {}): CommandRunner & {
 
         if (crop) {
           // A caption-band crop: type is only there while a cue is
-          // scheduled, which is what the caption-timing check compares.
-          const cues = (
-            fixtureRaw as { captions: { cues: { startSeconds: number; endSeconds: number }[] } }
-          ).captions.cues;
-          const scheduled = cues.some(
+          // scheduled, which is what the caption-timing check compares. A crop
+          // whose centre falls *below* the bottom safe margin is the safe-area
+          // probe, and painting type into it would fake the very violation
+          // that check exists to catch.
+          const captions = (
+            fixtureRaw as {
+              captions: {
+                style?: { marginBottomPx?: number };
+                cues: { startSeconds: number; endSeconds: number }[];
+              };
+            }
+          ).captions;
+          const marginBottomPx = captions.style?.marginBottomPx ?? 420;
+          const cropTop = Number(crop[4] ?? 0);
+          const insideCaptionBand = cropTop + height / 2 < 1920 - marginBottomPx;
+          const scheduled = captions.cues.some(
             (cue) => timeSeconds >= cue.startSeconds && timeSeconds <= cue.endSeconds,
           );
-          if (scheduled) stripe(0, height);
+          if (insideCaptionBand && scheduled) stripe(0, height);
           else pixels.fill(96);
           await mkdir(dirname(target), { recursive: true });
           await writeFile(target, pixels);
@@ -186,10 +212,47 @@ function fakeRunner(options: { squareOutput?: boolean } = {}): CommandRunner & {
         return ok('');
       }
 
+      // The audio-measurement decode writes nothing and reports its findings
+      // on stderr, exactly as the real one does. It is not a render, so it
+      // must not be counted as one.
+      const afIndex = args.indexOf('-af');
+      if (afIndex >= 0 && (args[afIndex + 1] ?? '').includes('ebur128')) {
+        return {
+          stdout: '',
+          stderr: [
+            '  Stream #0:0(und): Audio: aac (LC), 48000 Hz, stereo, fltp, 192 kb/s',
+            '[Parsed_ebur128_0 @ 000001] Summary:',
+            '',
+            '  Integrated loudness:',
+            '    I:         -14.0 LUFS',
+            '',
+            '  Loudness range:',
+            '    LRA:        6.0 LU',
+            '',
+            '  True peak:',
+            '    Peak:      -1.2 dBFS',
+            '[Parsed_astats_1 @ 000002] Overall',
+            '[Parsed_astats_1 @ 000002] Peak level dB: -1.200000',
+            '[Parsed_astats_1 @ 000002] Abs Peak count: 1.000000',
+          ].join('\n'),
+          exitCode: 0,
+          stderrTruncated: false,
+        };
+      }
+
       renders += 1;
       const absolute = resolve(runOptions?.cwd ?? process.cwd(), target);
       await mkdir(dirname(absolute), { recursive: true });
-      await writeFile(absolute, Buffer.alloc(4096, 9));
+      // The faststart check reads the container's own atom table, so the fake
+      // has to write one: `ftyp`, then `moov` before `mdat`.
+      const container = Buffer.alloc(4096, 9);
+      container.writeUInt32BE(16, 0);
+      container.write('ftyp', 4, 4, 'latin1');
+      container.writeUInt32BE(16, 16);
+      container.write('moov', 20, 4, 'latin1');
+      container.writeUInt32BE(4096 - 32, 32);
+      container.write('mdat', 36, 4, 'latin1');
+      await writeFile(absolute, container);
       return ok('');
     },
   };
@@ -224,7 +287,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  await rm(workRoot, { recursive: true, force: true });
+  await rm(workRoot, CLEANUP);
 });
 
 function manifestBinding(mutate?: (raw: Record<string, any>) => void): Record<string, unknown> {

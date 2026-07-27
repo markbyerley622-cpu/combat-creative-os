@@ -1,4 +1,5 @@
 import { buildAssSubtitleFile } from './ass-captions';
+import { hexToFfmpegColor, num } from './filter-primitives';
 import {
   MIN_TRANSITION_SECONDS,
   type Overlay,
@@ -6,9 +7,16 @@ import {
   type RenderManifest,
   type Scene,
   type SceneMotion,
-  type SceneTransition,
-  secondsToFrames,
+  type SceneTreatmentKeyValue,
 } from './manifest';
+import {
+  compileDecorationTreatment,
+  compileSceneTreatment,
+  compileTransitionTreatment,
+  ctaEntranceOverride,
+  MOTION_TREATMENT_CATALOGUE_VERSION,
+  type CtaEntranceKey,
+} from './motion-treatments';
 import type { ResolvedSource } from './source-resolution';
 
 /**
@@ -35,23 +43,23 @@ import type { ResolvedSource } from './source-resolution';
  *   stay absolute — they are argv, not graph.
  */
 
-/** Oversample factor before `zoompan`, so a push-in still resolves full detail at maximum zoom. */
-const MOTION_OVERSAMPLE = 1.5;
 /** Distance overlay content keeps from the frame edge. */
 export const SAFE_MARGIN_PX = 72;
 
-const TRANSITION_TO_XFADE: Record<SceneTransition, string> = {
-  // A one-frame blend is a cut; expressing it as an xfade keeps the whole
-  // timeline a single chain instead of splicing concat runs into it.
-  CUT: 'fade',
-  CROSSFADE: 'fade',
-  DIP_TO_BLACK: 'fadeblack',
-  /** Directional smear — the closest xfade has to a motion-blurred whip pan. */
-  WHIP_PAN: 'smoothleft',
-  /** Two-frame white flash on the cut. */
-  IMPACT_CUT: 'fadewhite',
-  /** The incoming app-interface scene is revealed behind an expanding mask. */
-  MASKED_UI_REVEAL: 'circleopen',
+/**
+ * How the v1 motion vocabulary maps onto catalogue treatments.
+ *
+ * v1 manifests keep working unchanged and now go through exactly the same
+ * compiler as v2's `treatment` field — which is the point of having one
+ * catalogue. There is no second implementation of a push-in.
+ */
+const V1_MOTION_TO_TREATMENT: Readonly<Record<SceneMotion, SceneTreatmentKeyValue>> = {
+  STATIC: 'STATIC_HOLD',
+  PUSH_IN: 'PUSH_IN',
+  PUSH_OUT: 'PULL_OUT',
+  PAN_LEFT: 'LATERAL_LEFT',
+  PAN_RIGHT: 'LATERAL_RIGHT',
+  PARALLAX: 'APP_SCREENSHOT_PARALLAX',
 };
 
 export const CAPTION_ASS_FILENAME = 'typography.ass';
@@ -76,6 +84,16 @@ export interface PlannedInput {
   readonly absolutePath?: string;
 }
 
+/** What treatment each scene actually received, for the storyboard and provenance. */
+export interface AppliedTreatment {
+  readonly sceneId: string;
+  readonly treatmentKey: string;
+  readonly intensity: number;
+  readonly description: string;
+  readonly transitionKey: string | null;
+  readonly decorationKeys: readonly string[];
+}
+
 export interface RenderPlan {
   readonly args: readonly string[];
   readonly inputs: readonly PlannedInput[];
@@ -84,6 +102,9 @@ export interface RenderPlan {
   readonly timeline: readonly SceneTiming[];
   readonly hasAudio: boolean;
   readonly filterComplex: string;
+  /** The catalogue that produced this graph. Travels into the storyboard. */
+  readonly motionCatalogueVersion: number;
+  readonly treatments: readonly AppliedTreatment[];
 }
 
 export class FilterGraphError extends Error {
@@ -91,19 +112,6 @@ export class FilterGraphError extends Error {
     super(message);
     this.name = 'FilterGraphError';
   }
-}
-
-/** Fixed-precision so the same manifest always produces byte-identical argv. */
-function num(value: number): string {
-  if (!Number.isFinite(value)) {
-    throw new FilterGraphError(`non-finite value in filter graph: ${value}`);
-  }
-  return Number(value.toFixed(6)).toString();
-}
-
-/** FFmpeg colour literal. No `@alpha` suffix — the `color` source rejects it on a hex value. */
-function hexToFfmpegColor(hex: string): string {
-  return `0x${hex.replace('#', '').toUpperCase()}`;
 }
 
 interface AnchorPosition {
@@ -139,170 +147,50 @@ function anchorExpressions(
   return { x: `${base.x}${dx}`, y: `${base.y}${dy}` };
 }
 
-/**
- * `zoompan` expressions for each motion. Progress is driven by `on` (the
- * output frame index) rather than by accumulating onto the previous `zoom`,
- * so the move lands on exactly the intended end point instead of drifting.
- */
-function motionExpressions(
-  motion: Exclude<SceneMotion, 'PARALLAX'>,
-  intensity: number,
-  frames: number,
-): { z: string; x: string; y: string } | null {
-  if (motion === 'STATIC') return null;
-  const amplitude = 0.06 + 0.14 * intensity;
-  const lastFrame = Math.max(1, frames - 1);
-  const progress = `on/${num(lastFrame)}`;
-  const centredX = 'iw/2-(iw/zoom/2)';
-  const centredY = 'ih/2-(ih/zoom/2)';
-
-  switch (motion) {
-    case 'PUSH_IN':
-      return { z: `1+${num(amplitude)}*${progress}`, x: centredX, y: centredY };
-    case 'PUSH_OUT':
-      return {
-        z: `${num(1 + amplitude)}-${num(amplitude)}*${progress}`,
-        x: centredX,
-        y: centredY,
-      };
-    case 'PAN_LEFT':
-      return {
-        z: num(1 + amplitude),
-        x: `(iw-iw/zoom)*(1-${progress})`,
-        y: centredY,
-      };
-    case 'PAN_RIGHT':
-      return {
-        z: num(1 + amplitude),
-        x: `(iw-iw/zoom)*(${progress})`,
-        y: centredY,
-      };
-    default:
-      return null;
-  }
-}
-
 interface SceneChainInput {
   readonly scene: Scene;
   readonly inputIndex: number;
   readonly frameRate: number;
   readonly widthPx: number;
   readonly heightPx: number;
+  readonly sourceKind: 'VIDEO' | 'IMAGE';
 }
 
-/** One scene's video chain: framing, motion, exact length, `[vN]`. */
-function buildSceneChain(input: SceneChainInput): string {
+/**
+ * One scene's video chain, compiled by the motion-treatment catalogue.
+ *
+ * This function decides *which* treatment applies and delegates the grammar.
+ * It builds no filter text of its own — that separation is what makes "no
+ * unvalidated FFmpeg filter strings scattered through application code" a
+ * structural property rather than a habit.
+ */
+function buildSceneChain(input: SceneChainInput): {
+  readonly graph: string;
+  readonly applied: { key: string; intensity: number; description: string };
+} {
   const { scene, inputIndex, frameRate, widthPx, heightPx } = input;
-  const label = `v${inputIndex}`;
-  const frames = secondsToFrames(scene.durationSeconds, frameRate);
-  const overWidth = Math.round((widthPx * MOTION_OVERSAMPLE) / 2) * 2;
-  const overHeight = Math.round((heightPx * MOTION_OVERSAMPLE) / 2) * 2;
+  const key: SceneTreatmentKeyValue = scene.treatment
+    ? scene.treatment.key
+    : V1_MOTION_TO_TREATMENT[scene.motion];
+  const intensity = scene.treatment ? scene.treatment.intensity : scene.motionIntensity;
 
-  if (scene.motion === 'PARALLAX') {
-    return buildParallaxChain({ ...input, label, frames });
-  }
+  const compiled = compileSceneTreatment(key, {
+    inputLabel: `${inputIndex}:v`,
+    outputLabel: `v${inputIndex}`,
+    scopeTag: `t${inputIndex}`,
+    intensity,
+    durationSeconds: scene.durationSeconds,
+    frameRate,
+    widthPx,
+    heightPx,
+    sourceKind: input.sourceKind,
+    framing: scene.framing,
+  });
 
-  const moving = scene.motion !== 'STATIC';
-  const targetW = moving ? overWidth : widthPx;
-  const targetH = moving ? overHeight : heightPx;
-
-  const framing =
-    scene.framing.mode === 'CONTAIN'
-      ? containChain(targetW, targetH)
-      : coverChain(targetW, targetH, scene.framing.anchorX, scene.framing.anchorY);
-
-  const steps: string[] = [`fps=${num(frameRate)}`, ...framing];
-
-  const motion = motionExpressions(scene.motion, scene.motionIntensity, frames);
-  if (motion) {
-    steps.push(
-      `zoompan=z='${motion.z}':x='${motion.x}':y='${motion.y}':d=1:s=${widthPx}x${heightPx}:fps=${num(frameRate)}`,
-    );
-  }
-
-  steps.push(
-    'setsar=1',
-    `trim=duration=${num(scene.durationSeconds)}`,
-    'setpts=PTS-STARTPTS',
-    // `xfade` refuses to join links whose timebases differ, and a looped
-    // still (1/fps) and a demuxed clip (1/12800 or worse) never agree on
-    // their own. Normalising here is what lets any scene follow any other.
-    'settb=AVTB',
-    'format=yuv420p',
-  );
-
-  return `[${inputIndex}:v]${steps.join(',')}[${label}]`;
-}
-
-function coverChain(width: number, height: number, anchorX: number, anchorY: number): string[] {
-  return [
-    `scale=${width}:${height}:force_original_aspect_ratio=increase`,
-    `crop=${width}:${height}:x='(iw-ow)*${num(anchorX)}':y='(ih-oh)*${num(anchorY)}'`,
-  ];
-}
-
-/**
- * `CONTAIN` fits the whole source and fills the remainder with a blurred,
- * over-scaled copy of itself rather than hard bars — the standard vertical
- * treatment for landscape footage, and one that keeps the frame's colour
- * continuity across a cut.
- */
-function containChain(width: number, height: number): string[] {
-  return [
-    `split=2[bg_%L%][fg_%L%];[bg_%L%]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},gblur=sigma=40:steps=2[bgb_%L%];[fg_%L%]scale=${width}:${height}:force_original_aspect_ratio=decrease[fgs_%L%];[bgb_%L%][fgs_%L%]overlay=x=(W-w)/2:y=(H-h)/2`,
-  ];
-}
-
-interface ParallaxChainInput extends SceneChainInput {
-  readonly label: string;
-  readonly frames: number;
-}
-
-/**
- * Layered movement rather than a single pan: an over-scaled, blurred copy of
- * the screenshot pushes in slowly as a backplate while the sharp screenshot
- * — inside a light bezel, as an app interface reads — drifts vertically at a
- * different rate. Two planes moving at different speeds is what separates
- * this from a slideshow.
- */
-function buildParallaxChain(input: ParallaxChainInput): string {
-  const { scene, inputIndex, frameRate, widthPx, heightPx, label, frames } = input;
-  const tag = `p${inputIndex}`;
-  const backWidth = Math.round((widthPx * 1.8) / 2) * 2;
-  const backHeight = Math.round((heightPx * 1.8) / 2) * 2;
-  const foregroundWidth = Math.round(widthPx * 0.76);
-  const bezelPx = 10;
-  const lastFrame = Math.max(1, frames - 1);
-  const drift = 60 + 90 * scene.motionIntensity;
-  const duration = scene.durationSeconds;
-
-  const back = [
-    `[${inputIndex}:v]fps=${num(frameRate)}`,
-    `scale=${backWidth}:${backHeight}:force_original_aspect_ratio=increase`,
-    `crop=${backWidth}:${backHeight}`,
-    'gblur=sigma=28:steps=2',
-    'eq=brightness=-0.12:saturation=0.85',
-    `zoompan=z='1+${num(0.05 + 0.07 * scene.motionIntensity)}*on/${num(lastFrame)}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=1:s=${widthPx}x${heightPx}:fps=${num(frameRate)}`,
-    'setsar=1',
-    `trim=duration=${num(duration)}`,
-    'setpts=PTS-STARTPTS',
-    `format=yuv420p[${tag}back]`,
-  ].join(',');
-
-  const fore = [
-    `[${inputIndex}:v]fps=${num(frameRate)}`,
-    `scale=${foregroundWidth}:-2`,
-    `pad=iw+${bezelPx * 2}:ih+${bezelPx * 2}:${bezelPx}:${bezelPx}:color=white`,
-    `trim=duration=${num(duration)}`,
-    'setpts=PTS-STARTPTS',
-    `format=yuv420p[${tag}fore]`,
-  ].join(',');
-
-  // The foreground rises past the centre line while the backplate zooms —
-  // different planes, different rates.
-  const composite = `[${tag}back][${tag}fore]overlay=x='(W-w)/2':y='(H-h)/2+${num(drift / 2)}-${num(drift)}*t/${num(duration)}':format=auto,setsar=1,trim=duration=${num(duration)},setpts=PTS-STARTPTS,settb=AVTB,format=yuv420p[${label}]`;
-
-  return [`${back}`, `${fore}`, composite].join(';');
+  return {
+    graph: compiled.graph,
+    applied: { key, intensity, description: compiled.description },
+  };
 }
 
 interface OverlayImageBinding {
@@ -400,10 +288,14 @@ export function buildRenderPlan(input: BuildRenderPlanInput): RenderPlan {
   const sceneChains: string[] = [];
   const sceneLabels: string[] = [];
   const timeline: SceneTiming[] = [];
+  const treatments: AppliedTreatment[] = [];
   let runningLength = 0;
 
   manifest.scenes.forEach((scene, sceneIndex) => {
     const source = requireSource(scene.sourceId);
+    if (source.kind === 'AUDIO') {
+      throw new FilterGraphError(`scene "${scene.id}" resolves to an AUDIO source`);
+    }
     const index =
       source.kind === 'IMAGE'
         ? addInput(
@@ -435,16 +327,24 @@ export function buildRenderPlan(input: BuildRenderPlanInput): RenderPlan {
             source.absolutePath,
           );
 
-    sceneChains.push(
-      buildSceneChain({
-        scene,
-        inputIndex: index,
-        frameRate,
-        widthPx: output.widthPx,
-        heightPx: output.heightPx,
-      }).replace(/%L%/g, `s${index}`),
-    );
+    const chain = buildSceneChain({
+      scene,
+      inputIndex: index,
+      frameRate,
+      widthPx: output.widthPx,
+      heightPx: output.heightPx,
+      sourceKind: source.kind,
+    });
+    sceneChains.push(chain.graph);
     sceneLabels.push(`v${index}`);
+    treatments.push({
+      sceneId: scene.id,
+      treatmentKey: chain.applied.key,
+      intensity: chain.applied.intensity,
+      description: chain.applied.description,
+      transitionKey: scene.transitionIn?.kind ?? null,
+      decorationKeys: (scene.decorations ?? []).map((decoration) => decoration.key),
+    });
 
     const overlap = scene.transitionIn?.durationSeconds ?? 0;
     const startSeconds = sceneIndex === 0 ? 0 : runningLength - overlap;
@@ -485,8 +385,9 @@ export function buildRenderPlan(input: BuildRenderPlanInput): RenderPlan {
       );
     }
     const outLabel = `x${i}`;
+    const compiledTransition = compileTransitionTreatment(transition.kind);
     transitionChains.push(
-      `[${mergedLabel}][${label}]xfade=transition=${TRANSITION_TO_XFADE[transition.kind]}:duration=${num(transition.durationSeconds)}:offset=${num(offset)}[${outLabel}]`,
+      `[${mergedLabel}][${label}]xfade=transition=${compiledTransition.xfadeName}:duration=${num(transition.durationSeconds)}:offset=${num(offset)}[${outLabel}]`,
     );
     mergedLabel = outLabel;
     mergedLength = mergedLength + scene.durationSeconds - transition.durationSeconds;
@@ -500,6 +401,31 @@ export function buildRenderPlan(input: BuildRenderPlanInput): RenderPlan {
     compositeStep += 1;
     return `c${compositeStep}`;
   };
+
+  // Decorations sit directly on the composited picture, beneath every image
+  // overlay and beneath typography: a callout is part of the frame, not a
+  // badge on top of the brand lockup.
+  for (const scene of manifest.scenes) {
+    for (const decoration of scene.decorations ?? []) {
+      const outLabel = nextCompositeLabel();
+      overlayChains.push(
+        compileDecorationTreatment(decoration.key, {
+          baseLabel,
+          outputLabel: outLabel,
+          colorHex: decoration.colorHex,
+          opacity: decoration.opacity,
+          xPx: decoration.xPx,
+          yPx: decoration.yPx,
+          widthPx: decoration.widthPx,
+          heightPx: decoration.heightPx,
+          thicknessPx: decoration.thicknessPx,
+          startSeconds: decoration.startSeconds,
+          endSeconds: decoration.endSeconds,
+        }).graph,
+      );
+      baseLabel = outLabel;
+    }
+  }
 
   for (const overlay of manifest.overlays) {
     if (overlay.kind !== 'IMAGE') continue;
@@ -582,7 +508,11 @@ export function buildRenderPlan(input: BuildRenderPlanInput): RenderPlan {
       ],
       'GENERATED',
     );
-    const cardFade = 0.3;
+    // `holdSeconds` is a promise about the *settled* card, so the animation
+    // has to finish before the hold begins. Deriving the fade from it — rather
+    // than fading for a fixed 0.3s and hoping — is what makes the hold QA
+    // measures and the hold the graph produces the same number.
+    const cardFade = ctaAnimationSeconds(cta.startSeconds, cta.endSeconds, cta.holdSeconds);
     const cardOut = nextCompositeLabel();
     overlayChains.push(
       `[${cardIndex}:v]format=rgba,fade=t=in:st=${num(cta.startSeconds)}:d=${num(cardFade)}:alpha=1,setpts=PTS-STARTPTS[ctacard];[${baseLabel}][ctacard]overlay=x=0:y=0:enable='between(t,${num(cta.startSeconds)},${num(cta.endSeconds)})':format=auto[${cardOut}]`,
@@ -608,7 +538,7 @@ export function buildRenderPlan(input: BuildRenderPlanInput): RenderPlan {
       );
       const outLabel = nextCompositeLabel();
       overlayChains.push(
-        `[${index}:v]scale=${cta.logoWidthPx}:-2,format=rgba,fade=t=in:st=${num(cta.startSeconds + 0.15)}:d=0.35:alpha=1,setpts=PTS-STARTPTS[ctalogo];[${baseLabel}][ctalogo]overlay=x='(W-w)/2':y='${num(Math.round(output.heightPx * 0.34))}':enable='between(t,${num(cta.startSeconds)},${num(cta.endSeconds)})':format=auto[${outLabel}]`,
+        `[${index}:v]scale=${cta.logoWidthPx}:-2,format=rgba,fade=t=in:st=${num(cta.startSeconds)}:d=${num(cardFade)}:alpha=1,setpts=PTS-STARTPTS[ctalogo];[${baseLabel}][ctalogo]overlay=x='(W-w)/2':y='${num(Math.round(output.heightPx * 0.34))}':enable='between(t,${num(cta.startSeconds)},${num(cta.endSeconds)})':format=auto[${outLabel}]`,
       );
       baseLabel = outLabel;
     }
@@ -720,6 +650,8 @@ export function buildRenderPlan(input: BuildRenderPlanInput): RenderPlan {
     timeline,
     hasAudio: audio.outputLabel !== null,
     filterComplex,
+    motionCatalogueVersion: MOTION_TREATMENT_CATALOGUE_VERSION,
+    treatments,
   };
 }
 
@@ -803,6 +735,8 @@ function buildAudioGraph(input: AudioGraphInput): AudioGraphResult {
     else otherLabels.push(label);
   }
 
+  const design = manifest.audio?.design;
+
   manifest.scenes.forEach((scene, sceneIndex) => {
     if (!scene.useSourceAudio) return;
     const source = sources.get(scene.sourceId);
@@ -820,11 +754,55 @@ function buildAudioGraph(input: AudioGraphInput): AudioGraphResult {
     // output timeline.
     const sceneInput = sceneIndex;
     const label = `ascene${sceneIndex}`;
+    const sourceGainDb = design?.sourceAudioGainDb ?? 0;
     chains.push(
-      `[${sceneInput}:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,${commonTail(timing.startSeconds, 0.05, 0.05).join(',')}[${label}]`,
+      `[${sceneInput}:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo${
+        sourceGainDb === 0 ? '' : `,volume=${num(sourceGainDb)}dB`
+      },${commonTail(timing.startSeconds, 0.05, 0.05).join(',')}[${label}]`,
     );
     otherLabels.push(label);
   });
+
+  // ---- placed sound events ------------------------------------------------
+  // Each cue is its own input, trimmed, gained, faded and delayed to its
+  // moment. Cues that duck the bed are split so the same signal can key the
+  // compressor and still be heard — a duck keyed off a cue nobody hears is a
+  // gap in the music with no cause.
+  const cueLabels: string[] = [];
+  const duckingKeyLabels: string[] = [];
+  for (const cue of design?.cues ?? []) {
+    const source = sources.get(cue.sourceId);
+    if (!source) {
+      throw new FilterGraphError(`audio cue source "${cue.sourceId}" was not resolved`);
+    }
+    const index = addInput(
+      ['-i', source.absolutePath],
+      'AUDIO_TRACK',
+      source.id,
+      source.absolutePath,
+    );
+    const label = `acue${index}`;
+    const steps: string[] = [
+      ...(cue.sourceOffsetSeconds > 0
+        ? [`atrim=start=${num(cue.sourceOffsetSeconds)}`, 'asetpts=PTS-STARTPTS']
+        : []),
+      ...(cue.durationSeconds === undefined
+        ? []
+        : [`atrim=duration=${num(cue.durationSeconds)}`, 'asetpts=PTS-STARTPTS']),
+      'aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo',
+      ...(cue.gainDb !== 0 ? [`volume=${num(cue.gainDb)}dB`] : []),
+      ...commonTail(cue.atSeconds, cue.fadeInSeconds, 0),
+    ];
+    chains.push(`[${index}:a]${steps.join(',')}[${label}]`);
+
+    if (cue.ducksMusic) {
+      chains.push(`[${label}]asplit=2[${label}mix][${label}key]`);
+      cueLabels.push(`${label}mix`);
+      duckingKeyLabels.push(`${label}key`);
+    } else {
+      cueLabels.push(label);
+    }
+  }
 
   const mixInputs: string[] = [];
   const duckingDb = manifest.audio?.musicDuckingDb ?? 0;
@@ -842,11 +820,24 @@ function buildAudioGraph(input: AudioGraphInput): AudioGraphResult {
 
   if (musicLabels.length > 0) {
     const musicBus = 'musicbus';
-    chains.push(
-      musicLabels.length === 1
-        ? `[${musicLabels[0]}]anull[${musicBus}]`
-        : `${musicLabels.map((l) => `[${l}]`).join('')}amix=inputs=${musicLabels.length}:duration=longest:normalize=0[${musicBus}]`,
-    );
+    const crossfadeSeconds = design?.musicCrossfadeSeconds ?? 0;
+    if (musicLabels.length === 1) {
+      chains.push(`[${musicLabels[0]}]anull[${musicBus}]`);
+    } else if (musicLabels.length === 2 && crossfadeSeconds > 0) {
+      // Two beds means a handover, and a handover wants an equal-power
+      // crossfade rather than a sum: mixing them would double the level
+      // through the overlap and leave a hump exactly where the change is
+      // meant to be least noticeable.
+      chains.push(
+        `[${musicLabels[0]}][${musicLabels[1]}]acrossfade=d=${num(crossfadeSeconds)}:c1=tri:c2=tri[${musicBus}]`,
+      );
+    } else {
+      chains.push(
+        `${musicLabels.map((l) => `[${l}]`).join('')}amix=inputs=${musicLabels.length}:duration=longest:normalize=0[${musicBus}]`,
+      );
+    }
+
+    let currentMusic = musicBus;
 
     if (voiceBus && duckingDb > 0) {
       // The voice bus is needed twice — as the compressor's key and in the
@@ -854,18 +845,38 @@ function buildAudioGraph(input: AudioGraphInput): AudioGraphResult {
       chains.push(`[${voiceBus}]asplit=2[voicemix][voicekey]`);
       const ratio = Math.min(20, Math.max(1, 1 + duckingDb));
       chains.push(
-        `[${musicBus}][voicekey]sidechaincompress=threshold=0.03:ratio=${num(ratio)}:attack=20:release=350:makeup=1:level_sc=1[musicducked]`,
+        `[${currentMusic}][voicekey]sidechaincompress=threshold=0.03:ratio=${num(ratio)}:attack=20:release=350:makeup=1:level_sc=1[musicducked]`,
       );
-      mixInputs.push('musicducked', 'voicemix');
+      currentMusic = 'musicducked';
+      mixInputs.push(currentMusic, 'voicemix');
     } else {
-      mixInputs.push(musicBus);
+      if (duckingKeyLabels.length > 0 && (design?.cueDuckingDb ?? 0) > 0) {
+        // Cue ducking is a second, independent duck: a bell or an impact
+        // should open a hole in the bed even when there is no voiceover at
+        // all, which is the case for every source-only cut.
+        const key =
+          duckingKeyLabels.length === 1
+            ? (duckingKeyLabels[0] as string)
+            : ((): string => {
+                chains.push(
+                  `${duckingKeyLabels.map((l) => `[${l}]`).join('')}amix=inputs=${duckingKeyLabels.length}:duration=longest:normalize=0[cuekey]`,
+                );
+                return 'cuekey';
+              })();
+        const cueRatio = Math.min(20, Math.max(1, 1 + (design?.cueDuckingDb ?? 0)));
+        chains.push(
+          `[${currentMusic}][${key}]sidechaincompress=threshold=0.05:ratio=${num(cueRatio)}:attack=5:release=250:makeup=1:level_sc=1[musiccueducked]`,
+        );
+        currentMusic = 'musiccueducked';
+      }
+      mixInputs.push(currentMusic);
       if (voiceBus) mixInputs.push(voiceBus);
     }
   } else if (voiceBus) {
     mixInputs.push(voiceBus);
   }
 
-  mixInputs.push(...otherLabels);
+  mixInputs.push(...otherLabels, ...cueLabels);
 
   if (mixInputs.length === 0) {
     return { chains: [], outputLabel: null };
@@ -884,11 +895,52 @@ function buildAudioGraph(input: AudioGraphInput): AudioGraphResult {
       : `${mixInputs.map((l) => `[${l}]`).join('')}amix=inputs=${mixInputs.length}:duration=longest:normalize=0[${mixed}]`,
   );
 
+  // Peak protection sits *ahead* of loudness normalisation on purpose: a
+  // stacked bell and impact can clip the sum even though each cue is well
+  // under the ceiling on its own, and `loudnorm` corrects the programme's
+  // level rather than rescuing samples that already wrapped.
+  const limiter =
+    design?.limiterEnabled === false
+      ? []
+      : [
+          `alimiter=level_in=1:level_out=1:limit=${num(dbToLinear(design?.peakCeilingDbtp ?? -1.5))}:attack=5:release=50:level=disabled`,
+        ];
+
   chains.push(
-    `[${mixed}]loudnorm=I=${num(loudness.integratedLufs)}:TP=${num(loudness.truePeakDbtp)}:LRA=${num(loudness.loudnessRange)},aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=0:${num(duration)},asetpts=PTS-STARTPTS[aout]`,
+    `[${mixed}]${[
+      ...limiter,
+      `loudnorm=I=${num(loudness.integratedLufs)}:TP=${num(loudness.truePeakDbtp)}:LRA=${num(loudness.loudnessRange)}`,
+      'aresample=48000',
+      'aformat=sample_fmts=fltp:channel_layouts=stereo',
+      `atrim=0:${num(duration)}`,
+      'asetpts=PTS-STARTPTS',
+    ].join(',')}[aout]`,
   );
 
   return { chains, outputLabel: 'aout' };
+}
+
+/** dBFS to linear amplitude, for filters that take a ratio rather than decibels. */
+function dbToLinear(db: number): number {
+  return Number(Math.pow(10, db / 20).toFixed(6));
+}
+
+/**
+ * How long the end card has to animate, given how long it must sit settled.
+ *
+ * A CTA that never finishes arriving is a CTA nobody acts on, so the hold wins
+ * and the animation takes whatever is left — floored at one frame's worth so a
+ * card still fades rather than popping, and capped at the historical 0.3 s so
+ * a manifest that asks for no hold behaves exactly as it did before.
+ */
+export function ctaAnimationSeconds(
+  startSeconds: number,
+  endSeconds: number,
+  holdSeconds: number | undefined,
+): number {
+  const onScreen = endSeconds - startSeconds;
+  if (holdSeconds === undefined) return Math.min(0.3, Math.max(0.05, onScreen / 2));
+  return Math.min(0.3, Math.max(0.05, onScreen - holdSeconds));
 }
 
 /**
@@ -910,6 +962,7 @@ export function buildTypographyFile(manifest: RenderManifest): string | null {
         cues: manifest.captions.cues,
         widthPx: manifest.output.widthPx,
         heightPx: manifest.output.heightPx,
+        ...(manifest.captions.entrance ? { entrance: manifest.captions.entrance } : {}),
       })
     : buildAssSubtitleFile({
         style: {
@@ -957,6 +1010,12 @@ export function buildTypographyFile(manifest: RenderManifest): string | null {
 
   if (manifest.cta) {
     const cta = manifest.cta;
+    const entrance: CtaEntranceKey = cta.entrance ?? 'RISE_AND_SCALE';
+    const fadeMs = Math.round(
+      ctaAnimationSeconds(cta.startSeconds, cta.endSeconds, cta.holdSeconds) * 1000,
+    );
+    const centreX = Math.round(manifest.output.widthPx / 2);
+
     extraStyles.push(
       assStyleLine({
         name: 'CtaHeadline',
@@ -974,9 +1033,12 @@ export function buildTypographyFile(manifest: RenderManifest): string | null {
         startSeconds: cta.startSeconds,
         endSeconds: cta.endSeconds,
         text: cta.headline.toUpperCase(),
-        // Rises into place and scales up: the "animated typography"
-        // requirement applied to the end card.
-        override: `{\\an5\\pos(${Math.round(manifest.output.widthPx / 2)},${Math.round(manifest.output.heightPx * 0.55)})\\fad(260,180)\\fscx88\\fscy88\\t(0,320,\\fscx100\\fscy100)}`,
+        override: ctaEntranceOverride(entrance, {
+          xPx: centreX,
+          yPx: Math.round(manifest.output.heightPx * 0.55),
+          alignment: 5,
+          fadeMs,
+        }),
       }),
     );
     if (cta.subline) {
@@ -994,10 +1056,15 @@ export function buildTypographyFile(manifest: RenderManifest): string | null {
       extraEvents.push(
         assDialogueLine({
           styleName: 'CtaSubline',
-          startSeconds: cta.startSeconds + 0.2,
+          startSeconds: cta.startSeconds,
           endSeconds: cta.endSeconds,
           text: cta.subline.toUpperCase(),
-          override: `{\\an5\\pos(${Math.round(manifest.output.widthPx / 2)},${Math.round(manifest.output.heightPx * 0.63)})\\fad(240,180)\\move(${Math.round(manifest.output.widthPx / 2)},${Math.round(manifest.output.heightPx * 0.63 + 40)},${Math.round(manifest.output.widthPx / 2)},${Math.round(manifest.output.heightPx * 0.63)},0,300)}`,
+          override: ctaEntranceOverride(entrance, {
+            xPx: centreX,
+            yPx: Math.round(manifest.output.heightPx * 0.63),
+            alignment: 5,
+            fadeMs,
+          }),
         }),
       );
     }

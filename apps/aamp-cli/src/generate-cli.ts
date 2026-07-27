@@ -35,11 +35,19 @@ import {
   type CampaignRequest,
 } from './campaign-request';
 import { planCampaign } from './plan-campaign';
-import { parseExecutionModeFlag, type AampExecutionMode } from './production/aamp-execution-mode';
+import { parseProductionAssetManifest } from './production-assets';
+import { buildHumanPlanTemplate } from './preview/human-plan';
+import { runPreviewCampaign } from './preview/run-preview-campaign';
+import {
+  executionModeFlagFor,
+  parseExecutionModeFlag,
+  type AampExecutionMode,
+} from './production/aamp-execution-mode';
 import { buildRunProvenance } from './production/campaign-run-provenance';
 import {
   AampDependencyError,
   createAampDependencies,
+  requireReasoningProvider,
   type AampDependencies,
   type AampDependencyFailure,
 } from './production/dependency-factory';
@@ -112,6 +120,17 @@ export interface GenerateCliOptions {
    */
   readonly creativeMemory: CreativeMemoryMode;
   /**
+   * A validated, human-authored creative plan.
+   *
+   * Its presence selects `HUMAN_ASSISTED_PREVIEW`: no reasoning provider and no
+   * generation provider is constructed, so neither can be called.
+   */
+  readonly planFile?: string;
+  /** The external directory every production asset must canonicalise inside. */
+  readonly assetRoot?: string;
+  /** Writes a deterministic plan skeleton for the request and exits. */
+  readonly emitPlanTemplate: boolean;
+  /**
    * The **required minimum** infrastructure tier.
    *
    * Absent means "require nothing" — the attained tier is still derived from
@@ -139,6 +158,9 @@ export function parseGenerateCliArguments(argv: readonly string[]): GenerateCliO
   let fixtureDemo = false;
   let creativeMemory: CreativeMemoryMode = 'off';
   let executionMode: AampExecutionMode | undefined;
+  let planFile: string | undefined;
+  let assetRoot: string | undefined;
+  let emitPlanTemplate = false;
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -148,7 +170,7 @@ export function parseGenerateCliArguments(argv: readonly string[]): GenerateCliO
         const parsed = parseExecutionModeFlag(value);
         if (!parsed) {
           throw new Error(
-            `--execution-mode must be one of fixture|local-production|production (got "${value ?? ''}")`,
+            `--execution-mode must be one of fixture|human-assisted-preview|local-production|production (got "${value ?? ''}")`,
           );
         }
         executionMode = parsed;
@@ -170,6 +192,15 @@ export function parseGenerateCliArguments(argv: readonly string[]): GenerateCliO
         break;
       case '--assets':
         assetsPath = argv[++i];
+        break;
+      case '--plan-file':
+        planFile = argv[++i];
+        break;
+      case '--asset-root':
+        assetRoot = argv[++i];
+        break;
+      case '--emit-plan-template':
+        emitPlanTemplate = true;
         break;
       case '--output-dir':
         outputDirectory = argv[++i];
@@ -198,7 +229,18 @@ export function parseGenerateCliArguments(argv: readonly string[]): GenerateCliO
     throw new Error(
       [
         'Usage: aamp:generate --request <campaign-request.json> [--assets <production-assets.json>] [--output-dir <dir>]',
-        '  --execution-mode fixture|local-production|production',
+        '',
+        'Zero-cost footage-first preview:',
+        '  --plan-file <validated-plan.json>',
+        '                   execute a human-authored creative plan. Selects HUMAN_ASSISTED_PREVIEW:',
+        '                   no reasoning provider and no generation provider is constructed, so',
+        '                   neither can be called and no paid work is possible.',
+        '  --asset-root <dir>',
+        '                   the external directory every production asset must canonicalise inside.',
+        '  --emit-plan-template',
+        '                   write a deterministic plan skeleton for this request to stdout and exit.',
+        '',
+        '  --execution-mode fixture|human-assisted-preview|local-production|production',
         '                   the minimum infrastructure tier this run must reach (default: require nothing,',
         '                   report whatever was attained). Never promotes a label; only refuses.',
         '  --creative-memory required|optional|off',
@@ -221,6 +263,9 @@ export function parseGenerateCliArguments(argv: readonly string[]): GenerateCliO
     planOnly,
     fixtureDemo,
     creativeMemory,
+    emitPlanTemplate,
+    ...(planFile ? { planFile } : {}),
+    ...(assetRoot ? { assetRoot } : {}),
     ...(executionMode ? { executionMode } : {}),
   };
 }
@@ -321,9 +366,249 @@ export async function runGenerateCli(
   }
 
   if (options.requestPath) {
+    if (options.emitPlanTemplate) return emitPlanTemplateCli(options, context);
+    if (options.planFile) return runHumanAssistedPreviewCli(options, context);
     return runCampaignRequestCli(options, context);
   }
   return runLegacyManifestCli(options, context);
+}
+
+/** Loads the request the two preview entry points share. */
+async function loadRequestFor(
+  options: GenerateCliOptions,
+  repositoryRoot: string,
+): Promise<CampaignRequest> {
+  const requestPath = isAbsolute(options.requestPath!)
+    ? options.requestPath!
+    : resolve(repositoryRoot, options.requestPath!);
+  const request = await loadCampaignRequest(requestPath);
+  if (!options.assetsPath) return request;
+  return {
+    ...request,
+    sourceAssetManifestPath: isAbsolute(options.assetsPath)
+      ? options.assetsPath
+      : resolve(repositoryRoot, options.assetsPath),
+  };
+}
+
+async function emitPlanTemplateCli(
+  options: GenerateCliOptions,
+  context: GenerateCliContext,
+): Promise<number> {
+  const repositoryRoot = await findRepositoryRoot(context.cwd);
+  try {
+    const request = await loadRequestFor(options, repositoryRoot);
+    const authoredAt = (context.now ? context.now() : new Date()).toISOString();
+    context.stdout(`${JSON.stringify(buildHumanPlanTemplate(request, authoredAt), null, 2)}\n`);
+    context.stderr(
+      "This is a skeleton, not a plan. Every TODO is a decision only a person can make; a template that rendered as-is would make this mode's claim untrue on first use.\n",
+    );
+    return EXIT_CODES.SUCCESS;
+  } catch (error) {
+    context.stderr(
+      `${
+        error instanceof CampaignRequestValidationError
+          ? error.message
+          : `Could not read the campaign request: ${error instanceof Error ? error.message : String(error)}`
+      }\n`,
+    );
+    return EXIT_CODES.INVALID_CAMPAIGN_REQUEST;
+  }
+}
+
+/**
+ * The zero-cost, footage-first preview.
+ *
+ * Deliberately does *not* go through `createAampDependencies`: that factory's
+ * job is to build reasoning, generation, persistence and retrieval
+ * collaborators, and this mode's entire claim is that none of the first two
+ * exist. Asking the composition root for a run with no reasoning provider and
+ * then not using it would leave the call path in place; not asking removes it.
+ * The FFmpeg toolchain — the one collaborator a preview genuinely needs — is
+ * verified here explicitly, before anything is read.
+ */
+async function runHumanAssistedPreviewCli(
+  options: GenerateCliOptions,
+  context: GenerateCliContext,
+): Promise<number> {
+  const repositoryRoot = await findRepositoryRoot(context.cwd);
+
+  let request: CampaignRequest;
+  try {
+    request = await loadRequestFor(options, repositoryRoot);
+  } catch (error) {
+    context.stderr(
+      `${
+        error instanceof CampaignRequestValidationError
+          ? error.message
+          : `Could not read the campaign request: ${error instanceof Error ? error.message : String(error)}`
+      }\n`,
+    );
+    return EXIT_CODES.INVALID_CAMPAIGN_REQUEST;
+  }
+
+  if (options.executionMode && options.executionMode !== 'HUMAN_ASSISTED_PREVIEW') {
+    context.stderr(
+      `--plan-file selects HUMAN_ASSISTED_PREVIEW, but --execution-mode ${executionModeFlagFor(options.executionMode)} was required. A human-authored plan cannot attain that mode: the creative did not come from a model.\n`,
+    );
+    return EXIT_CODES.EXECUTION_MODE_NOT_ATTAINED;
+  }
+
+  const planPath = isAbsolute(options.planFile!)
+    ? options.planFile!
+    : resolve(repositoryRoot, options.planFile!);
+  const assetRoot = options.assetRoot
+    ? isAbsolute(options.assetRoot)
+      ? options.assetRoot
+      : resolve(repositoryRoot, options.assetRoot)
+    : dirname(request.sourceAssetManifestPath);
+
+  const workflowRunId = context.workflowRunId ?? `aamp-cli-${randomUUID()}`;
+  const outputRoot = options.outputDirectory
+    ? resolve(repositoryRoot, options.outputDirectory)
+    : resolve(repositoryRoot, request.outputDirectory);
+  const runDirectory = runDirectoryFor(outputRoot, request.name, workflowRunId);
+  const runner = context.runner ?? new NodeCommandRunner();
+  const binaries = resolveFfmpegBinaries(context.env);
+
+  // The banner, before any work. Everything an operator needs to know that
+  // this run cannot spend money is stated up front rather than inferred from
+  // the absence of a warning.
+  const banner = [
+    '',
+    'PAID PROVIDER CALLS DISABLED',
+    'AUTONOMOUS REASONING NOT USED',
+    'OUTPUT IS A HUMAN-ASSISTED PREVIEW',
+    '',
+    `execution mode:        HUMAN_ASSISTED_PREVIEW`,
+    `paid calls possible:   NO — no reasoning provider and no generation provider is constructed`,
+    `plan file:             ${planPath}`,
+    `asset root:            ${assetRoot}`,
+    `output directory:      ${runDirectory}`,
+  ];
+
+  // The asset counts need the manifest, which is cheap to read and is the
+  // first thing that can be wrong. Reading it here means the banner reports
+  // real numbers rather than promising to find some later.
+  let outputEligibleCount = 0;
+  let analysisOnlyReferenceCount = 0;
+  try {
+    const manifest = parseProductionAssetManifest(
+      JSON.parse(await readFile(request.sourceAssetManifestPath, 'utf8')),
+      request.sourceAssetManifestPath,
+    );
+    outputEligibleCount = manifest.assets.length;
+    analysisOnlyReferenceCount = await countAnalysisOnlyReferences(assetRoot);
+  } catch {
+    // A manifest that cannot be read is reported properly by the run itself,
+    // with the full validation detail. The banner simply says it is unknown.
+  }
+
+  banner.push(
+    `output-eligible assets: ${outputEligibleCount || 'unknown until preflight'}`,
+    `analysis-only refs:     ${analysisOnlyReferenceCount} (counted, never resolved, never eligible for output)`,
+    'expected artefacts:     storyboard.json, storyboard.html, contact-sheet.png,',
+    '                        source-selection-report.json, audio-plan.json, render-summary.json,',
+    '                        render-manifest.json, asset-preflight.json, creative-plan.json,',
+    '                        originality-report.json, creative-scorecard.json and the measured MP4',
+    '',
+  );
+  if (!options.json) context.stderr(`${banner.join('\n')}\n`);
+
+  const progress = (message: string): void => {
+    if (!options.json) context.stderr(`  ${message}\n`);
+  };
+
+  const result = await runPreviewCampaign({
+    request,
+    planPath,
+    assetRoot,
+    runDirectory,
+    repositoryRoot,
+    binaries,
+    workflowRunId,
+    now: context.now ? context.now() : new Date(),
+    runner,
+    onProgress: progress,
+  });
+
+  if (options.json) {
+    context.stdout(
+      `${JSON.stringify(
+        {
+          executionMode: 'HUMAN_ASSISTED_PREVIEW',
+          isRealCampaignRun: false,
+          paidProviderCalls: 0,
+          planningSource: 'HUMAN_SUPPLIED_STRUCTURED_PLAN',
+          promptSha256: request.promptSha256,
+          exitCode: result.exitCode,
+          runDirectory: result.runDirectory,
+          outputPath: result.outputPath ?? null,
+          qaVerdict: result.qaVerdict ?? null,
+          measuredDurationSeconds: result.measuredDurationSeconds ?? null,
+          measuredResolution: result.measuredResolution ?? null,
+          measuredCodecs: result.measuredCodecs ?? null,
+          measuredLoudnessLufs: result.measuredLoudnessLufs ?? null,
+          measuredPeakDbtp: result.measuredPeakDbtp ?? null,
+          outputChecksumSha256: result.outputChecksumSha256 ?? null,
+          nonZeroInPointCount: result.nonZeroInPointCount ?? 0,
+          qaFailedChecks: result.qaFailedChecks ?? [],
+          artefacts: result.artefacts ?? [],
+          failure: result.failure ?? null,
+        },
+        null,
+        2,
+      )}\n`,
+    );
+  } else if (result.exitCode === EXIT_CODES.SUCCESS || result.exitCode === EXIT_CODES.QA_FAILURE) {
+    context.stdout(
+      `${[
+        `execution mode:    HUMAN_ASSISTED_PREVIEW`,
+        `real campaign run: NO`,
+        `paid calls:        0`,
+        `planning source:   HUMAN_SUPPLIED_STRUCTURED_PLAN (${result.plan?.authoredBy ?? 'unknown'})`,
+        `campaign ID:       ${request.campaignId}`,
+        `prompt sha256:     ${request.promptSha256}`,
+        `run directory:     ${result.runDirectory}`,
+        `final MP4:         ${result.outputPath ?? 'none'}`,
+        `duration:          ${
+          result.measuredDurationSeconds === null || result.measuredDurationSeconds === undefined
+            ? 'unknown'
+            : `${result.measuredDurationSeconds.toFixed(3)}s`
+        }`,
+        `resolution:        ${result.measuredResolution ?? '?'}`,
+        `codecs:            ${result.measuredCodecs ?? '?'}`,
+        `loudness:          ${result.measuredLoudnessLufs ?? 'not measured'} LUFS (measured from the file)`,
+        `true peak:         ${result.measuredPeakDbtp ?? 'not measured'} dB (measured from the file)`,
+        `non-zero in-points:${' '}${result.nonZeroInPointCount ?? 0} of ${result.preflight?.assets.filter((a) => a.kind === 'VIDEO').length ?? 0} video segments`,
+        `QA status:         ${result.qaVerdict ?? 'unknown'}`,
+        `output sha256:     ${result.outputChecksumSha256 ?? 'none'}`,
+        `status:            ${result.exitCode === EXIT_CODES.SUCCESS ? 'RENDERED — REQUIRES HUMAN APPROVAL' : 'REJECTED BY QA'}`,
+      ].join('\n')}\n`,
+    );
+  }
+
+  if (result.failure) context.stderr(`\n${result.failure}\n`);
+  if (result.exitCode === EXIT_CODES.SUCCESS) {
+    context.stderr(
+      '\nWARNING: HUMAN_ASSISTED_PREVIEW — the creative decisions were made by a person and executed deterministically. No reasoning model and no generation provider was called. This is not an autonomous campaign result, and human approval is still required before publication.\n',
+    );
+  }
+  return result.exitCode;
+}
+
+/** Counts reference files without resolving, reading or measuring any of them. */
+async function countAnalysisOnlyReferences(assetRoot: string): Promise<number> {
+  const { readdir } = await import('node:fs/promises');
+  try {
+    const entries = await readdir(resolve(assetRoot, 'references'), {
+      withFileTypes: true,
+      recursive: true,
+    });
+    return entries.filter((entry) => entry.isFile()).length;
+  } catch {
+    return 0;
+  }
 }
 
 async function runLegacyManifestCli(
@@ -787,7 +1072,7 @@ async function runCampaignRequestCli(
       try {
         const plan = await planCampaign({
           request,
-          reasoningProvider: dependencies.reasoningProvider,
+          reasoningProvider: requireReasoningProvider(dependencies),
           workflowRunId,
           ...(injector ? { injector } : {}),
           onProgress: progress,
@@ -826,7 +1111,7 @@ async function runCampaignRequestCli(
 
     const result = await runSourceCampaign({
       request,
-      reasoningProvider: dependencies.reasoningProvider,
+      reasoningProvider: requireReasoningProvider(dependencies),
       reasoningPolicy: policy,
       runDirectory,
       repositoryRoot,

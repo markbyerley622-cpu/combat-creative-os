@@ -1,0 +1,191 @@
+{
+  "planVersion": 1,
+  "workspaceId": "6f1d5f6c-6d3a-4a2e-9c5f-0f2a1b3c4d5e",
+  "campaignId": "3c9b7a24-8f61-4d0e-9a37-5b2c8e14d7f0",
+  "authoredBy": "Combat Reviews creative lead",
+  "authoredAt": "2026-07-27T00:00:00.000Z",
+  "campaignPromptSha256": "d7e1f7e60fef1f106017614950f8a5c328347a7066f4d4484f903c7c6a3b90cd",
+  "targetDurationSeconds": 15,
+
+  "strategy": {
+    "audienceName": "Multi-promotion combat fans who plan their weekend around cards",
+    "painPoints": [
+      "Fight schedules are scattered across promotions, broadcasters and timezones",
+      "Predictions made in group chats are forgotten by the time the decision lands",
+      "Disputed scorecards get argued from memory rather than from rounds"
+    ],
+    "positioning": "One app that holds every promotion's weekend, before the card and after it",
+    "targetAudienceSummary": "Combat sports fans aged 18-34 who follow multiple promotions and argue about scorecards after every card",
+    "keyMessages": [
+      "12 events this weekend, all in one app",
+      "Predictions before the card, scorecards after it"
+    ],
+    "toneGuidelines": [
+      "Direct and factual; the number does the work",
+      "Fast in the first second, then let each screen be readable",
+      "Confident without hype"
+    ]
+  },
+
+  "creativeDirection": {
+    "logline": "Twelve events this weekend, and one app that already has all of them.",
+    "visualDirection": "Open on high-contrast gym footage with a hard push-in, then cut to app screens held long enough to read. Typography is heavy, uppercase and bottom-anchored inside the safe area. Accent rules mark the two screens that carry the numbers. Pacing tightens toward the end card.",
+    "narrativeArc": "A number that demands attention, the card that backs it up, the predictions that come before it, the scorecards that settle it, then the download.",
+    "referenceNotes": [
+      "Hold each app screen at least a second and a half — a screen nobody can read is a wasted beat"
+    ]
+  },
+
+  "hook": {
+    "strategy": "Lead on the count. Twelve is specific, checkable and larger than a viewer expects.",
+    "latencySeconds": 0.5,
+    "onScreenLine": "12 EVENTS THIS WEEKEND"
+  },
+
+  "beats": [
+    {
+      "id": "hook-count",
+      "index": 0,
+      "role": "HOOK",
+      "description": "Gym footage with a hard push-in while the count lands.",
+      "durationSeconds": 3.3,
+      "source": { "assetId": "clip-gym-session", "requiredTags": [] },
+      "motion": { "treatment": "PUSH_IN", "intensity": 0.75 },
+      "caption": { "text": "12 events this weekend", "entrance": "SNAP" },
+      "decorations": [],
+      "audioCues": [
+        { "role": "FIGHT_BELL", "atOffsetSeconds": 0.1, "gainDb": -6, "ducksMusic": true }
+      ],
+      "useSourceAudio": false
+    },
+    {
+      "id": "event-detail-walkout",
+      "index": 1,
+      "role": "EVENT_DETAIL",
+      "description": "Ring-walk footage, taken from the second section of the clip rather than its opening.",
+      "durationSeconds": 3.6,
+      "source": { "assetId": "clip-ring-walk", "requiredTags": [] },
+      "motion": { "treatment": "LATERAL_RIGHT", "intensity": 0.4 },
+      "transitionIn": { "kind": "IMPACT_CUT", "durationSeconds": 0.3 },
+      "caption": { "text": "Every card, every start time", "entrance": "RISE" },
+      "decorations": [
+        {
+          "key": "ACCENT_OUTLINE",
+          "colour": "ACCENT",
+          "opacity": 0.95,
+          "xPx": 90,
+          "yPx": 520,
+          "widthPx": 900,
+          "heightPx": 240,
+          "thicknessPx": 6
+        }
+      ],
+      "audioCues": [
+        { "role": "UI_CLICK", "atOffsetSeconds": 0.2, "gainDb": -18, "ducksMusic": false }
+      ],
+      "useSourceAudio": false
+    },
+    {
+      "id": "prediction-screen",
+      "index": 2,
+      "role": "PREDICTION",
+      "description": "The predictions screen drifting on a blurred backplate.",
+      "durationSeconds": 3.0,
+      "source": { "assetId": "screen-predictions", "requiredTags": [] },
+      "motion": { "treatment": "APP_SCREENSHOT_PARALLAX", "intensity": 0.5 },
+      "transitionIn": { "kind": "MASKED_UI_REVEAL", "durationSeconds": 0.3 },
+      "caption": { "text": "Predict before the card", "entrance": "RISE" },
+      "decorations": [],
+      "audioCues": [
+        { "role": "CONFIRMATION_PULSE", "atOffsetSeconds": 0.5, "gainDb": -14, "ducksMusic": false }
+      ],
+      "useSourceAudio": false
+    },
+    {
+      "id": "discussion-screen",
+      "index": 3,
+      "role": "DISCUSSION",
+      "description": "The scorecards screen, held still so the rounds are legible.",
+      "durationSeconds": 3.0,
+      "source": { "assetId": "screen-scorecards", "requiredTags": [] },
+      "motion": { "treatment": "FRAMED_PHONE_UI", "intensity": 0.5 },
+      "transitionIn": { "kind": "CROSSFADE", "durationSeconds": 0.3 },
+      "caption": { "text": "Settle it with the rounds", "entrance": "RISE" },
+      "decorations": [
+        {
+          "key": "BRAND_COLOUR_CALLOUT",
+          "colour": "ACCENT",
+          "opacity": 0.28,
+          "xPx": 90,
+          "yPx": 980,
+          "widthPx": 900,
+          "heightPx": 140,
+          "thicknessPx": 6
+        }
+      ],
+      "audioCues": [
+        { "role": "IMPACT", "atOffsetSeconds": 0.05, "gainDb": -10, "ducksMusic": true }
+      ],
+      "useSourceAudio": false
+    },
+    {
+      "id": "cta",
+      "index": 4,
+      "role": "CTA",
+      "description": "The designed brand card the end frame sits on.",
+      "durationSeconds": 3.3,
+      "source": { "assetId": "brand-card", "requiredTags": [] },
+      "motion": { "treatment": "STATIC_HOLD", "intensity": 0 },
+      "transitionIn": { "kind": "DIP_TO_BLACK", "durationSeconds": 0.3 },
+      "decorations": [],
+      "audioCues": [
+        { "role": "CTA_EMPHASIS", "atOffsetSeconds": 0.1, "gainDb": -8, "ducksMusic": true }
+      ],
+      "useSourceAudio": false
+    }
+  ],
+
+  "cta": {
+    "headline": "Download Free",
+    "subline": "Every event. Every round.",
+    "durationSeconds": 3,
+    "holdSeconds": 2.4,
+    "entrance": "RISE_AND_SCALE"
+  },
+
+  "audio": {
+    "musicAssetId": "music-bed",
+    "musicGainDb": -9,
+    "sourceAudioGainDb": -14,
+    "cueDuckingDb": 6,
+    "musicCrossfadeSeconds": 0.25,
+    "peakCeilingDbtp": -1.5,
+    "targetLufs": -14,
+    "cueAssetIds": {
+      "FIGHT_BELL": "sfx-fight-bell",
+      "CROWD": "sfx-crowd",
+      "IMPACT": "sfx-impact",
+      "UI_CLICK": "sfx-ui-click",
+      "CONFIRMATION_PULSE": "sfx-confirmation-pulse",
+      "CTA_EMPHASIS": "sfx-cta-emphasis"
+    }
+  },
+
+  "factualConstraints": [
+    "PRODUCT — Coverage: Combat Reviews covers every major combat-sports promotion in one app — MMA, boxing and kickboxing.",
+    "PRODUCT — Event details: Every card shows full fight order, start times in the viewer's own timezone, and broadcaster.",
+    "PRODUCT — Predictions: Users submit predictions before each card and see aggregated community picks per bout.",
+    "PRODUCT — Discussion: Round-by-round scorecards and post-fight discussion threads let fans settle disputed decisions with data.",
+    "PRODUCT — Price: The app is free to download and free to use; no subscription is required for event data or discussion.",
+    "EVENT — Events this weekend: 12 combat-sports events are scheduled across all covered promotions this weekend."
+  ],
+
+  "brandConstraints": {
+    "logoAssetId": "logo-primary",
+    "primaryColorHex": "#0B0B0F",
+    "accentColorHex": "#FF3B30",
+    "captionFontFamily": "Arial",
+    "safeAreaTopPx": 220,
+    "safeAreaBottomPx": 420
+  }
+}

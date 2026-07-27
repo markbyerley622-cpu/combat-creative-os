@@ -6,7 +6,7 @@ import {
   ManifestValidationError,
   MIN_TRANSITION_SECONDS,
   parseRenderManifest,
-  RenderManifestV1Schema,
+  RenderManifestSchema,
   secondsToFrames,
   type RenderManifest,
 } from './manifest';
@@ -98,9 +98,46 @@ describe('render manifest — the checked-in fixture', () => {
 });
 
 describe('render manifest — validation', () => {
-  it('rejects an unknown manifest version rather than reading it as v1', async () => {
-    const error = expectRejected(await fixtureWith((m) => (m.manifestVersion = 2)));
+  it('rejects an unknown manifest version rather than reading it as the newest known one', async () => {
+    const error = expectRejected(await fixtureWith((m) => (m.manifestVersion = 3)));
     expect(issuePaths(error)).toContain('manifestVersion');
+  });
+
+  it('refuses a v2-only field on a v1 manifest, naming the field and the version', async () => {
+    const error = expectRejected(
+      await fixtureWith((m) => {
+        m.manifestVersion = 1;
+        (m.scenes as Record<string, unknown>[])[0]!.treatment = { key: 'PUSH_IN', intensity: 0.4 };
+      }),
+    );
+    expect((error as ManifestValidationError).message).toContain(
+      'scene.treatment requires manifestVersion 2',
+    );
+  });
+
+  it('accepts the same field once the manifest declares version 2', async () => {
+    const manifest = parseRenderManifest(
+      await fixtureWith((m) => {
+        m.manifestVersion = 2;
+        (m.scenes as Record<string, unknown>[])[0]!.treatment = { key: 'PUSH_IN', intensity: 0.4 };
+      }),
+    );
+    expect(manifest.scenes[0]?.treatment).toEqual({ key: 'PUSH_IN', intensity: 0.4 });
+  });
+
+  it('refuses a treatment the scene source cannot carry', async () => {
+    const error = expectRejected(
+      await fixtureWith((m) => {
+        m.manifestVersion = 2;
+        // Scene 0 is a video clip in the fixture; a bezelled UI frame is a
+        // still-image treatment.
+        (m.scenes as Record<string, unknown>[])[0]!.treatment = {
+          key: 'FRAMED_PHONE_UI',
+          intensity: 0.5,
+        };
+      }),
+    );
+    expect((error as ManifestValidationError).message).toContain('accepts IMAGE sources');
   });
 
   it('rejects an unknown top-level field instead of silently ignoring it', async () => {
@@ -297,7 +334,7 @@ describe('render manifest — validation', () => {
   });
 
   it('applies documented defaults for optional presentation fields', () => {
-    const parsed = RenderManifestV1Schema.parse({
+    const parsed = RenderManifestSchema.parse({
       manifestVersion: 1,
       name: 'minimal',
       campaignId: '11111111-1111-4111-8111-111111111111',

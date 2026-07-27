@@ -2948,6 +2948,99 @@ milestone exists to close; the in-memory stores implement the seam by strictly
 serializing bodies and rolling back a failed one, which is a _stricter_ fake
 and therefore never a source of false confidence.
 
+**Next milestone: the zero-cost footage-first creative preview**, now done —
+see the entry below. AAMP-1 step 4 (`apps/worker` against a live Temporal
+server, `docs/aamp-architecture.md` §6 task 6) follows it.
+
+### Zero-cost footage-first creative preview (2026-07-27)
+
+**Why.** Every route to a strong Combat Reviews advertisement had a cost or a
+prerequisite this machine cannot meet: real reasoning needs a paid key, real
+generation needs 12 GB of VRAM against a 4 GB card, and the fixture path
+ignores the campaign prompt entirely. The one remaining source of genuine
+creative judgement that costs nothing is **a person** — so this milestone lets
+a human author the creative decisions as a validated plan and has the pipeline
+execute them deterministically, with no reasoning provider and no generation
+provider constructed at all.
+
+**What changed.**
+
+- **`HUMAN_ASSISTED_PREVIEW`, a fourth execution mode**
+  (`production/aamp-execution-mode.ts`). It is decided by a new evidence value,
+  `reasoning: HUMAN_SUPPLIED_PLAN`, which no other mode permits — so a
+  model-planned run cannot be labelled a preview and a preview cannot be
+  labelled PRODUCTION, whatever infrastructure either stood on. It also
+  requires `videoGeneration: NOT_REQUIRED`, which makes "zero generation calls"
+  structural. `satisfiesExecutionFloor` matches it exactly rather than by rank,
+  because it is a different _kind_ of run, not a weaker tier.
+- **`preview/human-plan.ts`** — the strict, versioned plan schema carrying
+  strategy, creative direction, hook, beat timing, per-beat shot
+  specifications, transitions, motion, captions, CTA timing, audio intentions,
+  factual constraints and brand constraints. It is bound to one brief by
+  `campaignPromptSha256`, requires a named author, enforces the same
+  exact-duration contract the render manifest does, and carries the
+  no-agency-imitation prohibition that would otherwise live only in a prompt.
+  `--emit-plan-template` writes a deterministic skeleton.
+- **The composition root builds no reasoning provider** in this mode. Not a
+  fixture one either: `AampDependencies.reasoningProvider` is optional, and a
+  path that needs one calls `requireReasoningProvider`. There is nothing to
+  call, which is a stronger guarantee than a spy that counts calls.
+- **`preview/asset-root-preflight.ts`** — an external, operator-supplied asset
+  root (`brand/`, `app-ui/`, `combat-clips/`, `audio/`, `references/`) is
+  validated for canonical containment (resolve _and_ `realpath`, so a symlink
+  out of the root is caught), existence, checksums, media kind, codec,
+  dimensions, duration, audio presence, duplicate content, corruption, rights
+  and sufficiency for the shortest beat. Anything under `references/` is
+  counted and refused entry to the production manifest whatever its declared
+  rights say.
+- **`preview/segment-selection.ts` removes the `inSeconds: 0` limitation.**
+  `packages/media/src/analysis/clip-analysis.ts` measures scene boundaries,
+  black regions and frozen regions from each clip with lavfi's own machine-
+  readable `metadata` stream; selection then scores candidate windows across
+  the whole runtime, rejects those over black, frozen or already-used footage,
+  requires transition handles, and records every rejected alternative.
+- **`packages/media/src/render/motion-treatments.ts`** — the typed, validated,
+  versioned catalogue that is now the single producer of motion, transition,
+  decoration and typography grammar. The filter graph builds none of its own;
+  v1 manifests map onto the same compiler, so there is no second push-in.
+- **Render manifest v2, strictly additive.** One schema object, two versions:
+  every v2 field is optional and `manifestVersion: 1` refuses each of them _by
+  name_. v1's meaning is frozen and a v1 manifest parses to exactly what it did
+  before.
+- **A real deterministic audio mix** — placed cues (bell, crowd, impact, UI
+  click, confirmation pulse, CTA emphasis) with per-role gain clamping, trim
+  ceilings, ducking, fades, an equal-power bed crossfade and a brick-wall
+  limiter ahead of loudness normalisation.
+- **Storyboard artefacts before the render** — `storyboard.json`, a
+  self-contained `storyboard.html` (no server, no network, no script),
+  `contact-sheet.png` from the actual in-points, `source-selection-report.json`,
+  `audio-plan.json` and `render-summary.json`. `assertStoryboardSafe` fails
+  closed on credentials, absolute paths and reference-analysis paths.
+- **Expanded actual-media QA** — 37 binding checks on this cut, including
+  faststart read from the container's atom table, measured integrated loudness,
+  true peak, clipping, silence, channel layout and sample rate from a decode of
+  the master, a black/freeze walk across the body of the cut, CTA hold, safe-area
+  compliance, rights, provenance completeness and storyboard-to-render
+  agreement. An unmeasurable binding property is reported with its reason and
+  is never a pass.
+
+**Proven, live, on this machine.** A genuine ffprobe-verified 1080×1920
+h264/AAC MP4 at exactly 15.000 s, QA `PASS` across all 37 checks, measured at
+−13.8 LUFS against a −14 target with 0 clipped samples; the run succeeds in an
+environment where `REASONING_PROVIDER=claude` is set with **no API key** (a
+campaign run exits 3 there), which is what proves no provider was constructed;
+two runs of the same plan produce a byte-identical master; real detection found
+the deliberate black stretch and scene joins in the fixture clip and the
+selector chose a non-zero, black-avoiding in-point; a QA failure sends the
+master to `rejected/`, returns a non-zero exit code and marks the asset
+`FAILED`.
+
+**Not proven.** Creative quality — a human wrote the plan, and whether it is a
+good advertisement is a human judgement this pipeline neither makes nor claims.
+The example plan and the synthetic asset root demonstrate the mechanism against
+`lavfi`-generated material, not against real Combat Reviews footage. Nothing
+here is evidence about autonomous reasoning, which this mode does not use.
+
 **Next milestone: AAMP-1 step 4 — `apps/worker` against a live Temporal server**
 (`docs/aamp-architecture.md` §6 task 6), confirming every name in
 `activity-name-contract.ts` is registered against a real server.

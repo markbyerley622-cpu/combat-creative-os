@@ -21,6 +21,14 @@ export const RUN_MODES = [
   'REAL',
   /** Explicitly requested demonstration. Replays committed fixtures; never a campaign result. */
   'FIXTURE_DEMO',
+  /**
+   * A person made the creative decisions and supplied them as a validated plan.
+   *
+   * No reasoning provider is constructed at all — not a fixture one either —
+   * so there is nothing to call. That is the difference from `FIXTURE_DEMO`,
+   * which does construct a provider and replays canned answers from it.
+   */
+  'HUMAN_ASSISTED',
 ] as const;
 export type RunMode = (typeof RUN_MODES)[number];
 
@@ -41,12 +49,13 @@ export interface ReasoningPolicyInput {
 export interface ReasoningPolicy {
   readonly runMode: RunMode;
   readonly useFixtureReasoning: boolean;
-  /** The model actually asked for, or `NONE-FIXTURE-REPLAY` in demo mode. */
+  /** The model actually asked for, or a `NONE-…` sentinel when none was used. */
   readonly reasoningModel: string;
-  readonly providerName: 'claude' | 'fixture-replay';
+  readonly providerName: 'claude' | 'fixture-replay' | 'human-authored-plan';
 }
 
 const FIXTURE_MODEL = 'NONE-FIXTURE-REPLAY';
+const HUMAN_PLAN_MODEL = 'NONE-HUMAN-AUTHORED-PLAN';
 
 /**
  * Decides how a run may reason, or refuses it.
@@ -58,6 +67,18 @@ const FIXTURE_MODEL = 'NONE-FIXTURE-REPLAY';
  * change — a refusal that does not tell you what to do is just an obstacle.
  */
 export function resolveReasoningPolicy(input: ReasoningPolicyInput): ReasoningPolicy {
+  // Checked first and unconditionally: a human-assisted run must not be
+  // refused for lacking an API key it will never use, and must not be given a
+  // fixture provider it must never call.
+  if (input.runMode === 'HUMAN_ASSISTED') {
+    return {
+      runMode: 'HUMAN_ASSISTED',
+      useFixtureReasoning: false,
+      reasoningModel: HUMAN_PLAN_MODEL,
+      providerName: 'human-authored-plan',
+    };
+  }
+
   if (input.runMode === 'FIXTURE_DEMO') {
     return {
       runMode: 'FIXTURE_DEMO',

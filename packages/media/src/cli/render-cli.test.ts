@@ -5,6 +5,17 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { findRepositoryRoot, parseCliArguments, runRenderCli } from './render-cli';
 
+/**
+ * Windows releases a child process's file handles asynchronously, so a
+ * directory removal issued immediately after the last FFmpeg exits can see
+ * `ENOTEMPTY` even though every file was unlinked. Actual-media QA now spawns
+ * roughly ten probes per render — a frame walk, the caption and safe-area
+ * crops, the CTA hold and the audio decode — which widens that window
+ * considerably on a loaded machine. `fs.rm`'s retry options exist for exactly
+ * this case; they are the documented API, not a retry hiding a defect.
+ */
+const CLEANUP = { recursive: true, force: true, maxRetries: 10, retryDelay: 50 } as const;
+
 let workRoot: string;
 
 beforeEach(async () => {
@@ -12,7 +23,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  await rm(workRoot, { recursive: true, force: true });
+  await rm(workRoot, CLEANUP);
 });
 
 function capture(): { out: string[]; err: string[] } {

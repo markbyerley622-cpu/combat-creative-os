@@ -52,6 +52,12 @@ infrastructure/.data/
 # that references them is committed; the media it generates is not.
 packages/media/fixtures/generated/
 
+# The synthetic external asset root the zero-cost preview runs against —
+# brand/, app-ui/, combat-clips/, audio/ and references/. Rebuilt with
+# `pnpm aamp:fixtures`. No external, licensed or copyrighted media is ever
+# committed; the manifest and the creative plan that describe it are.
+packages/media/fixtures/preview-asset-root/
+
 # Creative Memory analysis output — proxies, extracted frames, scene clips,
 # transcripts and FiftyOne projections derived from reference advertisements.
 # Reference material is analysis-only and third-party; none of it is ever
