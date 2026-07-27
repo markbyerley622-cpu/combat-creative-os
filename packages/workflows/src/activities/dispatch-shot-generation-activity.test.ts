@@ -163,7 +163,7 @@ describe('dispatchShotGenerationActivity', () => {
     expect(store.budgetLedgerEntries.filter((e) => e.entryType === 'RESERVATION')).toHaveLength(4);
   });
 
-  it('rejects and releases already-made reservations when a later budget level is exhausted', async () => {
+  it('writes no reservation at any level when a later budget level is exhausted', async () => {
     const store = new InMemoryCampaignStore();
     const campaign = store.seedCampaign();
     const spec = await seedSpec(store, campaign.workspaceId, campaign.id);
@@ -179,7 +179,7 @@ describe('dispatchShotGenerationActivity', () => {
       workspaceId: campaign.workspaceId,
       level: 'CAMPAIGN',
       scopeId: campaign.id,
-      limitCents: 1, // exhausted immediately -> CAMPAIGN check fails after WORKSPACE already reserved
+      limitCents: 1, // exhausted immediately -> CAMPAIGN refuses the whole reservation
     });
     const activity = buildActivity(store);
 
@@ -193,10 +193,11 @@ describe('dispatchShotGenerationActivity', () => {
 
     expect(result).toMatchObject({ ok: false, reason: 'BUDGET_EXCEEDED', level: 'CAMPAIGN' });
     expect(store.shotGenerationAttemptRecords).toHaveLength(0);
-    const workspaceEntries = store.budgetLedgerEntries.filter(
-      (e) => e.budgetPolicyId === store.budgetPolicies[0]!.id,
-    );
-    expect(workspaceEntries.map((e) => e.entryType)).toEqual(['RESERVATION', 'RELEASE']);
+    // AAMP-1 step 3: all four levels are decided inside one SERIALIZABLE
+    // transaction, so a refusal at CAMPAIGN leaves the WORKSPACE policy with no
+    // row at all — not a RESERVATION compensated by a RELEASE, which is only
+    // self-correcting if the process survives to write the second row.
+    expect(store.budgetLedgerEntries).toHaveLength(0);
   });
 
   it('dispatches as IMAGE_TO_VIDEO when the spec has reference assets, TEXT_TO_VIDEO otherwise', async () => {

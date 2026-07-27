@@ -11,6 +11,11 @@ import type {
   BudgetLedgerEntryRecord,
   BudgetPolicyRecord,
 } from '../budget-repository';
+import {
+  createSerializedBudgetTransactionRunner,
+  type BudgetTransactionRunner,
+  type SerializableBudgetDataSource,
+} from '../budget-transaction';
 import type { CampaignDataSource, CampaignRecord } from '../campaign-repository';
 import type { CampaignBriefDataSource, CampaignBriefRecord } from '../campaign-brief-repository';
 import type { StrategyDataSource, StrategyRecord } from '../strategy-repository';
@@ -147,7 +152,7 @@ export class InMemoryCampaignStore
     CampaignTransitionAuditDataSource,
     HumanApprovalDataSource,
     TransitionFactsDataSource,
-    BudgetDataSource,
+    SerializableBudgetDataSource,
     AssetDataSource,
     PromptDataSource,
     AgentInvocationDataSource,
@@ -1625,6 +1630,22 @@ export class InMemoryCampaignStore
       return entry;
     },
   };
+
+  /**
+   * The in-process stand-in for a `SERIALIZABLE` transaction. Strictly
+   * serializes reservation bodies and undoes a failed one — see
+   * `createSerializedBudgetTransactionRunner`. A pass here says nothing about
+   * PostgreSQL concurrency; that is proven only by
+   * `budget-postgres-concurrency.test.ts` against a live database.
+   */
+  budgetTransaction: BudgetTransactionRunner = createSerializedBudgetTransactionRunner({
+    dataSource: this,
+    snapshot: () => [...this.budgetLedgerEntries],
+    restore: (rows) => {
+      this.budgetLedgerEntries.length = 0;
+      this.budgetLedgerEntries.push(...rows);
+    },
+  });
 
   asset: AssetDataSource['asset'] = {
     create: async ({ data }) => {

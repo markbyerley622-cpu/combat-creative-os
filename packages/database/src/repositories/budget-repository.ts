@@ -3,6 +3,13 @@ import {
   type BudgetLedgerEntryType,
   type BudgetLevel,
 } from '@combat/domain';
+import {
+  BudgetReservationRaceError,
+  isUniqueConstraintViolation,
+  runBudgetTransactionWithRetry,
+  type BudgetTransactionRetryOptions,
+  type SerializableBudgetDataSource,
+} from './budget-transaction';
 
 /**
  * Budget checks happen before every external-generation dispatch, at every
@@ -33,6 +40,15 @@ export interface BudgetLedgerEntryRecord {
   createdAt: Date;
 }
 
+/**
+ * The reads and writes budget accounting performs.
+ *
+ * Reserving needs more than this — it needs a `SERIALIZABLE` transaction, so
+ * `reserveBudgetAcrossScopes` takes `SerializableBudgetDataSource` (this plus a
+ * `BudgetTransactionRunner`). Status, charge and release stay on the narrower
+ * type: each is a single statement or idempotent on the ledger's unique key,
+ * and keeping them here means a read-only handle cannot reserve.
+ */
 export interface BudgetDataSource {
   budgetPolicy: {
     findFirst(args: {
@@ -121,129 +137,275 @@ export type BudgetCheckResult =
   | { ok: true; policy: undefined; reservation: undefined } // no policy configured at this level — uncapped
   | { ok: false; error: CampaignTransitionError };
 
+/** One (level, scopeId) pair a dispatch must clear before it may spend. */
+export interface BudgetScope {
+  readonly level: BudgetLevel;
+  readonly scopeId: string;
+}
+
+export interface BudgetReservationRequest {
+  readonly workspaceId: string;
+  /** Every scope this dispatch is gated on. All of them clear together or none of them do. */
+  readonly scopes: readonly BudgetScope[];
+  readonly requiredCents: number;
+  readonly idempotencyKey: string;
+  readonly campaignId?: string;
+  readonly shotId?: string;
+  readonly generationJobRef?: string;
+}
+
+export interface BudgetScopeReservation {
+  readonly level: BudgetLevel;
+  readonly scopeId: string;
+  readonly policy: BudgetPolicyRecord;
+  readonly reservation: BudgetLedgerEntryRecord;
+}
+
+export type BudgetReservationResult =
+  | {
+      readonly ok: true;
+      readonly reservations: readonly BudgetScopeReservation[];
+      /** Scopes with no configured policy. Reported rather than silently dropped, so a caller can tell "uncapped" from "reserved". */
+      readonly uncappedScopes: readonly BudgetScope[];
+    }
+  | {
+      readonly ok: false;
+      /** The scope that could not be cleared. The rest were never written. */
+      readonly level: BudgetLevel;
+      readonly scopeId: string;
+      readonly error: CampaignTransitionError;
+    };
+
 /**
- * Reserves `requiredCents` against the policy at (level, scopeId), if one is
- * configured — a level with no configured BudgetPolicy is treated as
- * uncapped, so a workspace can enforce budgets only where it has chosen to
- * configure them. Idempotent: replaying the same `idempotencyKey` against the
- * same policy returns the existing reservation rather than double-reserving
- * (CLAUDE.md workflow-idempotency rule).
+ * A reservation request that is malformed rather than unaffordable.
  *
- * **M14 — concurrency.** The headroom check is a read followed by a write, so
- * two callers can both observe enough budget before either has written. Two
- * guards close that window without requiring a database transaction:
+ * Thrown before the transaction opens, so it can never be retried as
+ * contention (requirement 7 of AAMP-1 step 3) and can never leave a partial
+ * ledger behind.
+ */
+export class InvalidBudgetRequestError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'InvalidBudgetRequestError';
+  }
+}
+
+/**
+ * Deterministic scope ordering for policy lookup.
  *
- * 1. *Duplicate keys.* Concurrent retries of the SAME key all pass the
- *    pre-read, so the losers hit the `(budgetPolicyId, idempotencyKey)` unique
- *    constraint. That violation is caught and resolved by re-reading the row
- *    the winner wrote, so a retry storm is idempotent rather than an error.
- * 2. *Over-commitment.* After inserting, the ledger is re-read and the total
- *    re-checked. A reservation that turns out to have crossed the limit is
- *    compensated — released immediately and reported as `BUDGET_EXCEEDED` — so
- *    the committed total can never exceed the configured cap even when several
- *    distinct dispatches race.
+ * Two concurrent transactions that touch the same policies must touch them in
+ * the same order, or they can hold-and-wait on each other's rows and deadlock
+ * (40P01) instead of merely conflicting (40001). Ordering by level first gives
+ * a stable order for the common four-level dispatch regardless of the order the
+ * caller happened to list its scopes in; the final lock order is by policy id
+ * (below), which is stable across *every* caller in the system, including ones
+ * gated on different level sets.
+ */
+const BUDGET_LEVEL_LOCK_ORDER: readonly BudgetLevel[] = [
+  'WORKSPACE',
+  'CAMPAIGN',
+  'PROVIDER',
+  'SHOT',
+];
+
+function compareScopes(a: BudgetScope, b: BudgetScope): number {
+  const levelDelta =
+    BUDGET_LEVEL_LOCK_ORDER.indexOf(a.level) - BUDGET_LEVEL_LOCK_ORDER.indexOf(b.level);
+  if (levelDelta !== 0) return levelDelta;
+  return a.scopeId < b.scopeId ? -1 : a.scopeId > b.scopeId ? 1 : 0;
+}
+
+function assertValidReservationRequest(request: BudgetReservationRequest): void {
+  if (request.workspaceId.length === 0) {
+    throw new InvalidBudgetRequestError('workspaceId is required');
+  }
+  if (request.idempotencyKey.length === 0) {
+    throw new InvalidBudgetRequestError('idempotencyKey is required');
+  }
+  if (!Number.isInteger(request.requiredCents) || request.requiredCents < 0) {
+    throw new InvalidBudgetRequestError(
+      `requiredCents must be a non-negative integer, received ${String(request.requiredCents)}`,
+    );
+  }
+  if (request.scopes.length === 0) {
+    throw new InvalidBudgetRequestError('at least one budget scope is required');
+  }
+  const seen = new Set<string>();
+  for (const scope of request.scopes) {
+    if (scope.scopeId.length === 0) {
+      throw new InvalidBudgetRequestError(`scopeId is required for level ${scope.level}`);
+    }
+    const key = `${scope.level}:${scope.scopeId}`;
+    if (seen.has(key)) {
+      // Two entries for one policy would reserve the amount twice against the
+      // same cap while reporting one reservation.
+      throw new InvalidBudgetRequestError(`duplicate budget scope ${key}`);
+    }
+    seen.add(key);
+  }
+}
+
+/**
+ * Reserves `requiredCents` against every configured policy in `scopes`, inside
+ * one `SERIALIZABLE` transaction (AAMP-1 step 3).
  *
- * The durable fix under Postgres is a `SERIALIZABLE` transaction (or a
- * `SELECT ... FOR UPDATE` on the policy row) around the read-and-insert; that
- * cannot be exercised in this environment, which has no live database, so the
- * compensating guard above is what is actually tested. See
- * docs/architecture.md §8's M14 entry.
+ * A scope with no configured `BudgetPolicy` is uncapped: a workspace enforces
+ * budgets only where it has chosen to configure them. Idempotent — replaying
+ * the same `idempotencyKey` returns the reservations already written rather
+ * than double-reserving (CLAUDE.md workflow-idempotency rule).
+ *
+ * Three properties this shape buys that a per-level loop could not:
+ *
+ * 1. *All or nothing.* Every applicable policy is checked before any row is
+ *    written, and the transaction commits both or neither. The old loop
+ *    reserved level by level and unwound its earlier reservations with
+ *    compensating RELEASE rows when a later level refused — correct only if the
+ *    process survived long enough to write them.
+ * 2. *No read-then-write window.* PostgreSQL's serializable snapshot isolation
+ *    aborts one of two transactions that read the same ledger and both write to
+ *    it, so two dispatches can never both observe the same headroom. The
+ *    aborted one is retried by `runBudgetTransactionWithRetry`.
+ * 3. *One lock order.* Policies are locked by id, so two dispatches gated on
+ *    overlapping scope sets cannot deadlock by approaching them from opposite
+ *    ends.
+ *
+ * `BUDGET_EXCEEDED` is returned, never thrown: it is an expected business
+ * outcome the caller must branch on. Contention that outlives the retry bound
+ * *is* thrown (`BudgetTransactionContentionError`), because it says nothing
+ * about the workspace's money — see that class's doc comment.
+ */
+export async function reserveBudgetAcrossScopes(
+  db: SerializableBudgetDataSource,
+  request: BudgetReservationRequest,
+  retryOptions?: BudgetTransactionRetryOptions,
+): Promise<BudgetReservationResult> {
+  assertValidReservationRequest(request);
+
+  const orderedScopes = [...request.scopes].sort(compareScopes);
+
+  return runBudgetTransactionWithRetry(
+    db.budgetTransaction,
+    async (tx) => {
+      const configured: { scope: BudgetScope; policy: BudgetPolicyRecord }[] = [];
+      const uncappedScopes: BudgetScope[] = [];
+
+      for (const scope of orderedScopes) {
+        // eslint-disable-next-line no-await-in-loop -- deterministic order is the deadlock guard; parallel lookups would surrender it
+        const policy = await tx.budgetPolicy.findFirst({
+          where: { workspaceId: request.workspaceId, level: scope.level, scopeId: scope.scopeId },
+        });
+        if (policy) configured.push({ scope, policy });
+        else uncappedScopes.push(scope);
+      }
+
+      // Final lock order: policy id, stable across every caller in the system.
+      configured.sort((a, b) =>
+        a.policy.id < b.policy.id ? -1 : a.policy.id > b.policy.id ? 1 : 0,
+      );
+
+      // Decide for every policy before writing to any of them, so a refusal at
+      // the last scope leaves no row behind to be compensated.
+      const planned: {
+        scope: BudgetScope;
+        policy: BudgetPolicyRecord;
+        existing?: BudgetLedgerEntryRecord;
+      }[] = [];
+
+      for (const { scope, policy } of configured) {
+        // eslint-disable-next-line no-await-in-loop -- sequential by design (see lock order above)
+        const existing = await tx.budgetLedgerEntry.findFirst({
+          where: { budgetPolicyId: policy.id, idempotencyKey: request.idempotencyKey },
+        });
+        if (existing) {
+          planned.push({ scope, policy, existing });
+          continue;
+        }
+
+        // eslint-disable-next-line no-await-in-loop -- sequential by design (see lock order above)
+        const entries = await tx.budgetLedgerEntry.findMany({
+          where: { budgetPolicyId: policy.id },
+        });
+        const remaining = policy.limitCents - computeSpentCents(entries);
+        if (remaining < request.requiredCents) {
+          return {
+            ok: false as const,
+            level: scope.level,
+            scopeId: scope.scopeId,
+            error: new CampaignTransitionError({
+              type: 'BUDGET_EXCEEDED',
+              level: scope.level,
+              scopeId: scope.scopeId,
+              requiredCents: request.requiredCents,
+              remainingCents: remaining,
+            }),
+          };
+        }
+        planned.push({ scope, policy });
+      }
+
+      const reservations: BudgetScopeReservation[] = [];
+      for (const { scope, policy, existing } of planned) {
+        let reservation = existing;
+        if (!reservation) {
+          try {
+            // eslint-disable-next-line no-await-in-loop -- sequential by design (see lock order above)
+            reservation = await tx.budgetLedgerEntry.create({
+              data: {
+                workspaceId: request.workspaceId,
+                budgetPolicyId: policy.id,
+                entryType: 'RESERVATION',
+                amountCents: request.requiredCents,
+                idempotencyKey: request.idempotencyKey,
+                campaignId: request.campaignId,
+                shotId: request.shotId,
+                generationJobRef: request.generationJobRef,
+              },
+            });
+          } catch (error) {
+            if (isUniqueConstraintViolation(error)) {
+              // A concurrent retry of the same key won. Its row is invisible to
+              // this snapshot, so retry the transaction rather than re-reading.
+              throw new BudgetReservationRaceError(request.idempotencyKey, error);
+            }
+            throw error;
+          }
+        }
+        reservations.push({ level: scope.level, scopeId: scope.scopeId, policy, reservation });
+      }
+
+      return { ok: true as const, reservations, uncappedScopes };
+    },
+    retryOptions,
+  );
+}
+
+/**
+ * Reserves against the single policy at (level, scopeId).
+ *
+ * Retained as the one-scope spelling of `reserveBudgetAcrossScopes` — the
+ * shape most call sites and the whole existing test suite are written against.
+ * A caller gated on several levels should use the plural form, so the levels
+ * clear atomically instead of level by level.
  */
 export async function checkAndReserveBudget(
-  db: BudgetDataSource,
+  db: SerializableBudgetDataSource,
   request: BudgetCheckRequest,
 ): Promise<BudgetCheckResult> {
-  const policy = await db.budgetPolicy.findFirst({
-    where: { workspaceId: request.workspaceId, level: request.level, scopeId: request.scopeId },
+  const result = await reserveBudgetAcrossScopes(db, {
+    workspaceId: request.workspaceId,
+    scopes: [{ level: request.level, scopeId: request.scopeId }],
+    requiredCents: request.requiredCents,
+    idempotencyKey: request.idempotencyKey,
+    campaignId: request.campaignId,
+    shotId: request.shotId,
+    generationJobRef: request.generationJobRef,
   });
-  if (!policy) {
-    return { ok: true, policy: undefined, reservation: undefined };
-  }
 
-  const existingReservation = await db.budgetLedgerEntry.findFirst({
-    where: { budgetPolicyId: policy.id, idempotencyKey: request.idempotencyKey },
-  });
-  if (existingReservation) {
-    return { ok: true, policy, reservation: existingReservation };
-  }
+  if (!result.ok) return { ok: false, error: result.error };
 
-  const entries = await db.budgetLedgerEntry.findMany({ where: { budgetPolicyId: policy.id } });
-  const spent = computeSpentCents(entries);
-  const remaining = policy.limitCents - spent;
-
-  if (remaining < request.requiredCents) {
-    return {
-      ok: false,
-      error: new CampaignTransitionError({
-        type: 'BUDGET_EXCEEDED',
-        level: request.level,
-        scopeId: request.scopeId,
-        requiredCents: request.requiredCents,
-        remainingCents: remaining,
-      }),
-    };
-  }
-
-  let reservation: BudgetLedgerEntryRecord;
-  try {
-    reservation = await db.budgetLedgerEntry.create({
-      data: {
-        workspaceId: request.workspaceId,
-        budgetPolicyId: policy.id,
-        entryType: 'RESERVATION',
-        amountCents: request.requiredCents,
-        idempotencyKey: request.idempotencyKey,
-        campaignId: request.campaignId,
-        shotId: request.shotId,
-        generationJobRef: request.generationJobRef,
-      },
-    });
-  } catch (error) {
-    // Guard 1: a concurrent retry of the same key won the race. The unique
-    // constraint is the authority — resolve to the row it wrote.
-    const winner = await db.budgetLedgerEntry.findFirst({
-      where: { budgetPolicyId: policy.id, idempotencyKey: request.idempotencyKey },
-    });
-    if (winner) return { ok: true, policy, reservation: winner };
-    throw error;
-  }
-
-  // Guard 2: re-read and re-check, first-writer-wins. Another dispatch may
-  // have committed between this call's read and its write, so the ledger
-  // prefix up to and including this reservation is re-summed: if THIS row is
-  // the one that crossed the cap it is compensated, while everything written
-  // before it stands. Without the prefix rule every racer would see the
-  // over-commit and all of them would back out, wasting headroom that one of
-  // them was entitled to.
-  const committed = await db.budgetLedgerEntry.findMany({ where: { budgetPolicyId: policy.id } });
-  const ownIndex = committed.findIndex((e) => e.id === reservation.id);
-  const prefix = ownIndex >= 0 ? committed.slice(0, ownIndex + 1) : committed;
-  if (computeSpentCents(prefix) > policy.limitCents) {
-    await db.budgetLedgerEntry.create({
-      data: {
-        workspaceId: request.workspaceId,
-        budgetPolicyId: policy.id,
-        entryType: 'RELEASE',
-        amountCents: request.requiredCents,
-        idempotencyKey: `${request.idempotencyKey}:overcommit-release`,
-        campaignId: request.campaignId,
-        shotId: request.shotId,
-        generationJobRef: request.generationJobRef,
-      },
-    });
-    return {
-      ok: false,
-      error: new CampaignTransitionError({
-        type: 'BUDGET_EXCEEDED',
-        level: request.level,
-        scopeId: request.scopeId,
-        requiredCents: request.requiredCents,
-        remainingCents: Math.max(0, policy.limitCents - spent),
-      }),
-    };
-  }
-
-  return { ok: true, policy, reservation };
+  const reserved = result.reservations[0];
+  if (!reserved) return { ok: true, policy: undefined, reservation: undefined };
+  return { ok: true, policy: reserved.policy, reservation: reserved.reservation };
 }
 
 export interface BudgetLedgerWriteInput {

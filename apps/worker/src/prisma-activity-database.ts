@@ -1,4 +1,5 @@
 import type { PrismaClient } from '@combat/database';
+import { createPrismaBudgetTransactionRunner } from '@combat/database';
 import type { WorkerActivityDatabase } from '@combat/workflows';
 
 /**
@@ -75,11 +76,17 @@ function wrapDelegate(delegate: Delegate): Delegate {
 
 export function createPrismaActivityDatabase(prisma: PrismaClient): WorkerActivityDatabase {
   const cache = new Map<string, unknown>();
+  // Budget reservation runs inside a SERIALIZABLE transaction (AAMP-1
+  // step 3). It is not a model delegate, so the proxy below would answer
+  // `undefined` for it — it is supplied explicitly, from the same client, and
+  // is the only way a reservation reaches PostgreSQL.
+  const budgetTransaction = createPrismaBudgetTransactionRunner(prisma);
   const proxy = new Proxy(prisma as unknown as Delegate, {
     get(target, property): unknown {
       if (typeof property !== 'string') {
         return Reflect.get(target, property) as unknown;
       }
+      if (property === 'budgetTransaction') return budgetTransaction;
       if (cache.has(property)) return cache.get(property);
 
       const member = Reflect.get(target, property) as unknown;

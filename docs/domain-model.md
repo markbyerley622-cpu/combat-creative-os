@@ -346,12 +346,21 @@ enforced only by convention and are now enforced by code and covered by tests:
   `setId` / `creativeVariantId` / `variantAssetId` against the path campaign
   before use (`assertBelongsToCampaign`). Cross-tenant lookups answer 404 rather
   than 403, so ids stay unprobeable.
-- _Budget reservation is compensating, not transactional._ `BudgetLedgerEntry`
-  is append-only and every amount is derived from it, so a reservation is a
-  read-then-write. Under concurrency the ledger prefix up to a new reservation
-  is re-summed and the row that crossed the cap is released, leaving earlier
-  writers standing. The durable fix is a `SERIALIZABLE` transaction in Postgres;
-  the compensating guard is what this environment can actually test.
+- _Budget reservation is transactional, not compensating (AAMP-1 step 3)._
+  `BudgetLedgerEntry` is append-only and every amount is derived from it, so a
+  reservation is a read-then-write. M14 closed that window by re-summing the
+  ledger prefix after inserting and releasing the row that crossed the cap;
+  AAMP-1 step 3 replaced it with the durable fix. Every applicable policy —
+  workspace, campaign, provider, shot — is loaded, summed, decided and written
+  inside one PostgreSQL `SERIALIZABLE` transaction (`reserveBudgetAcrossScopes`),
+  so a refusal at any level writes nothing at any other, and two concurrent
+  dispatches can never both observe the same headroom. Policies are processed in
+  policy-id order, one lock order shared by every caller. Serialization aborts,
+  deadlocks and lost idempotency-key races retry within a bounded, jittered
+  loop; exhausted contention throws a typed error rather than being reported as
+  `BUDGET_EXCEEDED`, which would be a false statement about the workspace's
+  money. Proven against live PostgreSQL — see `docs/architecture.md` §8's
+  AAMP-1 step 3 entry.
 
 ---
 

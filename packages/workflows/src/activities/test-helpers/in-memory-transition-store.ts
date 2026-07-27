@@ -1,9 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import type { CampaignStage } from '@combat/domain';
+import { createSerializedBudgetTransactionRunner } from '@combat/database';
 import type {
   BudgetDataSource,
   BudgetLedgerEntryRecord,
   BudgetPolicyRecord,
+  BudgetTransactionRunner,
   CampaignRecord,
   CampaignTransitionAuditDataSource,
   CampaignTransitionAuditRecord,
@@ -256,9 +258,30 @@ export class InMemoryTransitionStore
           e.budgetPolicyId === where.budgetPolicyId && e.idempotencyKey === where.idempotencyKey,
       ) ?? null,
     create: async ({ data }) => {
+      // Mirrors `budget_ledger_entries (budgetPolicyId, idempotencyKey)`. This
+      // fake previously accepted a duplicate key silently, so a missing
+      // idempotency guard could pass here and double-reserve against Postgres.
+      const exists = this.budgetLedgerEntries.some(
+        (e) => e.budgetPolicyId === data.budgetPolicyId && e.idempotencyKey === data.idempotencyKey,
+      );
+      if (exists) {
+        throw new Error(
+          'unique constraint violation on budget_ledger_entries (budgetPolicyId, idempotencyKey)',
+        );
+      }
       const entry: BudgetLedgerEntryRecord = { id: randomUUID(), createdAt: new Date(), ...data };
       this.budgetLedgerEntries.push(entry);
       return entry;
     },
   };
+
+  /** In-process stand-in for a `SERIALIZABLE` transaction; not evidence about PostgreSQL concurrency. */
+  budgetTransaction: BudgetTransactionRunner = createSerializedBudgetTransactionRunner({
+    dataSource: this,
+    snapshot: () => [...this.budgetLedgerEntries],
+    restore: (rows) => {
+      this.budgetLedgerEntries.length = 0;
+      this.budgetLedgerEntries.push(...rows);
+    },
+  });
 }

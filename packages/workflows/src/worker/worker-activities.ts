@@ -1,7 +1,6 @@
 import type {
   AgentInvocationDataSource,
   AssetDataSource,
-  BudgetDataSource,
   CampaignBriefDataSource,
   CampaignDataSource,
   CampaignTransitionDataSource,
@@ -20,6 +19,7 @@ import type {
   RoughEditSpecificationDataSource,
   ScriptDataSource,
   ScriptWithShotsDataSource,
+  SerializableBudgetDataSource,
   ShotDataSource,
   ShotGenerationDataSource,
   ShotSelectionDataSource,
@@ -93,7 +93,7 @@ import type { VariantActivities } from '../workflows/variant-workflow-activities
  */
 export type WorkerActivityDatabase = AgentInvocationDataSource &
   AssetDataSource &
-  BudgetDataSource &
+  SerializableBudgetDataSource &
   CampaignBriefDataSource &
   CampaignDataSource &
   CampaignTransitionDataSource &

@@ -98,8 +98,58 @@ REQUIRED arm eleven across three references and all four planning roles.
 context-aware fixture. See the "Controlled creative benchmark" rules below and
 `docs/runbooks/creative-benchmark.md`.
 
-**The next milestone is AAMP-1 step 3** — the `SERIALIZABLE` budget transaction
-(`docs/aamp-architecture.md` §6 task 5), still outstanding and unstarted.
+**AAMP-1 step 3 (durable `SERIALIZABLE` budget enforcement) is done** —
+`checkAndReserveBudget`'s M14 compensating guard is removed, and every
+applicable budget policy is now loaded, summed, decided and written inside one
+PostgreSQL `SERIALIZABLE` transaction. **Proven against live PostgreSQL:**
+twenty concurrent distinct-key reservations accept exactly the four that fit;
+twelve same-key retries produce one reservation; all four levels enforce their
+own limit and a refusal writes nothing anywhere; sixteen callers using opposing
+scope orders commit with the database's deadlock counter unmoved; settlement,
+release and replay are idempotent; a cross-workspace reservation reveals
+nothing. **Not proven:** no application process runs against live Postgres in
+normal operation, so the Worker's use of this under a real Temporal server is
+still unexercised. See the "Budget enforcement" rules below,
+`docs/architecture.md` §8's AAMP-1 step 3 entry and
+`docs/runbooks/database-migrations.md` §9.
+
+**The next milestone is AAMP-1 step 4** — `apps/worker` against a live Temporal
+server (`docs/aamp-architecture.md` §6 task 6).
+
+## Budget enforcement — permanent rules (AAMP-1 step 3)
+
+- **A reservation happens inside one `SERIALIZABLE` transaction, or it does not
+  happen.** `reserveBudgetAcrossScopes` takes a `SerializableBudgetDataSource`;
+  status, charge and release take the narrower `BudgetDataSource`. Never widen
+  the reserving path to accept a handle that cannot serialize, and never add a
+  non-transactional fallback — a compensating guard is only self-correcting if
+  the process survives to write the compensation.
+- **Every applicable level clears together.** A refusal at any scope writes
+  nothing at any other. Never reintroduce a per-level loop with
+  compensating RELEASE rows.
+- **Policies are processed in policy-id order**, one lock order shared by every
+  caller in the system. Changing that ordering reintroduces deadlocks between
+  dispatches gated on overlapping scope sets.
+- **Only contention retries.** Serialization aborts, deadlocks, Prisma `P2034`
+  and a lost idempotency-key race are retryable; everything else propagates
+  first time. An invalid request is refused before the transaction opens, so it
+  can never be retried into existence.
+- **Exhausted contention throws; it is never reported as `BUDGET_EXCEEDED`.**
+  Callers treat a returned failure as a terminal business decision that fails
+  the stage. Contention says nothing about the workspace's money.
+- **Retries back off with jitter.** Retrying in lockstep is how a five-attempt
+  bound was exhausted by eight concurrent dispatches; that was found against
+  live PostgreSQL and cannot be found in memory.
+- **`packages/database`'s repository layer stays vendor-neutral.** Only
+  `client.ts` and `prisma-budget-transaction.ts` know Prisma exists.
+- **The in-memory runner is a stricter fake, never evidence.** It serializes
+  bodies absolutely and rolls back a failed one, so it can never produce a
+  serialization abort. Only `budget-postgres-concurrency.test.ts` — opt-in,
+  `pnpm --filter @combat/database test:postgres` — is evidence about PostgreSQL
+  concurrency. CI never runs it.
+- **Settlement stays the single closing path.** Charge the actual cost, release
+  the reservation in full, both idempotent on `(policyId, idempotencyKey)` —
+  unchanged from the post-M14 C-2 repair.
 
 ## Controlled creative benchmark — permanent rules
 

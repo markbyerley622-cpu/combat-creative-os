@@ -1762,7 +1762,9 @@ subjectStage])` idempotency constraint. `createQualityAssessmentForCandidate`
   **The durable fix under Postgres is a `SERIALIZABLE` transaction (or
   `SELECT … FOR UPDATE` on the policy row) around the read-and-insert** — that
   cannot be exercised without a live database, so the compensating guard is what
-  is actually tested here.
+  is actually tested here. **Superseded by AAMP-1 step 3** (see §8's entry): the
+  compensating guard is removed and the reservation now runs inside a real
+  `SERIALIZABLE` transaction, proven against live PostgreSQL.
 
   **Crash-point recovery.** Activity-level replay tests cover both dangerous
   windows: a worker dying _after persistence, before dispatch_ (a retry reuses
@@ -2857,7 +2859,98 @@ Claude benchmark has run (no key configured). `actualCostCents` is always
 campaign, not a sample.
 
 **Next milestone: AAMP-1 step 3 — the `SERIALIZABLE` budget transaction**
-(`docs/aamp-architecture.md` §6 task 5), still outstanding and unstarted.
+(`docs/aamp-architecture.md` §6 task 5), now done — see the entry below.
+
+### AAMP-1 step 3 — durable `SERIALIZABLE` budget enforcement (2026-07-27)
+
+**What changed.** `checkAndReserveBudget`'s compensating guard is gone. Budget
+reservation now runs inside one PostgreSQL `SERIALIZABLE` transaction, through
+a seam the repository layer owns and the vendor adapter implements:
+
+- `packages/database/src/repositories/budget-transaction.ts` — the
+  vendor-neutral `BudgetTransactionRunner`, the failure classification, the
+  bounded retry loop and the in-process serialized runner the in-memory stores
+  use. `SerializableBudgetDataSource` is `BudgetDataSource` plus a runner;
+  reservation requires it, while status/charge/release keep the narrower type,
+  so `apps/api`'s read-only budget views are structurally incapable of
+  reserving.
+- `packages/database/src/prisma-budget-transaction.ts` —
+  `createPrismaBudgetTransactionRunner`, the only place a budget reservation
+  reaches `prisma.$transaction(..., { isolationLevel: 'Serializable' })`.
+  `apps/worker`'s `createPrismaActivityDatabase` supplies it from the same
+  client.
+- `reserveBudgetAcrossScopes` replaces the per-level loop at all five call
+  sites (three dispatch Activities, the specialist-agent Activity, and
+  `attemptCampaignTransition`). Every applicable policy is loaded, summed and
+  decided inside one transaction, then every RESERVATION is written together.
+  `checkAndReserveBudget` remains as the one-scope spelling of it, so the whole
+  existing test suite and its public contract stand unchanged.
+
+**Why `SERIALIZABLE` and not `REPEATABLE READ`.** The decision is a
+read-then-write over an _aggregate_ — the ledger sum for a policy. Only
+serializable snapshot isolation detects that two transactions read the same set
+and each wrote a row invalidating the other's read. Repeatable read would let
+both commit, which is exactly the over-commitment being removed.
+
+**Ordering and retries.** Scopes are looked up in a fixed level order and then
+processed in **policy-id order**, which is stable across every caller in the
+system, so two dispatches gated on overlapping scope sets cannot approach the
+same rows from opposite ends. A serialization abort, a deadlock, Prisma's
+`P2034` and a lost idempotency-key race are the four retryable outcomes;
+everything else propagates unchanged, and an invalid request is rejected
+(`InvalidBudgetRequestError`) before the transaction opens so it can never be
+retried into existence. Exhausted contention throws
+`BudgetTransactionContentionError` rather than returning `BUDGET_EXCEEDED` —
+every caller treats a returned failure as a terminal business decision, and
+reporting contention that way would be a lie about the workspace's money.
+
+**A defect the live tests found.** The first bound (five attempts, no backoff)
+was exhausted outright by eight simultaneous dispatches on one campaign policy:
+aborted transactions retried in lockstep and simply re-collided. The bound is
+now ten attempts with exponential-full-jitter backoff, and the same eight-way
+case settles well inside it. This is recorded because it is exactly the class
+of thing an in-memory test cannot find.
+
+**Two accounting defects fixed along the way.** (1) `attemptCampaignTransition`
+kept only the _most recent_ reservation, so when both WORKSPACE and CAMPAIGN
+policies existed, a losing compare-and-swap released one of the two and left
+the other sterilising budget permanently. It now releases every level it
+reserved — and, with the atomic reservation, a refusal writes nothing to
+release in the first place. (2) `InMemoryTransitionStore` did not mirror
+`budget_ledger_entries (budgetPolicyId, idempotencyKey)`, so a missing
+idempotency guard could pass there while double-reserving against Postgres.
+
+**Proven against live PostgreSQL** (`pnpm --filter @combat/database
+test:postgres`, ten tests, run repeatedly): twenty concurrent distinct-key
+reservations against a 1,000-cent cap accept exactly four and write four
+RESERVATION rows and nothing else; twelve concurrent same-key retries produce
+exactly one reservation and one result; WORKSPACE/CAMPAIGN/PROVIDER/SHOT
+policies each enforce their own limit and a refusal at the tight level writes
+nothing at the three that would have fitted; sixteen callers declaring their
+scopes in _opposing_ orders all commit with PostgreSQL's own
+`pg_stat_database.deadlocks` counter unmoved; settlement leaves `spentCents`
+equal to the actual cost and repeats idempotently; an Activity replay
+re-reserves and re-charges nothing; a cross-workspace reservation writes
+nothing and is reported exactly as an unconfigured scope is, revealing no
+existence.
+
+**Not proven.** No application process still runs against live Postgres in
+normal operation — this suite drives the repository directly, so the Worker's
+_use_ of it under a real Temporal server remains unexercised (that is step 4).
+The retry profile is measured on one developer machine; the observed abort
+count per burst is reported by the test, not asserted.
+
+**Deviation from the plan, recorded deliberately.** `docs/aamp-architecture.md`
+§6 task 5 said to keep the compensating logic "as a tested fallback for
+non-serializable stores". It is removed instead. A fallback would mean a store
+that cannot serialize is still allowed to reserve, which is the failure the
+milestone exists to close; the in-memory stores implement the seam by strictly
+serializing bodies and rolling back a failed one, which is a _stricter_ fake
+and therefore never a source of false confidence.
+
+**Next milestone: AAMP-1 step 4 — `apps/worker` against a live Temporal server**
+(`docs/aamp-architecture.md` §6 task 6), confirming every name in
+`activity-name-contract.ts` is registered against a real server.
 
 ---
 

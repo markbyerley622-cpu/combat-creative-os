@@ -2,11 +2,14 @@ import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { InMemoryCampaignStore } from './test-helpers/in-memory-campaign-store';
 import {
+  InvalidBudgetRequestError,
   chargeBudget,
   checkAndReserveBudget,
   getBudgetStatus,
   releaseBudget,
+  reserveBudgetAcrossScopes,
   settleBudgetReservation,
+  type BudgetScope,
 } from './budget-repository';
 
 /**
@@ -467,5 +470,207 @@ describe('budget integrity — tenant isolation', () => {
     if (!result.ok) return;
     expect(result.policy).toBeUndefined();
     expect(store.budgetLedgerEntries).toHaveLength(0);
+  });
+});
+
+/**
+ * AAMP-1 step 3 — the multi-level reservation, which is now one decision rather
+ * than a loop of independent ones. These run against the in-memory store, whose
+ * runner serializes strictly; the PostgreSQL behaviour they mirror is proven in
+ * `budget-postgres-concurrency.test.ts`.
+ */
+describe('budget integrity — atomic reservation across competing levels', () => {
+  function seedLevels(store: InMemoryCampaignStore, limits: Record<string, number>) {
+    const workspaceId = randomUUID();
+    const campaignId = randomUUID();
+    const shotId = randomUUID();
+    const providerId = 'provider-x';
+    const scopes: BudgetScope[] = [
+      { level: 'WORKSPACE', scopeId: workspaceId },
+      { level: 'CAMPAIGN', scopeId: campaignId },
+      { level: 'SHOT', scopeId: shotId },
+      { level: 'PROVIDER', scopeId: providerId },
+    ];
+    for (const scope of scopes) {
+      const limitCents = limits[scope.level];
+      if (limitCents === undefined) continue;
+      store.budgetPolicies.push({
+        id: randomUUID(),
+        workspaceId,
+        level: scope.level,
+        scopeId: scope.scopeId,
+        limitCents,
+      });
+    }
+    return { workspaceId, campaignId, shotId, providerId, scopes };
+  }
+
+  it('reserves at every configured level and reports the unconfigured ones as uncapped', async () => {
+    const store = new InMemoryCampaignStore();
+    const ctx = seedLevels(store, { WORKSPACE: 10_000, CAMPAIGN: 10_000 });
+
+    const result = await reserveBudgetAcrossScopes(store, {
+      workspaceId: ctx.workspaceId,
+      scopes: ctx.scopes,
+      requiredCents: 900,
+      idempotencyKey: 'job-1',
+      campaignId: ctx.campaignId,
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.reservations.map((r) => r.level).sort()).toEqual(['CAMPAIGN', 'WORKSPACE']);
+    expect(result.uncappedScopes.map((s) => s.level).sort()).toEqual(['PROVIDER', 'SHOT']);
+    expect(store.budgetLedgerEntries).toHaveLength(2);
+  });
+
+  it.each(['WORKSPACE', 'CAMPAIGN', 'SHOT', 'PROVIDER'] as const)(
+    'a %s policy with no headroom refuses the whole reservation and writes nothing anywhere',
+    async (tightLevel) => {
+      const store = new InMemoryCampaignStore();
+      const ctx = seedLevels(store, {
+        WORKSPACE: 10_000,
+        CAMPAIGN: 10_000,
+        SHOT: 10_000,
+        PROVIDER: 10_000,
+        [tightLevel]: 100,
+      });
+
+      const result = await reserveBudgetAcrossScopes(store, {
+        workspaceId: ctx.workspaceId,
+        scopes: ctx.scopes,
+        requiredCents: 500,
+        idempotencyKey: 'job-1',
+        campaignId: ctx.campaignId,
+      });
+
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.level).toBe(tightLevel);
+      // The defining property: no level was left holding a reservation that a
+      // compensating RELEASE would have had to unwind.
+      expect(store.budgetLedgerEntries).toHaveLength(0);
+    },
+  );
+
+  it('a replayed key resolves to the same reservations without writing new rows', async () => {
+    const store = new InMemoryCampaignStore();
+    const ctx = seedLevels(store, { WORKSPACE: 10_000, CAMPAIGN: 10_000 });
+    const request = {
+      workspaceId: ctx.workspaceId,
+      scopes: ctx.scopes,
+      requiredCents: 900,
+      idempotencyKey: 'job-1',
+      campaignId: ctx.campaignId,
+    };
+
+    const first = await reserveBudgetAcrossScopes(store, request);
+    const replay = await reserveBudgetAcrossScopes(store, request);
+
+    expect(first.ok && replay.ok).toBe(true);
+    if (!first.ok || !replay.ok) return;
+    expect(store.budgetLedgerEntries).toHaveLength(2);
+    expect(replay.reservations.map((r) => r.reservation.id).sort()).toEqual(
+      first.reservations.map((r) => r.reservation.id).sort(),
+    );
+  });
+
+  it('concurrent multi-level dispatches never collectively exceed the tightest limit', async () => {
+    const store = new InMemoryCampaignStore();
+    const ctx = seedLevels(store, { WORKSPACE: 10_000, CAMPAIGN: 1_000 });
+
+    const results = await Promise.all(
+      Array.from({ length: 10 }, (_, i) =>
+        reserveBudgetAcrossScopes(store, {
+          workspaceId: ctx.workspaceId,
+          scopes: ctx.scopes,
+          requiredCents: 300,
+          idempotencyKey: `job-${i}`,
+          campaignId: ctx.campaignId,
+        }),
+      ),
+    );
+
+    expect(results.filter((r) => r.ok)).toHaveLength(3);
+    const campaignStatus = await getBudgetStatus(
+      store,
+      ctx.workspaceId,
+      'CAMPAIGN',
+      ctx.campaignId,
+    );
+    const workspaceStatus = await getBudgetStatus(
+      store,
+      ctx.workspaceId,
+      'WORKSPACE',
+      ctx.workspaceId,
+    );
+    expect(campaignStatus!.spentCents).toBe(900);
+    // Whatever the campaign refused was never charged to the workspace either.
+    expect(workspaceStatus!.spentCents).toBe(900);
+  });
+
+  it('refuses a malformed request before opening a transaction, so nothing can be retried into existence', async () => {
+    const store = new InMemoryCampaignStore();
+    const ctx = seedLevels(store, { WORKSPACE: 10_000 });
+
+    await expect(
+      reserveBudgetAcrossScopes(store, {
+        workspaceId: ctx.workspaceId,
+        scopes: [],
+        requiredCents: 100,
+        idempotencyKey: 'job-1',
+      }),
+    ).rejects.toBeInstanceOf(InvalidBudgetRequestError);
+
+    await expect(
+      reserveBudgetAcrossScopes(store, {
+        workspaceId: ctx.workspaceId,
+        scopes: [
+          { level: 'WORKSPACE', scopeId: ctx.workspaceId },
+          { level: 'WORKSPACE', scopeId: ctx.workspaceId },
+        ],
+        requiredCents: 100,
+        idempotencyKey: 'job-1',
+      }),
+    ).rejects.toBeInstanceOf(InvalidBudgetRequestError);
+
+    await expect(
+      reserveBudgetAcrossScopes(store, {
+        workspaceId: ctx.workspaceId,
+        scopes: [{ level: 'WORKSPACE', scopeId: ctx.workspaceId }],
+        requiredCents: -1,
+        idempotencyKey: 'job-1',
+      }),
+    ).rejects.toBeInstanceOf(InvalidBudgetRequestError);
+
+    expect(store.budgetLedgerEntries).toHaveLength(0);
+  });
+
+  it('a policy in another workspace is invisible — the scope reads as uncapped, not as someone else`s cap', async () => {
+    const store = new InMemoryCampaignStore();
+    const owner = seedLevels(store, { WORKSPACE: 1_000 });
+    const intruderWorkspaceId = randomUUID();
+
+    const result = await reserveBudgetAcrossScopes(store, {
+      workspaceId: intruderWorkspaceId,
+      // The *other* workspace's scope id, from a caller scoped to this one.
+      scopes: [{ level: 'WORKSPACE', scopeId: owner.workspaceId }],
+      requiredCents: 5_000,
+      idempotencyKey: 'intruder',
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.reservations).toHaveLength(0);
+    expect(result.uncappedScopes).toHaveLength(1);
+    // Nothing was written against the owner's policy, and its status is unchanged.
+    expect(store.budgetLedgerEntries).toHaveLength(0);
+    const ownerStatus = await getBudgetStatus(
+      store,
+      owner.workspaceId,
+      'WORKSPACE',
+      owner.workspaceId,
+    );
+    expect(ownerStatus!.spentCents).toBe(0);
   });
 });

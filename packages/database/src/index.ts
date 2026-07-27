@@ -9,6 +9,8 @@ export * from './repositories/creative-concept-repository';
 export * from './repositories/script-repository';
 export * from './repositories/human-approval-repository';
 export * from './repositories/budget-repository';
+export * from './repositories/budget-transaction';
+export * from './prisma-budget-transaction';
 export * from './repositories/transition-facts';
 export * from './repositories/campaign-transition-service';
 export * from './repositories/asset-repository';

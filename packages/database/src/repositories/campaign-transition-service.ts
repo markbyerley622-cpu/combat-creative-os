@@ -4,7 +4,8 @@ import {
   type CampaignStage,
   type TransitionAuditResult,
 } from '@combat/domain';
-import { checkAndReserveBudget, releaseBudget, type BudgetDataSource } from './budget-repository';
+import { releaseBudget, reserveBudgetAcrossScopes } from './budget-repository';
+import type { SerializableBudgetDataSource } from './budget-transaction';
 import type { CampaignDataSource, CampaignRecord } from './campaign-repository';
 import { latestApprovalForGate, type HumanApprovalDataSource } from './human-approval-repository';
 import {
@@ -62,7 +63,7 @@ export type CampaignTransitionDataSource = CampaignDataSource &
   CampaignTransitionAuditDataSource &
   HumanApprovalDataSource &
   TransitionFactsDataSource &
-  BudgetDataSource & {
+  SerializableBudgetDataSource & {
     campaign: CampaignDataSource['campaign'] & {
       updateMany(args: {
         where: { id: string; workspaceId: string; currentStage: CampaignStage; version: number };
@@ -233,45 +234,39 @@ export async function attemptCampaignTransition(
     ? latestApprovalForGate(approvals, evaluation.definition.requiredApprovalGate)?.id
     : undefined;
 
-  let reservedBudget: { policyId: string; amountCents: number } | undefined;
+  // Both levels clear inside one SERIALIZABLE transaction (AAMP-1 step 3), so
+  // a refusal at CAMPAIGN never leaves a WORKSPACE reservation to unwind — the
+  // per-level loop this replaces both wrote such rows and, because it kept only
+  // the most recent policy, released at most one of them afterwards.
+  let reservedBudget: readonly { policyId: string; amountCents: number }[] = [];
   if (BUDGET_GATED_STAGES.has(toStage) && request.generationBudgetCents !== undefined) {
-    for (const level of ['WORKSPACE', 'CAMPAIGN'] as const) {
-      const scopeId = level === 'WORKSPACE' ? workspaceId : campaignId;
-      const budgetResult = await checkAndReserveBudget(db, {
+    const budgetResult = await reserveBudgetAcrossScopes(db, {
+      workspaceId,
+      scopes: [
+        { level: 'WORKSPACE', scopeId: workspaceId },
+        { level: 'CAMPAIGN', scopeId: campaignId },
+      ],
+      requiredCents: request.generationBudgetCents,
+      idempotencyKey,
+      campaignId,
+    });
+    if (!budgetResult.ok) {
+      const audit = await writeAudit(
+        db,
         workspaceId,
-        level,
-        scopeId,
-        requiredCents: request.generationBudgetCents,
-        idempotencyKey,
         campaignId,
-      });
-      if (!budgetResult.ok) {
-        const audit = await writeAudit(
-          db,
-          workspaceId,
-          campaignId,
-          idempotencyKey,
-          fromStage,
-          toStage,
-          'REJECTED_BUDGET_EXCEEDED',
-          { reason: budgetResult.error.message, requestedByUserId: request.requestedByUserId },
-        );
-        if (reservedBudget) {
-          await releaseBudget(db, reservedBudget.policyId, workspaceId, {
-            amountCents: reservedBudget.amountCents,
-            idempotencyKey: `${idempotencyKey}:release`,
-            campaignId,
-          });
-        }
-        return { ok: false, error: budgetResult.error, audit };
-      }
-      if (budgetResult.policy) {
-        reservedBudget = {
-          policyId: budgetResult.policy.id,
-          amountCents: request.generationBudgetCents,
-        };
-      }
+        idempotencyKey,
+        fromStage,
+        toStage,
+        'REJECTED_BUDGET_EXCEEDED',
+        { reason: budgetResult.error.message, requestedByUserId: request.requestedByUserId },
+      );
+      return { ok: false, error: budgetResult.error, audit };
     }
+    reservedBudget = budgetResult.reservations.map((reserved) => ({
+      policyId: reserved.policy.id,
+      amountCents: reserved.reservation.amountCents,
+    }));
   }
 
   const updateResult = await db.campaign.updateMany({
@@ -280,9 +275,12 @@ export async function attemptCampaignTransition(
   });
 
   if (updateResult.count === 0) {
-    if (reservedBudget) {
-      await releaseBudget(db, reservedBudget.policyId, workspaceId, {
-        amountCents: reservedBudget.amountCents,
+    // Every level that was reserved is released — the compare-and-swap losing
+    // must not sterilise budget at any of them.
+    for (const reserved of reservedBudget) {
+      // eslint-disable-next-line no-await-in-loop -- bounded by the gated levels (<= 2); all releases must complete before returning
+      await releaseBudget(db, reserved.policyId, workspaceId, {
+        amountCents: reserved.amountCents,
         idempotencyKey: `${idempotencyKey}:release`,
         campaignId,
       });

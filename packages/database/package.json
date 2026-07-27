@@ -12,7 +12,8 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint \"src/**/*.ts\"",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:postgres": "dotenv -e ../../.env -v BUDGET_POSTGRES_INTEGRATION=1 -- vitest run src/repositories/budget-postgres-concurrency.test.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

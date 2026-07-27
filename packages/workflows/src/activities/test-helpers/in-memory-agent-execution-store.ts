@@ -6,9 +6,12 @@ import type {
   BudgetDataSource,
   BudgetLedgerEntryRecord,
   BudgetPolicyRecord,
+  BudgetTransactionRunner,
   CampaignDataSource,
   CampaignRecord,
+  SerializableBudgetDataSource,
 } from '@combat/database';
+import { createSerializedBudgetTransactionRunner } from '@combat/database';
 
 /**
  * A minimal in-memory fake of the three narrow *DataSource interfaces
@@ -20,7 +23,7 @@ import type {
  * file isn't part of `@combat/database`'s public package export.
  */
 export class InMemoryAgentExecutionStore
-  implements CampaignDataSource, BudgetDataSource, AgentInvocationDataSource
+  implements CampaignDataSource, SerializableBudgetDataSource, AgentInvocationDataSource
 {
   campaigns: CampaignRecord[] = [];
   budgetPolicies: BudgetPolicyRecord[] = [];
@@ -105,6 +108,16 @@ export class InMemoryAgentExecutionStore
       return entry;
     },
   };
+
+  /** In-process stand-in for a `SERIALIZABLE` transaction; not evidence about PostgreSQL concurrency. */
+  budgetTransaction: BudgetTransactionRunner = createSerializedBudgetTransactionRunner({
+    dataSource: this,
+    snapshot: () => [...this.budgetLedgerEntries],
+    restore: (rows) => {
+      this.budgetLedgerEntries.length = 0;
+      this.budgetLedgerEntries.push(...rows);
+    },
+  });
 
   agentInvocation: AgentInvocationDataSource['agentInvocation'] = {
     findFirst: async ({ where }) =>

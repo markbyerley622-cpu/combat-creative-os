@@ -21,8 +21,13 @@ Memory off and required and compares nineteen dimensions. See
 `docs/architecture.md` §8's production-composition-root and
 creative-benchmark-runner entries, and `docs/runbooks/creative-benchmark.md`.
 
-The next step in this document's own plan is unchanged: **AAMP-1 step 3, the
-`SERIALIZABLE` budget transaction** (§6 task 5).
+**AAMP-1 step 3 (durable `SERIALIZABLE` budget enforcement, §6 task 5) is
+done** — `checkAndReserveBudget`'s compensating guard is removed and every
+applicable policy is now reserved inside one PostgreSQL `SERIALIZABLE`
+transaction, proven against a live database. See `docs/architecture.md` §8's
+AAMP-1 step 3 entry and `docs/runbooks/database-migrations.md` §8. The next step
+in this document's own plan is **AAMP-1 step 4: `apps/worker` against a live
+Temporal server** (§6 task 6).
 Date: 2026-07-26. Baseline: `ad3d241` (post-M14 foundation audit repair).
 
 This document is the delivery blueprint for turning the completed M0–M14
@@ -1642,9 +1647,23 @@ membership and permission are still read from PostgreSQL, and Clerk claims are
 never trusted for any of them. Full accounting: `docs/architecture.md` §8's
 AAMP-1 step 2 entry.
 
-**The next step is AAMP-1 step 3: the `SERIALIZABLE` budget transaction** (§6
-implementation task 5 — replacing `checkAndReserveBudget`'s M14 compensating
-guard now that live Postgres exists to run it against).
+**AAMP-1 step 3 completed 2026-07-27.** §6 implementation task 5 is done:
+`checkAndReserveBudget`'s M14 compensating guard is **removed**, not retained as
+a fallback, and budget reservation runs inside one PostgreSQL `SERIALIZABLE`
+transaction over every applicable policy. Task 5's wording ("keeping the
+compensating logic as a tested fallback for non-serializable stores") is
+deliberately not followed: a fallback would let a store that cannot serialize
+reserve budget anyway, which is the failure the task exists to close. The
+in-memory stores implement the transaction seam by strictly serializing bodies
+and rolling back a failed one — a stricter fake, never a looser one. The
+live-integration expectation in §6 ("concurrent distinct-key reservations
+against live Postgres under `SERIALIZABLE` cannot exceed a cap; same-key retries
+resolve idempotently") is met and is now an executable suite:
+`pnpm --filter @combat/database test:postgres`. Full accounting:
+`docs/architecture.md` §8's AAMP-1 step 3 entry.
+
+**The next step is AAMP-1 step 4: `apps/worker` against a live Temporal server**
+(§6 implementation task 6).
 
 ### 12.3 Dependency-ordered milestone list
 

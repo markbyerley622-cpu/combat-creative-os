@@ -1,14 +1,14 @@
 import type { ShotGenerationDataSource, ShotSpecificationDataSource } from '@combat/database';
 import {
   MAX_SHOT_GENERATION_ATTEMPTS,
-  checkAndReserveBudget,
   getLicenseRecord,
   getOrCreateShotGenerationAttempt,
   getOrCreateShotGenerationJob,
   getShotSpecification,
   releaseBudget,
-  type BudgetDataSource,
+  reserveBudgetAcrossScopes,
   type LicenseDataSource,
+  type SerializableBudgetDataSource,
 } from '@combat/database';
 import type { BudgetLevel } from '@combat/domain';
 import {
@@ -70,7 +70,7 @@ export interface DispatchShotGenerationActivityDeps {
   readonly videoGenerationProvider: VideoGenerationProvider;
   readonly shotSpecificationDb: ShotSpecificationDataSource;
   readonly shotGenerationDb: ShotGenerationDataSource;
-  readonly budgetDb: BudgetDataSource;
+  readonly budgetDb: SerializableBudgetDataSource;
   readonly estimatedCostCentsPerSecond: number;
   /**
    * Resolves each reference asset's `LicenseRecord`. Optional so existing
@@ -162,43 +162,38 @@ export function createDispatchShotGenerationActivity(
         deps.estimatedCostCentsPerSecond,
     );
 
-    const reservedLevels: BudgetLevel[] = [];
-    for (const level of BUDGET_GATED_LEVELS) {
-      const scopeId =
-        level === 'WORKSPACE'
-          ? workspaceId
-          : level === 'CAMPAIGN'
-            ? campaignId
-            : level === 'SHOT'
-              ? spec.shotId
-              : spec.providerId;
-      // eslint-disable-next-line no-await-in-loop -- budget checks are inherently sequential (each reservation depends on the running total the prior one just wrote)
-      const budgetResult = await checkAndReserveBudget(deps.budgetDb, {
-        workspaceId,
+    // All four levels clear inside one SERIALIZABLE transaction (AAMP-1
+    // step 3): either every applicable policy has headroom and every
+    // RESERVATION is committed together, or nothing is written at all. There is
+    // no partially-reserved state to unwind on refusal.
+    const budgetResult = await reserveBudgetAcrossScopes(deps.budgetDb, {
+      workspaceId,
+      scopes: BUDGET_GATED_LEVELS.map((level) => ({
         level,
-        scopeId,
-        requiredCents: estimatedCents,
-        idempotencyKey,
-        campaignId,
-        shotId: spec.shotId,
-        generationJobRef: idempotencyKey,
-      });
-      if (!budgetResult.ok) {
-        // eslint-disable-next-line no-await-in-loop -- releasing already-made reservations before returning, bounded by reservedLevels.length (<= 4)
-        await releaseAlreadyReserved(deps, reservedLevels, {
+        scopeId: budgetScopeId(level, {
           workspaceId,
           campaignId,
           shotId: spec.shotId,
           providerId: spec.providerId,
-          estimatedCents,
-          idempotencyKey,
-        });
-        return { ok: false, reason: 'BUDGET_EXCEEDED', level, detail: budgetResult.error.message };
-      }
-      if (budgetResult.policy) {
-        reservedLevels.push(level);
-      }
+        }),
+      })),
+      requiredCents: estimatedCents,
+      idempotencyKey,
+      campaignId,
+      shotId: spec.shotId,
+      generationJobRef: idempotencyKey,
+    });
+    if (!budgetResult.ok) {
+      return {
+        ok: false,
+        reason: 'BUDGET_EXCEEDED',
+        level: budgetResult.level,
+        detail: budgetResult.error.message,
+      };
     }
+    const reservedLevels: BudgetLevel[] = budgetResult.reservations.map(
+      (reservation) => reservation.level,
+    );
 
     // Rights are resolved before dispatch so the adapter can enforce them
     // before a single byte leaves this process.
@@ -341,6 +336,20 @@ export function createDispatchShotGenerationActivity(
   };
 }
 
+/** The scope a budget level is keyed by for this dispatch. One definition, used by both the reservation and the release path, so the two can never disagree about which policy a level means. */
+function budgetScopeId(
+  level: BudgetLevel,
+  ctx: { workspaceId: string; campaignId: string; shotId: string; providerId: string },
+): string {
+  return level === 'WORKSPACE'
+    ? ctx.workspaceId
+    : level === 'CAMPAIGN'
+      ? ctx.campaignId
+      : level === 'SHOT'
+        ? ctx.shotId
+        : ctx.providerId;
+}
+
 async function releaseAlreadyReserved(
   deps: DispatchShotGenerationActivityDeps,
   reservedLevels: readonly BudgetLevel[],
@@ -354,14 +363,7 @@ async function releaseAlreadyReserved(
   },
 ): Promise<void> {
   for (const level of reservedLevels) {
-    const scopeId =
-      level === 'WORKSPACE'
-        ? ctx.workspaceId
-        : level === 'CAMPAIGN'
-          ? ctx.campaignId
-          : level === 'SHOT'
-            ? ctx.shotId
-            : ctx.providerId;
+    const scopeId = budgetScopeId(level, ctx);
     const policy = await deps.budgetDb.budgetPolicy.findFirst({
       where: { workspaceId: ctx.workspaceId, level, scopeId },
     });

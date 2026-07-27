@@ -9,15 +9,15 @@ import {
 import type {
   AgentInvocationDataSource,
   AgentInvocationRecord,
-  BudgetDataSource,
   CampaignDataSource,
+  SerializableBudgetDataSource,
 } from '@combat/database';
 import {
   chargeBudget,
-  checkAndReserveBudget,
   findAgentInvocationByIdempotencyKey,
   recordAgentInvocation,
   releaseBudget,
+  reserveBudgetAcrossScopes,
 } from '@combat/database';
 import type {
   AgentInput,
@@ -63,7 +63,7 @@ export interface ExecuteSpecialistAgentActivityDeps {
   readonly reasoningProvider: ReasoningProvider;
   readonly campaignDb: CampaignDataSource;
   readonly agentInvocationDb: AgentInvocationDataSource;
-  readonly budgetDb: BudgetDataSource;
+  readonly budgetDb: SerializableBudgetDataSource;
   readonly logger?: Logger;
   /** Overridable for deterministic tests. Defaults to Date.now. */
   readonly now?: () => number;
@@ -241,41 +241,35 @@ export function createExecuteSpecialistAgentActivity(
         definition.tokenBudget.maxOutputTokens,
       ).costMicroCents,
     );
-    const reservations: BudgetReservation[] = [];
-    for (const level of BUDGET_GATED_LEVELS) {
-      const scopeId =
-        level === 'WORKSPACE'
-          ? workspaceId
-          : level === 'CAMPAIGN'
-            ? campaignId
-            : definition.modelPolicy.model;
-      const budgetResult = await checkAndReserveBudget(deps.budgetDb, {
-        workspaceId,
+    // All three levels clear inside one SERIALIZABLE transaction (AAMP-1
+    // step 3), so a refusal at PROVIDER never leaves a WORKSPACE reservation
+    // behind to be compensated.
+    const budgetResult = await reserveBudgetAcrossScopes(deps.budgetDb, {
+      workspaceId,
+      scopes: BUDGET_GATED_LEVELS.map((level) => ({
         level,
-        scopeId,
-        requiredCents: estimatedCents,
-        idempotencyKey,
-        campaignId,
+        scopeId:
+          level === 'WORKSPACE'
+            ? workspaceId
+            : level === 'CAMPAIGN'
+              ? campaignId
+              : definition.modelPolicy.model,
+      })),
+      requiredCents: estimatedCents,
+      idempotencyKey,
+      campaignId,
+    });
+    if (!budgetResult.ok) {
+      return persistFailure(input, {
+        reason: 'BUDGET_EXCEEDED',
+        retryable: false,
+        message: budgetResult.error.message,
+        details: budgetResult.error.reason,
       });
-      if (!budgetResult.ok) {
-        await releaseReservations(
-          reservations,
-          workspaceId,
-          campaignId,
-          estimatedCents,
-          idempotencyKey,
-        );
-        return persistFailure(input, {
-          reason: 'BUDGET_EXCEEDED',
-          retryable: false,
-          message: budgetResult.error.message,
-          details: budgetResult.error.reason,
-        });
-      }
-      if (budgetResult.policy) {
-        reservations.push({ policyId: budgetResult.policy.id });
-      }
     }
+    const reservations: BudgetReservation[] = budgetResult.reservations.map((reserved) => ({
+      policyId: reserved.policy.id,
+    }));
 
     // 5. Execute — the one and only place this Activity calls the reasoning
     // provider, entirely through `executeAgent` (requirement 5: no

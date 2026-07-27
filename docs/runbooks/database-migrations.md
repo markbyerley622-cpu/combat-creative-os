@@ -295,3 +295,34 @@ Note that `packages/database`'s Vitest suite runs against the in-memory store,
 not PostgreSQL — it verifies repository logic and mirrored constraints, and it
 passes with or without a live database. It is not evidence that a migration
 applied.
+
+## 9. Budget concurrency against live PostgreSQL
+
+Budget reservation is the one repository path whose correctness depends on the
+database's isolation level rather than on repository logic (AAMP-1 step 3): it
+runs inside a `SERIALIZABLE` transaction, and the in-memory store cannot
+reproduce a serialization abort. Its acceptance suite is therefore opt-in and
+lives beside the migration checks:
+
+```sh
+docker compose -f infrastructure/docker-compose.yml up -d postgres
+pnpm --filter @combat/database test:postgres
+```
+
+The script loads the repository `.env` and sets `BUDGET_POSTGRES_INTEGRATION=1`;
+without both, the suite skips with a loud warning rather than passing silently,
+which is why `pnpm test` and CI stay database-free.
+
+What it does to the database: it creates its own `Workspace` rows (named
+`budget-concurrency-<uuid>`) with their policies and ledger entries, and deletes
+those workspaces afterwards — the cascade removes everything it wrote. It never
+truncates a table, resets the database, alters migration history, or reads or
+writes a row it did not create. The one exception is a read-only
+`SELECT deadlocks FROM pg_stat_database`, which is how the lock-ordering test
+distinguishes a serialization conflict from a real deadlock (Prisma reports both
+as `P2034`).
+
+Expect the burst test to log its observed retry profile, e.g.
+`20 racers → 37 retried attempt(s)`. That number varies by machine and is
+reported, not asserted; a failure looks like a `BudgetTransactionContentionError`
+(the retry bound was exhausted) or an accepted total that exceeds a cap.
