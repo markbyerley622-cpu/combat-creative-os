@@ -91,6 +91,8 @@ const USAGE = [
   'Usage:',
   '  aamp:media search --query <text> --kind video|image|audio [--orientation portrait|landscape|square]',
   '                    [--providers pexels,pixabay,dvids,wikimedia,openverse] [--min-width N] [--per-page N] [--page N]',
+  '  aamp:media search --ids <id,id,...> --kind video|image --providers <one provider>',
+  '                    resolves known provider asset ids instead of searching by keyword',
   '  aamp:media import-pack --path <folder> [--measure]',
   '  aamp:media inspect --run <run-id> [--candidate <id>]',
   '  aamp:media gallery --run <run-id>',
@@ -260,11 +262,55 @@ function runProviders(context: MediaCliContext): number {
   return MEDIA_EXIT_CODES.SUCCESS;
 }
 
+/**
+ * Rights are decided here, once, over every provider — not inside the
+ * adapters, which would be five policies wearing one name.
+ */
+function withRightsDecision(candidate: MediaCandidate): MediaCandidate {
+  const rightsDecision = evaluateMediaRights({
+    facts: candidate.rights,
+    landingPageUrl: candidate.landingPageUrl,
+    isGovernmentPublicAffairs: candidate.provider === 'DVIDS',
+  });
+  return {
+    ...candidate,
+    state: rightsDecision.outcome === 'REJECTED' ? 'METADATA_VERIFIED' : 'RIGHTS_REVIEW_REQUIRED',
+    rightsDecision,
+  };
+}
+
+/**
+ * A recorded request describes what was asked for. An id lookup asked for
+ * specific items, so that is what the run says — bounded to the schema's 300
+ * characters, naming how many were dropped rather than silently truncating.
+ */
+function idLookupQuery(ids: readonly string[]): string {
+  const full = `provider-asset-ids: ${ids.join(',')}`;
+  if (full.length <= 300) return full;
+  const kept: string[] = [];
+  for (const id of ids) {
+    const next = `provider-asset-ids: ${[...kept, id].join(',')} (+${ids.length - kept.length - 1} more)`;
+    if (next.length > 300) break;
+    kept.push(id);
+  }
+  return `provider-asset-ids: ${kept.join(',')} (+${ids.length - kept.length} more)`;
+}
+
 async function runSearch(argv: readonly string[], context: MediaCliContext): Promise<number> {
   const { flags, booleans } = parseArgs(argv);
   const json = booleans.has('--json');
-  const query = flags.get('--query');
   const kindRaw = (flags.get('--kind') ?? 'video').toUpperCase();
+
+  // `--ids` resolves provider asset ids that are already known — the output of
+  // a review that happened elsewhere. A keyword search cannot reliably reach a
+  // specific item, so without this there is no path from "these exact ones"
+  // to an approval template.
+  const requestedIds = (flags.get('--ids') ?? '')
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+  const query =
+    flags.get('--query') ?? (requestedIds.length > 0 ? idLookupQuery(requestedIds) : '');
 
   if (!query || !['VIDEO', 'IMAGE', 'AUDIO'].includes(kindRaw)) {
     context.stderr(`${USAGE}\n`);
@@ -275,6 +321,16 @@ async function runSearch(argv: readonly string[], context: MediaCliContext): Pro
   for (const refusal of refusals) context.stderr(`  refused: ${refusal}\n`);
   if (providers.length === 0) {
     context.stderr('No usable providers were named.\n');
+    return MEDIA_EXIT_CODES.INVALID_ARGUMENTS;
+  }
+
+  // An asset id means nothing without the provider that issued it: id 8745106
+  // is a different item at every provider. Guessing which one the operator
+  // meant is how the wrong footage gets acquired.
+  if (requestedIds.length > 0 && providers.length !== 1) {
+    context.stderr(
+      `--ids resolves provider-scoped identifiers, so it needs exactly one --providers value; ${providers.length} were named (${providers.join(', ')}).\n`,
+    );
     return MEDIA_EXIT_CODES.INVALID_ARGUMENTS;
   }
 
@@ -324,25 +380,38 @@ async function runSearch(argv: readonly string[], context: MediaCliContext): Pro
   for (const providerId of providers) {
     const adapter = adapters.get(providerId);
     if (!adapter) continue;
+
+    if (requestedIds.length > 0) {
+      // One request per id, and one problem per id that fails. A single
+      // unreachable item must not discard the ones that resolved.
+      let resolved = 0;
+      for (const providerAssetId of requestedIds) {
+        try {
+          const candidate = await adapter.getCandidateDetails(providerAssetId, request.kind, {
+            ...(context.signal ? { signal: context.signal } : {}),
+          });
+          candidates.push(withRightsDecision(candidate));
+          resolved += 1;
+        } catch (error) {
+          const kind = error instanceof MediaHttpError ? error.kind : 'UNKNOWN';
+          problems.push({
+            provider: providerId,
+            kind,
+            detail: `${providerAssetId}: ${describe(error)}`.slice(0, 600),
+          });
+          if (!json) context.stderr(`  ${providerId} ${providerAssetId}: ${kind}\n`);
+        }
+      }
+      if (!json)
+        context.stderr(`  ${providerId}: ${resolved}/${requestedIds.length} ids resolved\n`);
+      continue;
+    }
+
     try {
       const page = await adapter.search(request, {
         ...(context.signal ? { signal: context.signal } : {}),
       });
-      for (const candidate of page.candidates) {
-        // Rights are decided here, once, over every provider — not inside the
-        // adapters, which would be five policies wearing one name.
-        const rightsDecision = evaluateMediaRights({
-          facts: candidate.rights,
-          landingPageUrl: candidate.landingPageUrl,
-          isGovernmentPublicAffairs: candidate.provider === 'DVIDS',
-        });
-        candidates.push({
-          ...candidate,
-          state:
-            rightsDecision.outcome === 'REJECTED' ? 'METADATA_VERIFIED' : 'RIGHTS_REVIEW_REQUIRED',
-          rightsDecision,
-        });
-      }
+      for (const candidate of page.candidates) candidates.push(withRightsDecision(candidate));
       if (!json) context.stderr(`  ${providerId}: ${page.candidates.length} candidates\n`);
     } catch (error) {
       const kind = error instanceof MediaHttpError ? error.kind : 'UNKNOWN';
@@ -353,7 +422,7 @@ async function runSearch(argv: readonly string[], context: MediaCliContext): Pro
 
   const runId = deriveRunId({
     origin: 'PROVIDER_SEARCH',
-    discriminator: `${request.query}|${request.kind}|${request.orientation ?? ''}|${providers.join(',')}|${request.page}`,
+    discriminator: `${request.query}|${request.kind}|${request.orientation ?? ''}|${providers.join(',')}|${request.page}|${requestedIds.join(',')}`,
     now,
   });
   const run: MediaAcquisitionRun = {

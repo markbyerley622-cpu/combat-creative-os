@@ -28,6 +28,7 @@ import {
 import {
   assertDownloadPermitted,
   healthFromError,
+  resolveSelectedRendition,
   type DownloadApprovedAssetInput,
   type DownloadedMediaBytes,
   type MediaAcquisitionProvider,
@@ -351,9 +352,7 @@ export class PexelsMediaProvider implements MediaAcquisitionProvider {
 
   resolveApprovedDownload(input: DownloadApprovedAssetInput): ResolvedMediaUrl {
     assertDownloadPermitted(input);
-    const rendition = input.candidate.renditions.find(
-      (entry) => entry.label === input.selection.renditionLabel,
-    );
+    const rendition = resolveSelectedRendition(input.candidate, input.selection.renditionLabel);
     if (!rendition) {
       throw new MediaHttpError(
         'REJECTED',

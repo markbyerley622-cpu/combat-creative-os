@@ -775,6 +775,52 @@ describe('the CLI, end to end', () => {
     expect(template.approvals.every((entry) => entry.notes.startsWith('TODO'))).toBe(true);
   }, 60_000);
 
+  it('resolves known provider asset ids instead of searching by keyword', async () => {
+    const { out, context } = cliContext();
+    const code = await runMediaCli(
+      ['search', '--ids', '8745106', '--kind', 'video', '--providers', 'pexels'],
+      context,
+    );
+    expect(code).toBe(MEDIA_EXIT_CODES.SUCCESS);
+
+    const output = out.join('');
+    const runId = /run id:\s+(\S+)/.exec(output)?.[1] as string;
+    const directory = runDirectory(workspace, runId);
+    const run = JSON.parse(await readFile(join(directory, 'run.json'), 'utf8')) as {
+      request: { query: string };
+      candidates: { state: string }[];
+      paidProviderCalls: number;
+    };
+
+    expect(run.candidates.length).toBe(1);
+    expect(run.paidProviderCalls).toBe(0);
+    // The recorded request says what was actually asked for, not a keyword
+    // nobody typed.
+    expect(run.request.query).toContain('provider-asset-ids');
+    expect(run.request.query).toContain('8745106');
+    // An id lookup is still a search: it confers nothing beyond rights review.
+    for (const candidate of run.candidates) {
+      expect(['METADATA_VERIFIED', 'RIGHTS_REVIEW_REQUIRED']).toContain(candidate.state);
+    }
+
+    const template = JSON.parse(
+      await readFile(join(directory, APPROVAL_TEMPLATE_FILENAME), 'utf8'),
+    ) as { approvals: { approvedBy: string }[] };
+    expect(template.approvals.every((entry) => entry.approvedBy.startsWith('TODO'))).toBe(true);
+  }, 60_000);
+
+  it('refuses --ids unless exactly one provider is named', async () => {
+    const { err, context } = cliContext();
+    const code = await runMediaCli(
+      ['search', '--ids', '8745106,8745104', '--kind', 'video', '--providers', 'pexels,pixabay'],
+      context,
+    );
+    // Id 8745106 is a different item at every provider; guessing which was
+    // meant is how the wrong footage gets acquired.
+    expect(code).toBe(MEDIA_EXIT_CODES.INVALID_ARGUMENTS);
+    expect(err.join('')).toContain('exactly one --providers value');
+  }, 60_000);
+
   it('never writes a provider API key into any run artefact', async () => {
     const { out, context } = cliContext();
     await runMediaCli(

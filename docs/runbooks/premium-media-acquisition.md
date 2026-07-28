@@ -117,6 +117,27 @@ Writes `.aamp-output/media-runs/<run-id>/` containing `run.json`,
 request and the date, so re-running the same search overwrites its own artefacts
 rather than leaving a drift of near-identical runs.
 
+### Search by known provider asset id
+
+When a review that happened elsewhere already named the exact items — a
+shortlist, a contact-sheet pass, a colleague's list — a keyword query cannot
+reliably reach them. `--ids` resolves them directly:
+
+```sh
+pnpm aamp:media search --ids 8745104,8745106,8473149 --kind video --providers pexels
+```
+
+It produces the same run, gallery and approval template as a keyword search,
+and confers exactly the same thing: nothing above `RIGHTS_REVIEW_REQUIRED`.
+The recorded `request.query` says `provider-asset-ids: …` rather than a keyword
+nobody typed.
+
+**Exactly one provider must be named.** An asset id is provider-scoped — id
+`8745106` is a different item at every provider — and guessing which one the
+operator meant is how the wrong footage gets acquired. Each id is resolved
+independently, so one unreachable item is reported as its own problem and does
+not discard the ones that resolved.
+
 ### Import an external candidate pack
 
 ```sh
@@ -170,6 +191,16 @@ Downloads only what the approval covers, hashes it, writes it under a
 content-addressed filename, measures it with ffprobe and FFmpeg, and promotes it
 only if it survives. `--accept-below-profile` keeps material that measures below
 the profile — recorded on the asset, never inferred.
+
+**The rendition downloaded is the rendition the approval selected.** A rendition
+label is not a unique key: Pexels returns six renditions for one video all
+labelled `unlabelled`, and several labelled `hd`. `resolveSelectedRendition`
+therefore resolves a label with the same largest-area rule `selectBestRendition`
+uses when the selection is recorded, so the two agree by construction rather
+than by a provider happening to label uniquely. Found against the live API: a
+2160×3840 approval downloaded 360×640, and the quality profile then refused the
+result for being below the source floor — blaming the source rather than the
+resolution.
 
 ### Build the manifest
 

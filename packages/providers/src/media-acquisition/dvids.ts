@@ -28,6 +28,7 @@ import { hostOf } from './pexels';
 import {
   assertDownloadPermitted,
   healthFromError,
+  resolveSelectedRendition,
   type DownloadApprovedAssetInput,
   type DownloadedMediaBytes,
   type MediaAcquisitionProvider,
@@ -398,9 +399,7 @@ export class DvidsMediaProvider implements MediaAcquisitionProvider {
         `${input.candidate.candidateId} is not an item-level US Government work, so it is not licensed by this route. DVIDS hosts separately copyrighted material and this adapter will not download it.`,
       );
     }
-    const rendition = input.candidate.renditions.find(
-      (entry) => entry.label === input.selection.renditionLabel,
-    );
+    const rendition = resolveSelectedRendition(input.candidate, input.selection.renditionLabel);
     if (!rendition) {
       throw new MediaHttpError(
         'REJECTED',

@@ -235,6 +235,38 @@ export function selectBestRendition(
   return sorted[0] ?? null;
 }
 
+/**
+ * The rendition an approved selection names.
+ *
+ * A rendition label is **not a unique key**. Pexels returns six renditions for
+ * one video all labelled `unlabelled`, and several labelled `hd`; a plain
+ * `find` on the label therefore returns whichever happened to come first,
+ * which is routinely a different — and much smaller — file than
+ * `selectBestRendition` chose when the selection was recorded. That was found
+ * against the live API: a 2160×3840 approval downloaded 360×640, and the
+ * quality profile then refused the result for being below the source floor,
+ * blaming the source rather than the resolution.
+ *
+ * Resolving with the same largest-area rule `selectBestRendition` uses makes
+ * the download agree with the approval by construction, rather than by the
+ * provider happening to label its renditions uniquely.
+ */
+export function resolveSelectedRendition(
+  candidate: MediaCandidate,
+  renditionLabel: string,
+): MediaCandidate['renditions'][number] | null {
+  const matching = candidate.renditions.filter((entry) => entry.label === renditionLabel);
+  if (matching.length === 0) return null;
+  const sorted = [...matching].sort((a, b) => {
+    const areaA = (a.widthPx ?? 0) * (a.heightPx ?? 0);
+    const areaB = (b.widthPx ?? 0) * (b.heightPx ?? 0);
+    if (areaA !== areaB) return areaB - areaA;
+    // Ties break on the url so two runs of the same approval agree.
+    return a.url.localeCompare(b.url);
+  });
+  return sorted[0] ?? null;
+}
+
 /** Maps a transport failure to the health state an operator should see. */
 export function healthFromError(
   provider: MediaAcquisitionProviderId,

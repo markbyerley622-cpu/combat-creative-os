@@ -12,7 +12,7 @@ import { PexelsMediaProvider } from './pexels';
 import { PixabayMediaProvider } from './pixabay';
 import { WikimediaMediaProvider, classifyCommonsLicence } from './wikimedia';
 import { createMediaAcquisitionProviders, providersForKind, refusedSourceReason } from './factory';
-import { MediaApprovalRequiredError } from './provider';
+import { MediaApprovalRequiredError, selectBestRendition } from './provider';
 import { startFakeMediaApi, type FakeMediaApi } from './testing/fake-media-api';
 
 /**
@@ -432,6 +432,64 @@ describe('the approval gate', () => {
       notes: '',
     };
   }
+
+  it('downloads the rendition the selection chose when a provider reuses one label', () => {
+    // Found against the live Pexels API: one video returned six renditions all
+    // labelled `unlabelled`. `selectBestRendition` chose 2160×3840 and a plain
+    // find-by-label downloaded the first entry — 360×640 — after which the
+    // quality profile refused the result for being below the source floor,
+    // blaming the source rather than the resolution.
+    const provider = new PexelsMediaProvider({ apiKey: 'k' });
+    const subject: MediaCandidate = {
+      ...candidate('APPROVED_FOR_DOWNLOAD'),
+      renditions: [
+        {
+          label: 'unlabelled',
+          url: 'https://videos.pexels.com/video-files/1/small.mp4',
+          widthPx: 360,
+          heightPx: 640,
+        },
+        {
+          label: 'unlabelled',
+          url: 'https://videos.pexels.com/video-files/1/largest.mp4',
+          widthPx: 2160,
+          heightPx: 3840,
+        },
+        {
+          label: 'unlabelled',
+          url: 'https://videos.pexels.com/video-files/1/medium.mp4',
+          widthPx: 1080,
+          heightPx: 1920,
+        },
+      ],
+    };
+
+    const chosen = selectBestRendition(subject, 512 * 1024 * 1024);
+    expect(chosen?.widthPx).toBe(2160);
+
+    const resolved = provider.resolveApprovedDownload({
+      candidate: subject,
+      selection: selectionFor(subject, chosen?.label ?? 'unlabelled'),
+      usage: 'ORGANIC_SOCIAL',
+      now: new Date('2026-07-27T00:00:00.000Z'),
+    });
+    expect(resolved.url).toBe('https://videos.pexels.com/video-files/1/largest.mp4');
+    expect(resolved.widthPx).toBe(2160);
+    expect(resolved.heightPx).toBe(3840);
+  });
+
+  it('still refuses a rendition label the candidate does not carry', () => {
+    const provider = new PexelsMediaProvider({ apiKey: 'k' });
+    const subject = candidate('APPROVED_FOR_DOWNLOAD');
+    expect(() =>
+      provider.resolveApprovedDownload({
+        candidate: subject,
+        selection: selectionFor(subject, 'uhd'),
+        usage: 'ORGANIC_SOCIAL',
+        now: new Date('2026-07-27T00:00:00.000Z'),
+      }),
+    ).toThrow(/"uhd" is not one of/);
+  });
 
   it('refuses a candidate that never reached APPROVED_FOR_DOWNLOAD, naming the skipped stations', () => {
     const provider = new PexelsMediaProvider({ apiKey: 'k' });
