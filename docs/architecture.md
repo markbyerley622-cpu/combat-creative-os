@@ -3318,6 +3318,88 @@ existing `formatFactualConstraints` is left untouched — its exact format is
 described in a frozen prompt version — and the launch path uses a separate
 formatter, with the convention stated in the new prompt section.
 
+**Next milestone: the premium creative finishing workflow.**
+
+---
+
+### Premium creative finishing workflow (2026-07-28)
+
+**What changed.** `pnpm aamp:finish` is the directed-revision pass that runs
+after a master exists and before anybody calls it finished. A named reviewer
+files a timestamped critique; the system produces controlled alternatives along
+one axis at a time from that reviewer's own structural directives, renders every
+one through the existing preview path, and a person picks between them. Full
+runbook: `docs/runbooks/premium-creative-finishing.md`.
+
+Eight subcommands over one run directory — `brief`, `open`, `directives`,
+`propose`, `inspect`, `select`, `scorecard`, `finalize`. As with the launch
+gate, they are deliberately not one pipeline: the step between `propose` and
+`select` is a person watching two files.
+
+**The division of labour is the milestone, again, and in a harder place.** A
+finishing pass is exactly where "the system decides what the advertisement
+should be" creeps back in, because a sensible-default alternative is so easy to
+justify. So the alternatives are authored: a `StageDirectiveSet` states, per
+candidate, a list of structural operations on the approved plan, and the
+operation vocabulary is closed and contains nothing that can write a caption, a
+headline, a hook line or a script beat. `SET_CAPTION_ENTRANCE` changes how a
+line arrives and cannot change what it says.
+`finishing-source-hygiene.test.ts` asserts it against the source: no creative
+copy, no timing, gain, opacity or intensity literal assigned to a plan field, no
+hardcoded beat plan, no default candidate, and no import that could reach a
+provider, the composition root or a database client.
+
+**Staged elimination.** `HOOK → PACING → AUDIO → CTA`, in that order and no
+other. The hook decides whether anything after it is seen, so it is settled
+first; pacing is judged against a fixed opening; audio against a fixed cut; the
+CTA last, because it is the only axis whose best answer genuinely depends on
+everything before it. Each stage owns a primary axis and a fixed set of
+dependent ones it may move to express itself; an operation outside that set is
+refused, as is a candidate that never moves the primary axis. The run adds the
+unchanged plan as `control` itself, so the reviewer is always choosing against
+what they already have rather than only between alternatives.
+
+**Nothing renders without a recorded selection, and nothing is PREMIUM_READY
+without a human scorecard.** A selection pins the reviewer, the instant, the
+reason in their own words and the checksum of the approved plan, and that
+checksum is re-verified on every read. Craft dimensions carry
+`HUMAN_JUDGEMENT_REQUIRED` and no number; the verdict needs a passing QA, a
+scorecard written against that master's checksum, every gated dimension over the
+brief's own threshold, and every `BLOCKING` defect recorded as resolved — with
+each missing condition named rather than summarised.
+
+**Catalogue defect found and fixed.** The five new finishing decorations
+(`FOCUS_DIM`, `TAP_INDICATOR`, `LIGHT_SWEEP`, `EDGE_VIGNETTE`, `FILM_GRAIN`)
+were first written using `drawbox` expressions of the form `x='10+100*t'`.
+`drawbox` accepts them and FFmpeg reports no error — but its `t` is the
+_thickness_, not the timestamp, and it has no per-frame evaluation mode, so the
+box resolves once against the wrong variable and never moves. Measured against
+FFmpeg 8.1.2 rather than assumed. Movement is now compiled as a series of
+statically-positioned boxes with disjoint `enable` windows, and
+`MOTION_TREATMENT_CATALOGUE_VERSION` is bumped to 2 — a storyboard citing "v1"
+describes a catalogue with five fewer ways to treat a frame.
+
+**Proven live, against real FFmpeg.** One acceptance round rendering eight
+candidates: all four stages settled in order on recorded human decisions; a
+control rendered beside every alternative, both QA `PASS`; each stage's approved
+plan carried forward as the next stage's base; an ffprobe-verified 1080×1920
+master at the requested duration; `FOCUS_DIM` and `LIGHT_SWEEP` surviving into
+the finished cut; `PREMIUM_READY` only with the submitted scorecard; a
+provenance trail naming every decision and its author; a comparison page with no
+script, no network and no verdict language. Separately, with no FFmpeg at all:
+vague feedback, a defect with no duration or past the end of the cut, a
+self-contradicting brief, an out-of-order stage, stale directives, a selection
+with no comparison, an unwatched candidate, an unknown candidate, approved bytes
+changed after the fact, a rewritten artefact, a cross-axis operation, a
+candidate that never moves the axis under comparison, a retime that empties its
+donor, unapproved footage, and a scorecard for a different master.
+
+**Not proven: creative quality.** Every craft score in every test is a number a
+fixture reviewer wrote — the scorecard exists precisely because no code can
+produce one, and the tests are not an exception. Nothing here has finished a
+master produced by a real campaign run either: the example round finishes a
+preview built from synthetic `lavfi` media.
+
 **Next milestone: AAMP-1 step 4 — `apps/worker` against a live Temporal server**
 (`docs/aamp-architecture.md` §6 task 6).
 

@@ -200,6 +200,35 @@ describe('motion-treatment catalogue — what each treatment actually emits', ()
   });
 });
 
+function firstOf<T>(values: readonly T[]): T {
+  const value = values[0];
+  if (value === undefined) throw new Error('expected at least one value');
+  return value;
+}
+
+function lastOf<T>(values: readonly T[]): T {
+  const value = values[values.length - 1];
+  if (value === undefined) throw new Error('expected at least one value');
+  return value;
+}
+
+/** The geometry every finishing-decoration case starts from. */
+const FINISHING_BASE = {
+  baseLabel: 'c1',
+  outputLabel: 'c2',
+  frameWidthPx: 1080,
+  frameHeightPx: 1920,
+  colorHex: '#0A0A0A',
+  opacity: 0.72,
+  xPx: 0,
+  yPx: 0,
+  widthPx: 1080,
+  heightPx: 1920,
+  thicknessPx: 6,
+  startSeconds: 1,
+  endSeconds: 3,
+} as const;
+
 describe('motion-treatment catalogue — transitions and decorations', () => {
   it('maps every transition onto an xfade name', () => {
     for (const key of catalogueInventory().TRANSITION) {
@@ -217,6 +246,8 @@ describe('motion-treatment catalogue — transitions and decorations', () => {
     const base = {
       baseLabel: 'c1',
       outputLabel: 'c2',
+      frameWidthPx: 1080,
+      frameHeightPx: 1920,
       colorHex: '#FF3B30',
       opacity: 0.9,
       xPx: 60,
@@ -241,6 +272,8 @@ describe('motion-treatment catalogue — transitions and decorations', () => {
       compileDecorationTreatment('ACCENT_OUTLINE', {
         baseLabel: 'c1',
         outputLabel: 'c2',
+        frameWidthPx: 1080,
+        frameHeightPx: 1920,
         colorHex: 'red:t=fill',
         opacity: 1,
         xPx: 0,
@@ -254,11 +287,152 @@ describe('motion-treatment catalogue — transitions and decorations', () => {
     ).toThrow(FilterPrimitiveError);
   });
 
+  it('dims all four bands around a focus region and leaves the region alone', () => {
+    const compiled = compileDecorationTreatment('FOCUS_DIM', {
+      ...FINISHING_BASE,
+      xPx: 140,
+      yPx: 600,
+      widthPx: 800,
+      heightPx: 700,
+    });
+    const boxes = compiled.graph.match(/drawbox=/g) ?? [];
+    expect(boxes).toHaveLength(4);
+    // Above, below, left, right — and never the region itself.
+    expect(compiled.graph).toContain('drawbox=x=0:y=0:w=1080:h=600');
+    expect(compiled.graph).toContain('drawbox=x=0:y=1300:w=1080:h=620');
+    expect(compiled.graph).toContain('drawbox=x=0:y=600:w=140:h=700');
+    expect(compiled.graph).toContain('drawbox=x=940:y=600:w=140:h=700');
+    expect(compiled.graph).not.toContain('drawbox=x=140:y=600:w=800:h=700');
+  });
+
+  it('omits an empty band rather than emitting a zero-extent drawbox', () => {
+    const compiled = compileDecorationTreatment('FOCUS_DIM', {
+      ...FINISHING_BASE,
+      xPx: 0,
+      yPx: 400,
+      widthPx: 1080,
+      heightPx: 700,
+    });
+    expect(compiled.graph.match(/drawbox=/g) ?? []).toHaveLength(2);
+    expect(compiled.graph).not.toContain(':w=0:');
+    expect(compiled.graph).not.toContain(':h=0:');
+  });
+
+  it('refuses a FOCUS_DIM that leaves nothing in focus', () => {
+    expect(() =>
+      compileDecorationTreatment('FOCUS_DIM', {
+        ...FINISHING_BASE,
+        xPx: 0,
+        yPx: 0,
+        widthPx: 1080,
+        heightPx: 1920,
+      }),
+    ).toThrow(MotionTreatmentError);
+  });
+
+  /**
+   * The property that matters for both moving decorations: `drawbox` cannot
+   * evaluate a timestamp, so movement has to be a series of static boxes with
+   * disjoint enable windows. A graph containing `t` inside an expression would
+   * be reading the thickness and standing still.
+   */
+  for (const key of ['TAP_INDICATOR', 'LIGHT_SWEEP'] as const) {
+    it(`${key} moves by stepping static boxes, never by an unevaluated expression`, () => {
+      const compiled = compileDecorationTreatment(key, {
+        ...FINISHING_BASE,
+        xPx: 100,
+        yPx: 700,
+        widthPx: 700,
+        heightPx: 400,
+        startSeconds: 2,
+        endSeconds: 3,
+      });
+      const steps = compiled.graph.match(/enable='between\(t,[\d.]+,[\d.]+\)'/g) ?? [];
+      expect(steps.length).toBeGreaterThan(4);
+      expect(new Set(steps).size).toBe(steps.length);
+      // No drawbox geometry is quoted, which is what an expression would need.
+      expect(compiled.graph).not.toMatch(/[xywh]='/);
+      // Every step sits inside the decoration's own window.
+      for (const step of steps) {
+        const [from, to] = (step.match(/between\(t,([\d.]+),([\d.]+)\)/) ?? [])
+          .slice(1)
+          .map(Number);
+        expect(from).toBeGreaterThanOrEqual(2);
+        expect(to).toBeLessThanOrEqual(3);
+      }
+    });
+  }
+
+  it('sweeps a light band across the region without spilling outside it', () => {
+    const compiled = compileDecorationTreatment('LIGHT_SWEEP', {
+      ...FINISHING_BASE,
+      xPx: 100,
+      yPx: 700,
+      widthPx: 700,
+      heightPx: 400,
+    });
+    const bands = [...compiled.graph.matchAll(/drawbox=x=(\d+):y=\d+:w=(\d+)/g)].map(
+      ([, x, width]) => ({ x: Number(x), width: Number(width) }),
+    );
+    expect(bands.length).toBeGreaterThan(4);
+    for (const band of bands) {
+      expect(band.x).toBeGreaterThanOrEqual(100);
+      expect(band.x + band.width).toBeLessThanOrEqual(800);
+    }
+    // It actually travels: the last band starts well right of the first.
+    expect(lastOf(bands).x).toBeGreaterThan(firstOf(bands).x);
+  });
+
+  it('fades the tap indicator as it expands', () => {
+    const compiled = compileDecorationTreatment('TAP_INDICATOR', {
+      ...FINISHING_BASE,
+      xPx: 400,
+      yPx: 800,
+      widthPx: 280,
+      heightPx: 280,
+    });
+    const widths = [...compiled.graph.matchAll(/drawbox=x=-?\d+:y=-?\d+:w=(\d+)/g)].map(
+      ([, width]) => Number(width),
+    );
+    expect(lastOf(widths)).toBeGreaterThan(firstOf(widths));
+    const alphas = [...compiled.graph.matchAll(/@([\d.]+):/g)].map(([, value]) => Number(value));
+    expect(lastOf(alphas)).toBeLessThan(firstOf(alphas));
+  });
+
+  it('binds the whole-frame finishes to their declared window', () => {
+    for (const key of ['EDGE_VIGNETTE', 'FILM_GRAIN'] as const) {
+      const compiled = compileDecorationTreatment(key, {
+        ...FINISHING_BASE,
+        xPx: 0,
+        yPx: 0,
+        widthPx: 1080,
+        heightPx: 1920,
+      });
+      expect(compiled.graph).toContain("enable='between(t,1,3)'");
+    }
+  });
+
+  it('refuses a whole-frame finish that was given a partial region', () => {
+    for (const key of ['EDGE_VIGNETTE', 'FILM_GRAIN'] as const) {
+      expect(() =>
+        compileDecorationTreatment(key, {
+          ...FINISHING_BASE,
+          xPx: 40,
+          yPx: 40,
+          widthPx: 600,
+          heightPx: 600,
+        }),
+      ).toThrow(MotionTreatmentError);
+    }
+  });
+
   it('refuses a decoration window that ends before it starts', () => {
     expect(() =>
       compileDecorationTreatment('ACCENT_OUTLINE', {
         baseLabel: 'c1',
         outputLabel: 'c2',
+        frameWidthPx: 1080,
+        frameHeightPx: 1920,
         colorHex: '#FFFFFF',
         opacity: 1,
         xPx: 0,

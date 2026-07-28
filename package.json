@@ -23,6 +23,7 @@
     "aamp:capture-app": "pnpm --filter aamp-cli run build && node --env-file-if-exists=.env apps/aamp-cli/dist/capture/capture-main.js",
     "aamp:media": "pnpm --filter aamp-cli run build && node --env-file-if-exists=.env apps/aamp-cli/dist/media/media-main.js",
     "aamp:launch": "pnpm --filter aamp-cli run build && node --env-file-if-exists=.env apps/aamp-cli/dist/launch/launch-main.js",
+    "aamp:finish": "pnpm --filter aamp-cli run build && node --env-file-if-exists=.env apps/aamp-cli/dist/finishing/finishing-main.js",
     "db:generate": "pnpm --filter @combat/database run generate",
     "db:migrate": "pnpm --filter @combat/database run migrate",
     "db:validate": "pnpm --filter @combat/database run validate"

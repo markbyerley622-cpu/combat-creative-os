@@ -41,7 +41,14 @@ import {
  * no media, no copy, no logo, no music, no copied sequence.
  */
 
-export const MOTION_TREATMENT_CATALOGUE_VERSION = 1 as const;
+/**
+ * Bumped to 2 by the premium creative finishing milestone, which added the
+ * five finishing decorations. A storyboard or provenance record saying
+ * "catalogue v1" describes a catalogue that had five fewer ways to treat a
+ * frame; leaving the number at 1 would make two different catalogues
+ * indistinguishable in the artefacts that cite them.
+ */
+export const MOTION_TREATMENT_CATALOGUE_VERSION = 2 as const;
 
 export class MotionTreatmentError extends Error {
   constructor(message: string) {
@@ -574,12 +581,45 @@ export const DECORATION_TREATMENT_KEYS = [
   'BRAND_COLOUR_CALLOUT',
   /** An unfilled accent rule around a region — an outline. */
   'ACCENT_OUTLINE',
+  /**
+   * Dims everything *outside* the region, leaving it at full brightness.
+   *
+   * Four filled boxes rather than an alpha mask, because `drawbox` is already
+   * the one primitive that turns a validated colour and a validated rectangle
+   * into filter grammar. A reviewer's eye goes to the undimmed part, which is
+   * the whole purpose: a product screenshot has one thing worth reading and
+   * fourteen things competing with it.
+   */
+  'FOCUS_DIM',
+  /**
+   * An expanding, fading square pulse centred on the region — a tap indicator.
+   *
+   * Square rather than circular because `drawbox` cannot draw an ellipse and
+   * inventing a bespoke overlay chain for one ring would put ungoverned filter
+   * grammar back into the graph. The pulse reads as a tap at delivery size.
+   */
+  'TAP_INDICATOR',
+  /** A restrained band of light travelling horizontally across the region. */
+  'LIGHT_SWEEP',
+  /** Restrained luminance falloff toward frame edges. Full-frame geometry only. */
+  'EDGE_VIGNETTE',
+  /** Restrained temporal grain, so flat gradients do not band. Full-frame geometry only. */
+  'FILM_GRAIN',
 ] as const;
 export type DecorationTreatmentKey = (typeof DECORATION_TREATMENT_KEYS)[number];
 
 export interface DecorationCompileInput {
   readonly baseLabel: string;
   readonly outputLabel: string;
+  /**
+   * Delivery frame geometry.
+   *
+   * `FOCUS_DIM` has to know what "outside the region" means, and a decoration
+   * that assumed 1080×1920 would be a second place the output geometry is
+   * stated — which is how the two quietly disagree.
+   */
+  readonly frameWidthPx: number;
+  readonly frameHeightPx: number;
   readonly colorHex: string;
   readonly opacity: number;
   readonly xPx: number;
@@ -598,6 +638,66 @@ export interface CompiledDecoration {
   readonly catalogueVersion: typeof MOTION_TREATMENT_CATALOGUE_VERSION;
   readonly graph: string;
   readonly description: string;
+}
+
+/**
+ * A whole-frame finish refuses a partial rectangle rather than quietly
+ * ignoring it. `EDGE_VIGNETTE` and `FILM_GRAIN` act on the entire picture, so
+ * a manifest that gave one a region asked for something the treatment cannot
+ * do, and silently widening it would make the artefact describe a cut nobody
+ * authored.
+ */
+function assertFullFrame(key: DecorationTreatmentKey, input: DecorationCompileInput): void {
+  const isFullFrame =
+    Math.round(input.xPx) === 0 &&
+    Math.round(input.yPx) === 0 &&
+    Math.round(input.widthPx) === Math.round(input.frameWidthPx) &&
+    Math.round(input.heightPx) === Math.round(input.frameHeightPx);
+  if (!isFullFrame) {
+    throw new MotionTreatmentError(
+      `${key} is a whole-frame finish and needs 0,0,${num(input.frameWidthPx)},${num(input.frameHeightPx)} — got ` +
+        `${num(input.xPx)},${num(input.yPx)},${num(input.widthPx)},${num(input.heightPx)}`,
+    );
+  }
+}
+
+/**
+ * How many discrete positions a moving decoration is cut into, per second.
+ *
+ * `drawbox` looks like it takes expressions, and it does — but its `t` is the
+ * *thickness*, not the timestamp, and it has no per-frame evaluation mode. An
+ * `x='10+100*t'` therefore silently resolves once, against the wrong variable,
+ * and draws a static box somewhere nobody asked for. Verified against FFmpeg
+ * 8.1.2 rather than assumed: the box never moves.
+ *
+ * So animation is expressed the only way this catalogue can express it
+ * honestly — as a series of statically-positioned boxes, each enabled for its
+ * own slice of the window. Twelve steps a second is under the frame rate and
+ * well past the point the eye reads it as continuous movement at delivery
+ * size, and it keeps the graph a bounded length.
+ */
+const ANIMATION_STEP_TARGET_HZ = 12;
+const MAX_ANIMATION_STEPS = 48;
+
+interface AnimationStep {
+  /** 0 at the start of the decoration's window, 1 at its end. */
+  readonly progress: number;
+  readonly enable: string;
+}
+
+function animationSteps(input: DecorationCompileInput, stepsPerSecond: number): AnimationStep[] {
+  const span = input.endSeconds - input.startSeconds;
+  const count = Math.min(MAX_ANIMATION_STEPS, Math.max(2, Math.round(span * stepsPerSecond)));
+  return Array.from({ length: count }, (_unused, index) => {
+    const from = input.startSeconds + (span * index) / count;
+    const to = input.startSeconds + (span * (index + 1)) / count;
+    return {
+      // Sampled at the middle of the step, so the movement is centred on the
+      // window rather than lagging or leading it.
+      progress: (index + 0.5) / count,
+      enable: `enable='between(t,${num(from)},${num(to)})'`,
+    };
+  });
 }
 
 /**
@@ -640,6 +740,132 @@ export function compileDecorationTreatment(
         catalogueVersion: MOTION_TREATMENT_CATALOGUE_VERSION,
         graph: `[${input.baseLabel}]drawbox=${box}:t=${num(thickness)}:${enable}[${input.outputLabel}]`,
         description: 'accent outline around a region of frame',
+      };
+    }
+    case 'FOCUS_DIM': {
+      // The four regions outside the focus rectangle, in output pixels. Each is
+      // skipped when it would be empty, because `drawbox` with a zero extent is
+      // a filter that does nothing while still costing a link.
+      const x = Math.round(input.xPx);
+      const y = Math.round(input.yPx);
+      const w = Math.round(input.widthPx);
+      const h = Math.round(input.heightPx);
+      const frameW = Math.round(input.frameWidthPx);
+      const frameH = Math.round(input.frameHeightPx);
+      const bands: { x: number; y: number; w: number; h: number }[] = [
+        { x: 0, y: 0, w: frameW, h: y },
+        { x: 0, y: y + h, w: frameW, h: frameH - (y + h) },
+        { x: 0, y, w: x, h },
+        { x: x + w, y, w: frameW - (x + w), h },
+      ];
+      const steps = bands
+        .filter((band) => band.w > 0 && band.h > 0)
+        .map(
+          (band) =>
+            `drawbox=x=${num(band.x)}:y=${num(band.y)}:w=${num(band.w)}:h=${num(band.h)}:color=${colour}:t=fill:${enable}`,
+        );
+      if (steps.length === 0) {
+        throw new MotionTreatmentError(
+          'FOCUS_DIM covers the whole frame, so there is nothing left in focus',
+        );
+      }
+      return {
+        treatmentKey: key,
+        family: 'DECORATION',
+        catalogueVersion: MOTION_TREATMENT_CATALOGUE_VERSION,
+        graph: `[${input.baseLabel}]${steps.join(',')}[${input.outputLabel}]`,
+        description: 'dims everything outside a focus region',
+      };
+    }
+    case 'TAP_INDICATOR': {
+      const centreX = Math.round(input.xPx + input.widthPx / 2);
+      const centreY = Math.round(input.yPx + input.heightPx / 2);
+      const radius = Math.max(8, Math.round(Math.min(input.widthPx, input.heightPx) / 2));
+      const thickness = Math.max(2, Math.round(input.thicknessPx));
+      const steps = animationSteps(input, ANIMATION_STEP_TARGET_HZ);
+      const graph = steps
+        .map((step) => {
+          // The ring grows from roughly a third of its radius to full and fades
+          // as it goes. Both are held constant *within* a step, because a
+          // drawbox parameter is evaluated once and never again.
+          const stepRadius = Math.round(radius * (0.34 + 0.66 * step.progress));
+          const stepColour = hexToFfmpegColorWithAlpha(
+            input.colorHex,
+            input.opacity * (1 - 0.75 * step.progress),
+          );
+          return (
+            `drawbox=x=${num(centreX - stepRadius)}:y=${num(centreY - stepRadius)}` +
+            `:w=${num(2 * stepRadius)}:h=${num(2 * stepRadius)}` +
+            `:color=${stepColour}:t=${num(thickness)}:${step.enable}`
+          );
+        })
+        .join(',');
+      return {
+        treatmentKey: key,
+        family: 'DECORATION',
+        catalogueVersion: MOTION_TREATMENT_CATALOGUE_VERSION,
+        graph: `[${input.baseLabel}]${graph}[${input.outputLabel}]`,
+        description: 'expanding tap indicator pulse',
+      };
+    }
+    case 'LIGHT_SWEEP': {
+      const regionX = Math.round(input.xPx);
+      const regionW = Math.round(input.widthPx);
+      const bandWidth = Math.max(24, Math.round(input.widthPx * 0.12));
+      const travel = regionW + bandWidth;
+      const steps = animationSteps(input, ANIMATION_STEP_TARGET_HZ);
+      const drawn = steps
+        .map((step) => {
+          // Clipped to the region rather than allowed to spill: a sweep that
+          // ran past the shot it belongs to would light the frame beside it.
+          const left = Math.max(regionX, Math.round(regionX - bandWidth + travel * step.progress));
+          const right = Math.min(
+            regionX + regionW,
+            Math.round(regionX - bandWidth + travel * step.progress) + bandWidth,
+          );
+          return { left, width: right - left, enable: step.enable };
+        })
+        .filter((band) => band.width > 0)
+        .map(
+          (band) =>
+            `drawbox=x=${num(band.left)}:y=${num(input.yPx)}:w=${num(band.width)}` +
+            `:h=${num(input.heightPx)}:color=${colour}:t=fill:${band.enable}`,
+        );
+      if (drawn.length === 0) {
+        throw new MotionTreatmentError(
+          'LIGHT_SWEEP produced no visible band — the region is too narrow to sweep across',
+        );
+      }
+      return {
+        treatmentKey: key,
+        family: 'DECORATION',
+        catalogueVersion: MOTION_TREATMENT_CATALOGUE_VERSION,
+        graph: `[${input.baseLabel}]${drawn.join(',')}[${input.outputLabel}]`,
+        description: 'restrained light sweep across a region',
+      };
+    }
+    case 'EDGE_VIGNETTE': {
+      assertFullFrame(key, input);
+      // Opacity drives the angle: a wider angle is a weaker falloff, so the
+      // profile's "restrained" is expressible as a number rather than a note.
+      const angle = 1.5 - 0.5 * Math.min(1, Math.max(0, input.opacity));
+      return {
+        treatmentKey: key,
+        family: 'DECORATION',
+        catalogueVersion: MOTION_TREATMENT_CATALOGUE_VERSION,
+        graph: `[${input.baseLabel}]vignette=angle=${num(angle)}:mode=forward:eval=init:${enable}[${input.outputLabel}]`,
+        description: 'restrained edge vignette',
+      };
+    }
+    case 'FILM_GRAIN': {
+      assertFullFrame(key, input);
+      const strength = Math.max(1, Math.round(4 + 16 * Math.min(1, Math.max(0, input.opacity))));
+      return {
+        treatmentKey: key,
+        family: 'DECORATION',
+        catalogueVersion: MOTION_TREATMENT_CATALOGUE_VERSION,
+        graph: `[${input.baseLabel}]noise=alls=${num(strength)}:allf=t+u:${enable}[${input.outputLabel}]`,
+        description: 'restrained temporal film grain',
       };
     }
     default: {

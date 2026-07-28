@@ -412,6 +412,8 @@ export function buildRenderPlan(input: BuildRenderPlanInput): RenderPlan {
         compileDecorationTreatment(decoration.key, {
           baseLabel,
           outputLabel: outLabel,
+          frameWidthPx: manifest.output.widthPx,
+          frameHeightPx: manifest.output.heightPx,
           colorHex: decoration.colorHex,
           opacity: decoration.opacity,
           xPx: decoration.xPx,

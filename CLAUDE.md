@@ -182,8 +182,97 @@ against a deterministic launch fixture provider, and no paid model has produced
 a launch concept in this repository. See the "Product-launch orchestration"
 rules below and `docs/runbooks/agent-led-product-launch.md`.
 
+**The premium creative finishing workflow is done** — `pnpm aamp:finish` is the
+directed-revision pass that runs after a master exists and before anyone calls it
+finished. A named reviewer files a timestamped critique; the system produces
+controlled alternatives along one axis at a time from that reviewer's own
+structural directives, renders each through the existing preview path, and a
+person picks between them. **Proven live, against real FFmpeg:** one round
+rendering eight candidates, all four stages settled in order on recorded human
+decisions, a control rendered beside every alternative with QA `PASS` on both,
+each stage's approved plan carried forward as the next stage's base, an
+ffprobe-verified 1080×1920 master at the requested duration, two of the new
+finishing decorations surviving into the finished cut, `PREMIUM_READY` reached
+only with a submitted human scorecard, and a provenance trail naming every
+decision and its author. **Proven with no FFmpeg:** sixteen distinct refusals,
+from vague feedback to approved bytes changed after the decision. **Not proven:**
+creative quality — every craft score in every test is a number a fixture reviewer
+wrote, and nothing here has finished a master from a real campaign run. See the
+"Creative finishing" rules below and
+`docs/runbooks/premium-creative-finishing.md`.
+
 **The next milestone is AAMP-1 step 4** — `apps/worker` against a live Temporal
 server (`docs/aamp-architecture.md` §6 task 6).
+
+## Creative finishing — permanent rules
+
+- **Vague feedback is refused, not interpreted.** Every defect carries a time
+  range, a category, what was observed and what must change. The vague-phrase
+  check fires on the whole field being a mood and nothing else, so a reviewer
+  writing prose is never blocked — but "make it punchier" cannot become a render
+  decision, and the schema will not accept it.
+- **The reviewer authors the alternatives; application code owns the
+  discipline.** A `StageDirectiveSet` states the structural operations per
+  candidate. The operation vocabulary is closed and contains nothing that writes
+  a caption, headline, hook line or script beat — `SET_CAPTION_ENTRANCE` changes
+  how a line arrives, never what it says. No timing, gain, opacity or intensity
+  literal may be assigned to a plan field anywhere in
+  `apps/aamp-cli/src/finishing/`; `finishing-source-hygiene.test.ts` asserts it.
+  A "sensible default" alternative added to unblock a demo is the system writing
+  the advertisement again.
+- **`HOOK → PACING → AUDIO → CTA`, in that order.** The hook decides whether
+  anything after it is seen; the CTA depends on everything before it. Comparing
+  a stage against an unsettled earlier one is comparing a variable against a
+  variable, and is refused by name. Each stage owns a primary axis and a fixed
+  set of dependent ones; an operation outside the set is refused, and so is a
+  candidate that never moves the primary axis.
+- **The run adds the control itself.** `control` is a reserved id, and it is the
+  approved plan unchanged. A comparison without the current cut in it asks
+  "which of these three?" when the honest question is "any of these three, or
+  what you already have?"
+- **Every candidate renders through the existing preview path, unchanged.** Same
+  preflight, same rights enforcement, same deterministic segment selection, same
+  actual-media QA. A candidate rendered through a shortcut would be judged
+  against a standard the finished master never has to meet. Two candidates
+  producing byte-identical plans are refused.
+- **Editing refuses rather than repairs.** A retime names the beat that gives
+  the time back; a donor that cannot afford it, a beat that does not exist, or
+  an asset the brief never approved is refused with the reviewer's own
+  vocabulary. The edited plan is re-parsed through `parseHumanPlan`, so there is
+  no privileged path around the schema for plans this code produced.
+- **A selection is the only way a stage settles.** No `--latest`, no default,
+  no highest-scoring candidate. It pins the reviewer, the instant, the reason in
+  their own words and the checksum of the approved plan, and that checksum is
+  re-verified on every read. A candidate that never produced a master cannot be
+  selected — a selection is a judgement about a file that exists.
+- **A finishing artefact is written once.** An identical rewrite is idempotent
+  and fine; a different one is refused by name. The directives file is written
+  only after the proposal stands, so a refused set cannot block the corrected
+  one.
+- **Nothing scores creative quality on the system's behalf.** Craft dimensions
+  carry `HUMAN_JUDGEMENT_REQUIRED` and no number, and no function in this
+  repository produces, suggests or defaults one. `PREMIUM_READY` needs a passing
+  QA, a scorecard written against that master's checksum, every gated dimension
+  over the brief's own threshold, and every `BLOCKING` defect recorded as
+  resolved — with each missing condition named, because a bare "not ready" gets
+  the condition removed rather than met.
+- **Nothing on this path constructs a provider.** No reasoning provider, no
+  generation provider, no database client, no composition root. The suite runs
+  with `REASONING_PROVIDER=claude` and no API key, where a campaign run exits 3.
+- **`drawbox` cannot animate, and the catalogue must not pretend it can.** Its
+  `t` in an expression is the _thickness_, not the timestamp, and it has no
+  per-frame evaluation mode — an `x='10+100*t'` resolves once against the wrong
+  variable and never moves, with no error. Movement is a series of
+  statically-positioned boxes with disjoint `enable` windows. Verified against
+  FFmpeg 8.1.2, and found the hard way.
+- **A whole-frame finish refuses a partial rectangle.** `EDGE_VIGNETTE` and
+  `FILM_GRAIN` act on the entire picture; silently widening a region would make
+  the artefact describe a cut nobody authored.
+- **Adding or changing a treatment is a `MOTION_TREATMENT_CATALOGUE_VERSION`
+  bump.** It is 2 as of this milestone. A storyboard citing v1 describes a
+  catalogue with five fewer ways to treat a frame, and two catalogues that
+  cannot be told apart in the artefacts citing them are one bug away from
+  disagreeing.
 
 ## Product-launch orchestration — permanent rules
 
