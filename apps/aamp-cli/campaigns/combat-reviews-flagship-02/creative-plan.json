@@ -1,0 +1,600 @@
+{
+  "planVersion": 1,
+  "workspaceId": "6f1d5f6c-6d3a-4a2e-9c5f-0f2a1b3c4d5e",
+  "campaignId": "e3b81f5a-9c47-4d02-b6a8-51fd7c204e93",
+  "authoredBy": "Riki Taylor (locked storyboard art direction); animation decisions executed deterministically by the AAMP flagship pipeline",
+  "authoredAt": "2026-07-29T00:00:00.000Z",
+  "campaignPromptSha256": "97c35497b852fb804665a61f94b481c8684a3caf29c04505d1f3384bad573334",
+  "targetDurationSeconds": 15,
+  "strategy": {
+    "audienceName": "Multi-promotion combat sports fans, 18-34",
+    "painPoints": [
+      "The cards they care about sit across different promotions, broadcasters and time zones",
+      "They find out a fight happened after it happened",
+      "They have an opinion about a matchup and nowhere to put it before the result lands"
+    ],
+    "positioning": "The one place the whole of combat sports is already organised: what is on, who is ranked, how the matchup reads, what you predicted and where that leaves you.",
+    "targetAudienceSummary": "Combat sports fans aged 18-34 who follow more than one promotion and argue about results after every card",
+    "keyMessages": [
+      "Every fight, from every combat sport, in one place",
+      "Research the division, read the matchup, then make a free prediction",
+      "Correct predictions build a record, and the argument carries on afterwards"
+    ],
+    "toneGuidelines": [
+      "Certain and physical; the product does the talking",
+      "Fight-night late-night, never broadcast-graphics bright",
+      "Red is a signal, never a wash"
+    ]
+  },
+  "creativeDirection": {
+    "logline": "A notification starts it, the product answers it in four escalating moves, and the record you build is the reason you come back.",
+    "visualDirection": "The locked storyboard is the picture. Each landscape panel is contained at full width over a heavily blurred, darkened backplate built from its own pixels, so no composition is cropped and no headline is lost to a vertical crop. Movement always points at the product and always decelerates into a screen that has to be read. Red is reserved for four moments: the notification ring, the tap, the submission flash and the call to action.",
+    "narrativeArc": "Notification, breadth, discovery, research, comparison, decision, submission, reward, argument, resolve. Ten scenes in the order the storyboard locked them, each earning the next.",
+    "referenceNotes": [
+      "Pacing accelerates into the submission and decelerates hard through the last two scenes",
+      "Every transition carries a visual idea across the cut rather than demonstrating an effect",
+      "The final stretch is a clean stable hold so the call to action can be read"
+    ]
+  },
+  "hook": {
+    "strategy": "Open on the notification the storyboard designed, and let a slow push and one red pulse make it the only thing in the frame.",
+    "latencySeconds": 0.25,
+    "onScreenLine": "FIGHTS THIS WEEKEND"
+  },
+  "beats": [
+    {
+      "id": "notification-hook",
+      "index": 0,
+      "role": "HOOK",
+      "description": "Panel one, contained at full width over a backplate built from its own pixels. A slow cinematic push carries the frame toward the face and the phone while a red accent ring pulses once around the notification card, which is the focal point the panel already designed.",
+      "durationSeconds": 1.1,
+      "source": {
+        "assetId": "storyboard-panel-01",
+        "requiredTags": []
+      },
+      "motion": {
+        "treatment": "STORYBOARD_PANEL_2_5D",
+        "intensity": 0.75
+      },
+      "decorations": [
+        {
+          "key": "EDGE_VIGNETTE",
+          "colour": "PRIMARY",
+          "opacity": 0.5,
+          "xPx": 0,
+          "yPx": 0,
+          "widthPx": 1080,
+          "heightPx": 1920,
+          "thicknessPx": 6
+        },
+        {
+          "key": "ACCENT_OUTLINE",
+          "colour": "ACCENT",
+          "opacity": 0.8,
+          "xPx": 170,
+          "yPx": 1028,
+          "widthPx": 612,
+          "heightPx": 238,
+          "thicknessPx": 4,
+          "startOffsetSeconds": 0.24,
+          "durationSeconds": 0.46
+        }
+      ],
+      "audioCues": [
+        {
+          "role": "IMPACT",
+          "atOffsetSeconds": 0.0,
+          "gainDb": -8,
+          "ducksMusic": true
+        },
+        {
+          "role": "CONFIRMATION_PULSE",
+          "atOffsetSeconds": 0.12,
+          "gainDb": -9,
+          "ducksMusic": false
+        }
+      ],
+      "useSourceAudio": false
+    },
+    {
+      "id": "combat-sport-breadth",
+      "index": 1,
+      "role": "INFORMATION",
+      "description": "Panel two, revealed as its own five vertical discipline slices in rhythmic sequence from left to right, so the breadth of the sport assembles rather than simply appearing. The headline resolves with the final slice.",
+      "durationSeconds": 1.4,
+      "source": {
+        "assetId": "storyboard-panel-02",
+        "requiredTags": []
+      },
+      "motion": {
+        "treatment": "STORYBOARD_SLICE_REVEAL",
+        "intensity": 0.5
+      },
+      "transitionIn": {
+        "kind": "IMPACT_CUT",
+        "durationSeconds": 0.2
+      },
+      "decorations": [
+        {
+          "key": "EDGE_VIGNETTE",
+          "colour": "PRIMARY",
+          "opacity": 0.45,
+          "xPx": 0,
+          "yPx": 0,
+          "widthPx": 1080,
+          "heightPx": 1920,
+          "thicknessPx": 6
+        }
+      ],
+      "audioCues": [
+        {
+          "role": "IMPACT",
+          "atOffsetSeconds": 0.03,
+          "gainDb": -7,
+          "ducksMusic": true
+        }
+      ],
+      "useSourceAudio": false
+    },
+    {
+      "id": "event-discovery",
+      "index": 2,
+      "role": "EVENT_DETAIL",
+      "description": "Panel three. The backplate drifts at its own rate behind the contained panel, separating the arena from the phone into two planes, and a focus dim holds the eye on the events interface so the screen stays the thing being read.",
+      "durationSeconds": 1.8,
+      "source": {
+        "assetId": "storyboard-panel-03",
+        "requiredTags": []
+      },
+      "motion": {
+        "treatment": "STORYBOARD_PANEL_2_5D",
+        "intensity": 0.85
+      },
+      "transitionIn": {
+        "kind": "MASKED_UI_REVEAL",
+        "durationSeconds": 0.3
+      },
+      "decorations": [
+        {
+          "key": "EDGE_VIGNETTE",
+          "colour": "PRIMARY",
+          "opacity": 0.4,
+          "xPx": 0,
+          "yPx": 0,
+          "widthPx": 1080,
+          "heightPx": 1920,
+          "thicknessPx": 6
+        },
+        {
+          "key": "FOCUS_DIM",
+          "colour": "PRIMARY",
+          "opacity": 0.34,
+          "xPx": 78,
+          "yPx": 578,
+          "widthPx": 346,
+          "heightPx": 742,
+          "thicknessPx": 6,
+          "startOffsetSeconds": 0.42,
+          "durationSeconds": 0.85
+        }
+      ],
+      "audioCues": [
+        {
+          "role": "CROWD",
+          "atOffsetSeconds": 0.0,
+          "gainDb": -22,
+          "ducksMusic": false
+        },
+        {
+          "role": "CONFIRMATION_PULSE",
+          "atOffsetSeconds": 0.34,
+          "gainDb": -11,
+          "ducksMusic": false
+        }
+      ],
+      "useSourceAudio": false
+    },
+    {
+      "id": "rankings-research",
+      "index": 3,
+      "role": "INFORMATION",
+      "description": "Panel four. A restrained push settles on the rankings phone and a focus dim isolates the ordered list, so the movement reads as research rather than decoration.",
+      "durationSeconds": 1.5,
+      "source": {
+        "assetId": "storyboard-panel-04",
+        "requiredTags": []
+      },
+      "motion": {
+        "treatment": "STORYBOARD_PANEL_2_5D",
+        "intensity": 0.55
+      },
+      "transitionIn": {
+        "kind": "WHIP_PAN",
+        "durationSeconds": 0.2
+      },
+      "decorations": [
+        {
+          "key": "EDGE_VIGNETTE",
+          "colour": "PRIMARY",
+          "opacity": 0.4,
+          "xPx": 0,
+          "yPx": 0,
+          "widthPx": 1080,
+          "heightPx": 1920,
+          "thicknessPx": 6
+        },
+        {
+          "key": "FOCUS_DIM",
+          "colour": "PRIMARY",
+          "opacity": 0.3,
+          "xPx": 582,
+          "yPx": 578,
+          "widthPx": 392,
+          "heightPx": 742,
+          "thicknessPx": 6,
+          "startOffsetSeconds": 0.3,
+          "durationSeconds": 0.75
+        }
+      ],
+      "audioCues": [
+        {
+          "role": "UI_CLICK",
+          "atOffsetSeconds": 0.04,
+          "gainDb": -15,
+          "ducksMusic": false
+        }
+      ],
+      "useSourceAudio": false
+    },
+    {
+      "id": "fighter-comparison",
+      "index": 4,
+      "role": "EVENT_DETAIL",
+      "description": "Panel five. A steady push draws the two fighters and the comparison card between them toward the viewer, holding the symmetrical face-off the panel composed.",
+      "durationSeconds": 1.8,
+      "source": {
+        "assetId": "storyboard-panel-05",
+        "requiredTags": []
+      },
+      "motion": {
+        "treatment": "STORYBOARD_PANEL_2_5D",
+        "intensity": 0.7
+      },
+      "transitionIn": {
+        "kind": "CROSSFADE",
+        "durationSeconds": 0.3
+      },
+      "decorations": [
+        {
+          "key": "EDGE_VIGNETTE",
+          "colour": "PRIMARY",
+          "opacity": 0.45,
+          "xPx": 0,
+          "yPx": 0,
+          "widthPx": 1080,
+          "heightPx": 1920,
+          "thicknessPx": 6
+        }
+      ],
+      "audioCues": [],
+      "useSourceAudio": false
+    },
+    {
+      "id": "free-prediction",
+      "index": 5,
+      "role": "PREDICTION",
+      "description": "Panel six. The push is deliberately restrained so the interface stays legible, and a tap indicator lands on the free-prediction button at the moment the finger reaches it, synchronised to the selection sound.",
+      "durationSeconds": 1.666667,
+      "source": {
+        "assetId": "storyboard-panel-06",
+        "requiredTags": []
+      },
+      "motion": {
+        "treatment": "STORYBOARD_PANEL_2_5D",
+        "intensity": 0.5
+      },
+      "transitionIn": {
+        "kind": "MASKED_UI_REVEAL",
+        "durationSeconds": 0.266667
+      },
+      "decorations": [
+        {
+          "key": "EDGE_VIGNETTE",
+          "colour": "PRIMARY",
+          "opacity": 0.4,
+          "xPx": 0,
+          "yPx": 0,
+          "widthPx": 1080,
+          "heightPx": 1920,
+          "thicknessPx": 6
+        },
+        {
+          "key": "TAP_INDICATOR",
+          "colour": "ACCENT",
+          "opacity": 0.85,
+          "xPx": 688,
+          "yPx": 1082,
+          "widthPx": 168,
+          "heightPx": 168,
+          "thicknessPx": 8,
+          "startOffsetSeconds": 0.54,
+          "durationSeconds": 0.38
+        }
+      ],
+      "audioCues": [
+        {
+          "role": "UI_CLICK",
+          "atOffsetSeconds": 0.58,
+          "gainDb": -13,
+          "ducksMusic": false
+        }
+      ],
+      "useSourceAudio": false
+    },
+    {
+      "id": "prediction-submitted",
+      "index": 6,
+      "role": "PREDICTION",
+      "description": "Panel seven, entered on an impact cut and pushed hard. A brand-red confirmation flash covers the frame for a fifth of a second on the bell, so the submission lands as a physical event rather than as another caption.",
+      "durationSeconds": 1.033333,
+      "source": {
+        "assetId": "storyboard-panel-07",
+        "requiredTags": []
+      },
+      "motion": {
+        "treatment": "STORYBOARD_PANEL_2_5D",
+        "intensity": 1.0
+      },
+      "transitionIn": {
+        "kind": "IMPACT_CUT",
+        "durationSeconds": 0.133333
+      },
+      "decorations": [
+        {
+          "key": "BRAND_COLOUR_CALLOUT",
+          "colour": "ACCENT",
+          "opacity": 0.4,
+          "xPx": 0,
+          "yPx": 0,
+          "widthPx": 1080,
+          "heightPx": 1920,
+          "thicknessPx": 6,
+          "startOffsetSeconds": 0.0,
+          "durationSeconds": 0.2
+        },
+        {
+          "key": "EDGE_VIGNETTE",
+          "colour": "PRIMARY",
+          "opacity": 0.5,
+          "xPx": 0,
+          "yPx": 0,
+          "widthPx": 1080,
+          "heightPx": 1920,
+          "thicknessPx": 6
+        }
+      ],
+      "audioCues": [
+        {
+          "role": "FIGHT_BELL",
+          "atOffsetSeconds": 0.02,
+          "gainDb": -5,
+          "ducksMusic": true
+        },
+        {
+          "role": "IMPACT",
+          "atOffsetSeconds": 0.02,
+          "gainDb": -5,
+          "ducksMusic": true
+        }
+      ],
+      "useSourceAudio": false
+    },
+    {
+      "id": "predictor-status-reward",
+      "index": 7,
+      "role": "DISCUSSION",
+      "description": "Panel eight. The push lifts with the celebration while grain adds crowd energy, and the result card stays clear of any treatment so the record improvement remains readable.",
+      "durationSeconds": 1.9,
+      "source": {
+        "assetId": "storyboard-panel-08",
+        "requiredTags": []
+      },
+      "motion": {
+        "treatment": "STORYBOARD_PANEL_2_5D",
+        "intensity": 0.8
+      },
+      "transitionIn": {
+        "kind": "CUT",
+        "durationSeconds": 0.1
+      },
+      "decorations": [
+        {
+          "key": "EDGE_VIGNETTE",
+          "colour": "PRIMARY",
+          "opacity": 0.42,
+          "xPx": 0,
+          "yPx": 0,
+          "widthPx": 1080,
+          "heightPx": 1920,
+          "thicknessPx": 6
+        },
+        {
+          "key": "FILM_GRAIN",
+          "colour": "PRIMARY",
+          "opacity": 0.16,
+          "xPx": 0,
+          "yPx": 0,
+          "widthPx": 1080,
+          "heightPx": 1920,
+          "thicknessPx": 6
+        }
+      ],
+      "audioCues": [
+        {
+          "role": "CROWD",
+          "atOffsetSeconds": 0.0,
+          "gainDb": -18,
+          "ducksMusic": false
+        },
+        {
+          "role": "CONFIRMATION_PULSE",
+          "atOffsetSeconds": 0.14,
+          "gainDb": -9,
+          "ducksMusic": false
+        }
+      ],
+      "useSourceAudio": false
+    },
+    {
+      "id": "community-discussion",
+      "index": 8,
+      "role": "DISCUSSION",
+      "description": "Panel nine. The slowest move in the cut, so the discussion feed can be read, with a light sweep passing once across the frame to keep the shot alive without pulling the eye off the conversation.",
+      "durationSeconds": 2.3,
+      "source": {
+        "assetId": "storyboard-panel-09",
+        "requiredTags": []
+      },
+      "motion": {
+        "treatment": "STORYBOARD_PANEL_2_5D",
+        "intensity": 0.45
+      },
+      "transitionIn": {
+        "kind": "CROSSFADE",
+        "durationSeconds": 0.3
+      },
+      "decorations": [
+        {
+          "key": "EDGE_VIGNETTE",
+          "colour": "PRIMARY",
+          "opacity": 0.4,
+          "xPx": 0,
+          "yPx": 0,
+          "widthPx": 1080,
+          "heightPx": 1920,
+          "thicknessPx": 6
+        },
+        {
+          "key": "LIGHT_SWEEP",
+          "colour": "ACCENT",
+          "opacity": 0.22,
+          "xPx": 0,
+          "yPx": 520,
+          "widthPx": 1080,
+          "heightPx": 880,
+          "thicknessPx": 6,
+          "startOffsetSeconds": 0.5,
+          "durationSeconds": 0.9
+        }
+      ],
+      "audioCues": [
+        {
+          "role": "CROWD",
+          "atOffsetSeconds": 0.0,
+          "gainDb": -24,
+          "ducksMusic": false
+        }
+      ],
+      "useSourceAudio": false
+    },
+    {
+      "id": "brand-cta",
+      "index": 9,
+      "role": "CTA",
+      "description": "Panel ten, entered on a dip to black. The move is almost imperceptible so the end card settles early, the call-to-action button illuminates once, and the last stretch of the cut is a clean, stable hold.",
+      "durationSeconds": 2.633333,
+      "source": {
+        "assetId": "storyboard-panel-10",
+        "requiredTags": []
+      },
+      "motion": {
+        "treatment": "STORYBOARD_PANEL_2_5D",
+        "intensity": 0.2
+      },
+      "transitionIn": {
+        "kind": "DIP_TO_BLACK",
+        "durationSeconds": 0.333333
+      },
+      "decorations": [
+        {
+          "key": "EDGE_VIGNETTE",
+          "colour": "PRIMARY",
+          "opacity": 0.35,
+          "xPx": 0,
+          "yPx": 0,
+          "widthPx": 1080,
+          "heightPx": 1920,
+          "thicknessPx": 6
+        },
+        {
+          "key": "BRAND_COLOUR_CALLOUT",
+          "colour": "ACCENT",
+          "opacity": 0.3,
+          "xPx": 94,
+          "yPx": 1148,
+          "widthPx": 388,
+          "heightPx": 92,
+          "thicknessPx": 6,
+          "startOffsetSeconds": 0.5,
+          "durationSeconds": 0.42
+        }
+      ],
+      "audioCues": [
+        {
+          "role": "CTA_EMPHASIS",
+          "atOffsetSeconds": 0.22,
+          "gainDb": -6,
+          "ducksMusic": true
+        }
+      ],
+      "useSourceAudio": false
+    }
+  ],
+  "cta": {
+    "headline": "NEVER MISS FIGHT NIGHT.",
+    "subline": "EXPLORE EVENTS",
+    "durationSeconds": 2.3,
+    "holdSeconds": 1.7,
+    "entrance": "FADE_HOLD",
+    "renderEndCard": false
+  },
+  "audio": {
+    "musicAssetId": "music-bed",
+    "musicGainDb": -10,
+    "sourceAudioGainDb": -18,
+    "cueDuckingDb": 7,
+    "musicCrossfadeSeconds": 0.25,
+    "peakCeilingDbtp": -1.5,
+    "targetLufs": -14,
+    "cueAssetIds": {
+      "FIGHT_BELL": "sfx-fight-bell",
+      "CROWD": "sfx-crowd",
+      "IMPACT": "sfx-impact",
+      "UI_CLICK": "sfx-ui-click",
+      "CONFIRMATION_PULSE": "sfx-confirmation-pulse",
+      "CTA_EMPHASIS": "sfx-cta-emphasis"
+    }
+  },
+  "factualConstraints": [
+    "PRODUCT - Coverage: Combat Reviews lists events across multiple combat-sports promotions in one app.",
+    "PRODUCT - Events screen: upcoming fights with predictions, full cards, venues, broadcasters and live countdowns.",
+    "PRODUCT - Rankings: the product carries fighter rankings alongside the community challenge leaderboard.",
+    "PRODUCT - Predictions: points are earned from correct predictions in the CombatReviews Challenge.",
+    "PRODUCT - Free to predict: making a prediction costs nothing, and the challenge is skill rather than betting.",
+    "PRODUCT - Discussion: each event carries a card-talk discussion region.",
+    "PRODUCT - How it is opened: reached on the web, with no verified public store listing.",
+    "PROHIBITION - the storyboard's event names, fighter names, records, rankings, predictor ranks, handles and comments are concept UI and are declared PRODUCT_MOCKUP.",
+    "PROHIBITION - no store badge, no download promise and no invented performance claim.",
+    "PROHIBITION - no agency, studio or existing campaign may be named or imitated."
+  ],
+  "brandConstraints": {
+    "logoAssetId": "logo-primary",
+    "primaryColorHex": "#08080C",
+    "accentColorHex": "#DA0318",
+    "captionFontFamily": "Arial",
+    "safeAreaTopPx": 220,
+    "safeAreaBottomPx": 420,
+    "logoWindows": [],
+    "showLogoOverlay": false
+  }
+}

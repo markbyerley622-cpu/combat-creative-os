@@ -3485,6 +3485,75 @@ such claim by its temporary audio alone: no real music or sound-effect file
 exists in any available pack, so `MUSIC_SOUND_DESIGN` scores 0 of 7 rather than
 partial credit.
 
+**Next milestone: the locked-storyboard motion proof.**
+
+### Locked ten-panel storyboard motion proof (2026-07-29)
+
+A second vertical production milestone, and the first one where storyboard
+imagery is the _output_ rather than a reference. Runbook:
+`docs/runbooks/locked-storyboard-motion-proof.md`.
+
+**The rights position inverts, so the parser is separate.** Storyboard-01 is
+`REFERENCE_ONLY` and the v1 run proves by checksum that no frame of it was
+rendered. Storyboard-02 is `STORYBOARD_INTERNAL_REVIEW_ONLY`: the operator
+supplied it as locked art direction and authorised one internal-review motion
+proof, so its panels are the primary visual source. `storyboard-v2.ts` is a
+deliberately separate module from `storyboard-package.ts` — collapsing them
+into one parser with a flag would put a switch between "these bytes may never
+be rendered" and "these bytes are what we render". What replaces exclusion is
+declaration: every panel carries `STORYBOARD_PANEL` provenance, its
+not-licensed position, its concept-UI position and its `INTERNAL_REVIEW`
+channel in its own restrictions, and the run additionally proves by hash that
+Storyboard-01 is absent from everything the renderer can reach.
+
+**The ten scenes are constants.** `LOCKED_SCENE_ROLES` and
+`LOCKED_SCENE_SLOTS` are checked against the package, the plan and the finished
+cut. `storyboard-fidelity-report.json` fails the run on a missing scene, a
+reordering, a slot drift, a gap, or a beat bound to a panel that is not its
+own. It scores nothing: how good the animation is remains a craft judgement.
+
+**Two catalogue treatments, because a landscape panel cannot be cropped.**
+`STORYBOARD_PANEL_2_5D` contains the panel at 96% of frame width over a
+blurred, darkened backplate built from its own pixels, each plane with its own
+zoom; the push is bounded so width-fraction times maximum push stays under 1.0,
+which is what makes "the composition is never cropped" a property rather than
+an intention. `STORYBOARD_SLICE_REVEAL` cuts the same composition into five
+vertical slices revealed in sequence, for the one panel whose art already
+contains five disciplines. `MOTION_TREATMENT_CATALOGUE_VERSION` goes to 4.
+
+**Three additive plan flags, all defaulting to the previous behaviour.**
+`cta.renderEndCard` and `brandConstraints.showLogoOverlay` let a plan whose
+final panel already _is_ the end card stop the renderer drawing a second one
+over it; decoration `startOffsetSeconds`/`durationSeconds` let a decoration be
+an event rather than a state, which a tap indicator and a confirmation flash
+both need. Every plan written before this milestone renders identically.
+
+**Two factual corrections, made inside the panel.** The storyboard asserts an
+unverifiable event count and a prediction-locking behaviour nothing evidences.
+Both were corrected in the panel's own typography, changing only the
+unverifiable element: the count erased by per-row interpolation between
+ink-free anchor columns with the bell glyph re-seated, the pill rebuilt from
+its own rounded caps about the same centre and relabelled. The verifier refuses
+a declared correction whose corrected panel is byte-identical to the original.
+
+**Proven live.** An ffprobe-verified 1080×1920 h264/yuv420p MP4 at exactly
+15.000 s, AAC stereo at 48 kHz, faststart, actual-media QA `PASS` over 32
+binding checks, −13.5 LUFS with zero clipped samples. Ten scenes in the locked
+order on the locked slots. Storyboard-01 absent across all 19 staged files.
+
+**Proven with fixtures.** 35 contract tests: package verification and every way
+its rights can be overstated, reordering, slot drift, checksum mismatch, a
+correction that changed nothing, panel declarations, the committed plan's ten
+beats on the locked slots, fidelity pass and three failure modes, both panel
+treatments' containment and slice sequencing, and every promoting flag refused.
+
+**Not proven: creative quality, and the animation's sufficiency.** Every panel
+is a single still. The bell does not swing, the ranking rows do not reveal
+individually, the discussion feed does not scroll and the logo does not build.
+Each is recorded per scene in `asset-gap-report.json` as a remaining mismatch
+against the storyboard's own stated motion intent, with the production asset it
+would need.
+
 **Next milestone: AAMP-1 step 4 — `apps/worker` against a live Temporal server**
 (`docs/aamp-architecture.md` §6 task 6).
 

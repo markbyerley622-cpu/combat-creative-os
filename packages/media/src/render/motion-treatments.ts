@@ -43,13 +43,14 @@ import {
 
 /**
  * Bumped to 2 by the premium creative finishing milestone, which added the
- * five finishing decorations, and to 3 by the flagship milestone, which added
- * the two colour grades. A storyboard or provenance record saying
- * "catalogue v1" describes a catalogue that had seven fewer ways to treat a
+ * five finishing decorations, to 3 by the flagship milestone, which added the
+ * two colour grades, and to 4 by the locked-storyboard proof, which added the
+ * two panel treatments. A storyboard or provenance record saying
+ * "catalogue v1" describes a catalogue that had nine fewer ways to treat a
  * frame; leaving the number behind would make two different catalogues
  * indistinguishable in the artefacts that cite them.
  */
-export const MOTION_TREATMENT_CATALOGUE_VERSION = 3 as const;
+export const MOTION_TREATMENT_CATALOGUE_VERSION = 4 as const;
 
 export class MotionTreatmentError extends Error {
   constructor(message: string) {
@@ -92,6 +93,16 @@ export const SCENE_TREATMENT_KEYS = [
   'IMPACT_FREEZE',
   /** A decaying white lift over the first fraction of a second. */
   'IMPACT_FLASH',
+  /**
+   * A landscape storyboard panel contained at full width over a blurred
+   * backplate built from its own pixels, with a bounded push. Stills only.
+   */
+  'STORYBOARD_PANEL_2_5D',
+  /**
+   * The same composition, with the panel revealed as five vertical slices in
+   * rhythmic sequence. Stills only.
+   */
+  'STORYBOARD_SLICE_REVEAL',
 ] as const;
 export type SceneTreatmentKey = (typeof SCENE_TREATMENT_KEYS)[number];
 
@@ -454,6 +465,19 @@ const SCENE_TREATMENTS: Readonly<Record<SceneTreatmentKey, SceneTreatmentDefinit
         extra: impactFreezeSteps(input.intensity, input.durationSeconds, input.frameRate),
       }),
   },
+  STORYBOARD_PANEL_2_5D: {
+    key: 'STORYBOARD_PANEL_2_5D',
+    summary:
+      'landscape panel contained at full width over a blurred backplate, with a bounded push',
+    accepts: ['IMAGE'],
+    compile: storyboardPanelGraph,
+  },
+  STORYBOARD_SLICE_REVEAL: {
+    key: 'STORYBOARD_SLICE_REVEAL',
+    summary: 'panel revealed as five vertical slices in sequence, over the same backplate',
+    accepts: ['IMAGE'],
+    compile: storyboardSliceRevealGraph,
+  },
   IMPACT_FLASH: {
     key: 'IMPACT_FLASH',
     summary: 'decaying white lift over the first tenth of a second',
@@ -517,6 +541,127 @@ export function compileSceneTreatment(
     graph: definition.compile(input),
     description: definition.summary,
   };
+}
+
+/**
+ * How much of the frame width a contained storyboard panel occupies, and how
+ * far it may push.
+ *
+ * A storyboard panel is landscape and the delivery frame is 9:16, so a `COVER`
+ * treatment would crop away most of a composition that is the whole point of a
+ * locked-storyboard proof. These two treatments contain the panel instead, at
+ * full width, over a backplate built from the panel's own pixels.
+ *
+ * The push is deliberately small and the panel deliberately under full width,
+ * because the product of the two must stay below 1.0: a panel that grows past
+ * the frame edge is a composition being cropped, which is the one thing this
+ * milestone may not do.
+ */
+const PANEL_WIDTH_FRACTION = 0.96;
+const PANEL_MAX_PUSH = 0.035;
+
+function panelBackplate(input: SceneTreatmentCompileInput, tag: string): string {
+  const backWidth = evenPx(input.widthPx * 1.5);
+  const backHeight = evenPx(input.heightPx * 1.5);
+  const frames = Math.max(1, Math.round(input.durationSeconds * input.frameRate));
+  const lastFrame = Math.max(1, frames - 1);
+  return [
+    `[${input.inputLabel}]fps=${num(input.frameRate)}`,
+    `scale=${num(backWidth)}:${num(backHeight)}:force_original_aspect_ratio=increase`,
+    `crop=${num(backWidth)}:${num(backHeight)}`,
+    // Blurred and darkened enough that it reads as atmosphere rather than as a
+    // second picture, but not crushed to black: a landscape panel in a 9:16
+    // frame leaves more than half the frame to the backplate, and a black one
+    // makes the result look letterboxed rather than composed.
+    'gblur=sigma=52:steps=3',
+    'eq=brightness=-0.26:saturation=0.72:contrast=1.06',
+    `zoompan=z='1+${num(0.06 + 0.05 * input.intensity)}*on/${num(lastFrame)}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=1:s=${num(input.widthPx)}x${num(input.heightPx)}:fps=${num(input.frameRate)}`,
+    'setsar=1',
+    `trim=duration=${num(input.durationSeconds)}`,
+    'setpts=PTS-STARTPTS',
+    `format=yuv420p[${tag}back]`,
+  ].join(',');
+}
+
+/** The push applied to the finished composite, and the tail that normalises it. */
+function panelPush(input: SceneTreatmentCompileInput, fromLabel: string): string {
+  const frames = Math.max(1, Math.round(input.durationSeconds * input.frameRate));
+  const lastFrame = Math.max(1, frames - 1);
+  const push = PANEL_MAX_PUSH * input.intensity;
+  return [
+    `[${fromLabel}]zoompan=z='1+${num(push)}*on/${num(lastFrame)}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=1:s=${num(input.widthPx)}x${num(input.heightPx)}:fps=${num(input.frameRate)}`,
+    ...normalisingTail(input.durationSeconds),
+  ].join(',');
+}
+
+function storyboardPanelGraph(input: SceneTreatmentCompileInput): string {
+  const tag = input.scopeTag;
+  const foreWidth = evenPx(input.widthPx * PANEL_WIDTH_FRACTION);
+  const back = panelBackplate(input, tag);
+  const fore = [
+    `[${input.inputLabel}]fps=${num(input.frameRate)}`,
+    `scale=${num(foreWidth)}:-2:flags=lanczos`,
+    // A restrained sharpen after the scale, which recovers edge definition the
+    // resample softened. It does not add detail that was not there, and the
+    // provenance record says so.
+    'unsharp=5:5:0.55:5:5:0.0',
+    `trim=duration=${num(input.durationSeconds)}`,
+    'setpts=PTS-STARTPTS',
+    `format=yuv420p[${tag}fore]`,
+  ].join(',');
+  const composite = `[${tag}back][${tag}fore]overlay=x='(W-w)/2':y='(H-h)/2':format=auto[${tag}comp]`;
+  return (
+    [back, fore, composite, panelPush(input, `${tag}comp`)].join(';') + `[${input.outputLabel}]`
+  );
+}
+
+/** How many vertical slices the reveal cuts a panel into. */
+const PANEL_SLICE_COUNT = 5;
+
+function storyboardSliceRevealGraph(input: SceneTreatmentCompileInput): string {
+  const tag = input.scopeTag;
+  const foreWidth = evenPx(input.widthPx * PANEL_WIDTH_FRACTION);
+  const back = panelBackplate(input, tag);
+
+  // The slices land across the first 60% of the scene, so the last one is
+  // established well before the panel's own headline has to be read.
+  const revealWindow = input.durationSeconds * 0.6;
+  const step = revealWindow / PANEL_SLICE_COUNT;
+
+  const fore = [
+    `[${input.inputLabel}]fps=${num(input.frameRate)}`,
+    `scale=${num(foreWidth)}:-2:flags=lanczos`,
+    'unsharp=5:5:0.55:5:5:0.0',
+    `trim=duration=${num(input.durationSeconds)}`,
+    'setpts=PTS-STARTPTS',
+    `format=yuv420p,split=${PANEL_SLICE_COUNT}${Array.from(
+      { length: PANEL_SLICE_COUNT },
+      (_unused, index) => `[${tag}s${index}]`,
+    ).join('')}`,
+  ].join(',');
+
+  const crops = Array.from(
+    { length: PANEL_SLICE_COUNT },
+    (_unused, index) =>
+      `[${tag}s${index}]crop=iw/${PANEL_SLICE_COUNT}:ih:iw*${index}/${PANEL_SLICE_COUNT}:0[${tag}c${index}]`,
+  );
+
+  // `w` is the slice's own width, so the row stays centred without this filter
+  // ever needing to know the panel's source aspect ratio.
+  const overlays = Array.from({ length: PANEL_SLICE_COUNT }, (_unused, index) => {
+    const from = index === 0 ? `${tag}back` : `${tag}o${index - 1}`;
+    const to = index === PANEL_SLICE_COUNT - 1 ? `${tag}comp` : `${tag}o${index}`;
+    const at = num(step * index);
+    return (
+      `[${from}][${tag}c${index}]overlay=x='(W-${PANEL_SLICE_COUNT}*w)/2+${index}*w':y='(H-h)/2':` +
+      `enable='gte(t,${at})':format=auto[${to}]`
+    );
+  });
+
+  return (
+    [back, fore, ...crops, ...overlays, panelPush(input, `${tag}comp`)].join(';') +
+    `[${input.outputLabel}]`
+  );
 }
 
 // ---------------------------------------------------------------------------

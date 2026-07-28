@@ -218,6 +218,70 @@ number, and the master is blocked from any agency-grade claim by its temporary
 audio alone. See the "Flagship advertisement" rules below and
 `docs/runbooks/flagship-advertisement.md`.
 
+**The locked ten-panel storyboard motion proof is done** — `pnpm aamp:flagship2`
+animates an operator-supplied storyboard into one 15-second master through the
+same composition root, and proves scene by scene that it executed the storyboard
+rather than reinterpreting it. **Proven live:** an ffprobe-verified 1080x1920
+h264/yuv420p MP4 at exactly 15.000 s, AAC stereo 48 kHz, faststart, QA `PASS`
+over 32 binding checks at -13.5 LUFS with zero clipped samples; ten scenes in the
+locked order on the locked slots with no gap; every scene rendering its own
+panel; both factual corrections applied inside the panel's own typography; and
+Storyboard-01 proven absent by checksum across all 19 staged files. **Proven with
+fixtures:** 35 contract tests covering package verification, every way its rights
+can be overstated, reordering, slot drift, panel declarations, fidelity pass and
+its failure modes, both panel treatments, and every promoting flag refused.
+**Not proven:** creative quality, and the animation's sufficiency — every panel
+is a single still, so the bell does not swing, the ranking rows do not reveal
+individually and the logo does not build. See the "Locked-storyboard proof" rules
+below and `docs/runbooks/locked-storyboard-motion-proof.md`.
+
+## Locked-storyboard proof — permanent rules
+
+- **Storyboard-01 and Storyboard-02 have opposite rights positions, and they get
+  separate parsers.** `REFERENCE_ONLY` means its pixels may never be rendered and
+  `reference-exclusion.ts` proves it by checksum. `STORYBOARD_INTERNAL_REVIEW_ONLY`
+  means the panels _are_ the primary visual source. Never collapse the two into
+  one parser with a flag: that would put a switch between "these bytes may never
+  be rendered" and "these bytes are what we render".
+- **What replaces exclusion is declaration, and it never travels alone.** Every
+  panel asset carries `STORYBOARD_PANEL` provenance, "not licensed
+  public-production media", "every phone screen is concept UI declared
+  `PRODUCT_MOCKUP`" and "INTERNAL_REVIEW only" in its restrictions, and
+  `isPublicReleaseReady: false` in every artefact. A panel is `role: BRAND_CARD`,
+  never `APP_SCREENSHOT` — designed art is not a capture.
+- **The run proves Storyboard-01 is absent.** Every file in the staging root is
+  hashed against Storyboard-01's frame checksums before FFmpeg is invoked. "We
+  did not use it" is a claim; the hash is the evidence.
+- **The ten scenes, their roles and their slots are constants, not
+  configuration.** `LOCKED_SCENE_ROLES` and `LOCKED_SCENE_SLOTS` are checked
+  against the package, the plan and the finished cut. A reordered package, a
+  scene off its slot, a gap, or a beat bound to a panel that is not its own fails
+  the run.
+- **A correction changes only the unverifiable element.** Both were made inside
+  the panel in its own typography — the count erased by interpolation between
+  ink-free anchors with the bell re-seated, the pill rebuilt from its own rounded
+  caps about the same centre. A declared correction whose corrected panel is
+  byte-identical to the original is refused: a correction that changed nothing
+  did not happen.
+- **A contained panel may never be cropped.** The push is bounded so that the
+  panel's width fraction times the maximum push stays under 1.0. Widening either
+  without re-checking that product would start cropping the composition the
+  milestone exists to preserve.
+- **Deterministic upscaling is declared, never claimed as detail.** Panels are
+  staged at a 3x lanczos resample so they clear the asset root's minimum delivery
+  width — the guard is respected rather than relaxed — and
+  `panelPreparation.createsNewDetail: false` is written explicitly.
+- **The fidelity report is structural and scores nothing.** It measures scene
+  presence, order, timing, panel binding and headline integrity. It does not
+  score how good the animation is, because no measurement of that exists and an
+  invented number would be the one figure in the report nobody could check.
+- **The three new plan flags default to the old behaviour.**
+  `cta.renderEndCard`, `brandConstraints.showLogoOverlay` and the decoration
+  window fields are all opt-out or optional, so every plan written before this
+  milestone renders exactly as it did. Never change one of those defaults.
+- **Adding a panel treatment is a `MOTION_TREATMENT_CATALOGUE_VERSION` bump.**
+  It is 4 as of this milestone.
+
 **The next milestone is AAMP-1 step 4** — `apps/worker` against a live Temporal
 server (`docs/aamp-architecture.md` §6 task 6).
 

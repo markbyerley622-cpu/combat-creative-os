@@ -1,0 +1,289 @@
+{
+  "treatmentVersion": 1,
+  "campaignId": "e3b81f5a-9c47-4d02-b6a8-51fd7c204e93",
+  "storyboardId": "combat-reviews-flagship-storyboard-02",
+  "approvedBy": "Riki Taylor",
+  "approvedAt": "2026-07-29T00:00:00.000Z",
+  "storyboardFrameCount": 10,
+  "strategicIdea": "Combat Reviews turns a fan who finds out late into a fan with a record worth defending.",
+  "audienceTension": "A fan who follows more than one promotion is permanently half-informed and permanently late. The cards are on different nights and different broadcasters, the schedule lives in a group chat nobody maintains, and the opinion they had about a matchup never had anywhere to go before the result landed. The storyboard opens on exactly that: a person alone in the dark, finding out from a notification.",
+  "productMechanism": "Four real product surfaces in escalating order of commitment, in the order the storyboard locked them. Events answers what is on. Rankings answers who is good. The comparison answers how this one reads. The prediction asks for a decision and takes nothing for it. The record and the discussion are what bring the fan back, which is why the storyboard spends its last four seconds there rather than on the product screens.",
+  "emotionalProgression": [
+    "0.00-1.10 recognition, slightly stung: this happens to me",
+    "1.10-2.30 appetite: all of it, not one promotion",
+    "2.30-3.80 relief: it is already organised",
+    "3.80-5.10 curiosity: I can look this up",
+    "5.10-6.60 judgement: I have a view on this",
+    "6.60-8.00 agency: and it costs nothing to say so",
+    "8.00-8.90 commitment: it is in",
+    "8.90-10.70 vindication: I was right, and it counted",
+    "10.70-12.70 belonging: and there are people to argue with",
+    "12.70-15.00 resolve: one mark, one instruction, held"
+  ],
+  "cameraGrammar": "There is no camera in a storyboard, so the grammar is what the frame does to a fixed composition. Every panel is contained at full width over a backplate built from its own pixels and pushed by a bounded amount that can never crop it. Intensity is the whole vocabulary: hardest on the submission, strongest on the discovery parallax, almost nothing on the end card. No handheld, no simulated shake, no fake tracking - a poor track is not premium and this milestone does not pretend otherwise.",
+  "lightingAndColourGrammar": "The storyboard's own palette is the palette: near-black grounds, one saturated brand red, white condensed type. The backplate is blurred, darkened by a third and desaturated so it reads as atmosphere and never competes with the panel it sits behind. Panels are never graded or tinted, because a graded panel is a changed composition. Red is added in exactly four places: the notification ring, the tap, the submission flash and the call-to-action illumination.",
+  "motionGrammar": "Movement always points at the product and always decelerates into a screen that has to be read. The three scenes carrying an interface to be understood are the three slowest in the cut. One scene assembles rather than appears - the five discipline slices - and one scene is deliberately violent, the submission. Grain appears once, on the celebration. A light sweep appears once, on the discussion. Nothing is decorated twice.",
+  "transitionGrammar": [
+    {
+      "fromBeatId": "notification-hook",
+      "toBeatId": "combat-sport-breadth",
+      "family": "IMPACT_CUT",
+      "motivation": "The red pulse around the notification is still on screen when the flash fires, so the ring appears to expand outward and become the five discipline slices. The idea carried is scale: one alert becomes the whole sport."
+    },
+    {
+      "fromBeatId": "combat-sport-breadth",
+      "toBeatId": "event-discovery",
+      "family": "UI_TO_WORLD",
+      "motivation": "The slices collapse inward through a masked reveal that opens on the events interface, so the montage does not simply end - it resolves into the product that organises it."
+    },
+    {
+      "fromBeatId": "event-discovery",
+      "toBeatId": "rankings-research",
+      "family": "CAMERA_WIPE",
+      "motivation": "A whip carries the eye across from the events phone to the rankings phone, reading as the user swiping from one screen to the next rather than as an edit between two shots."
+    },
+    {
+      "fromBeatId": "rankings-research",
+      "toBeatId": "fighter-comparison",
+      "family": "GRAPHIC_MATCH",
+      "motivation": "The ranking rows dissolve into the comparison card: the same tabular data, restated as a head-to-head. A crossfade is the only transition that lets one set of numbers become another."
+    },
+    {
+      "fromBeatId": "fighter-comparison",
+      "toBeatId": "free-prediction",
+      "family": "UI_TO_WORLD",
+      "motivation": "A masked reveal opens on the prediction interface with the selected fighter already carried across from the comparison, so the decision arrives as a consequence of the research rather than as a new topic."
+    },
+    {
+      "fromBeatId": "free-prediction",
+      "toBeatId": "prediction-submitted",
+      "family": "IMPACT_CUT",
+      "motivation": "The tap triggers the cut. The flash lands on the finger contact and the bell strike is the first thing on the other side, so selection and confirmation read as one uninterrupted interaction."
+    },
+    {
+      "fromBeatId": "prediction-submitted",
+      "toBeatId": "predictor-status-reward",
+      "family": "SOUND_BRIDGE",
+      "motivation": "A hard cut under the tail of the confirmation hit and the rising crowd, so the red flash of the submission is what reveals the result. The picture changes before the sound does."
+    },
+    {
+      "fromBeatId": "predictor-status-reward",
+      "toBeatId": "community-discussion",
+      "family": "GRAPHIC_MATCH",
+      "motivation": "The celebration crossfades into the fans, holding the same warm key and the same phone-at-right composition, so the energy of the result flows straight into the argument about it."
+    },
+    {
+      "fromBeatId": "community-discussion",
+      "toBeatId": "brand-cta",
+      "family": "SOUND_BRIDGE",
+      "motivation": "A dip to black under the final riser. The discussion goes dark, the riser continues across the join, and the mark resolves out of the black already lit."
+    }
+  ],
+  "typographyGrammar": "Every headline in this cut is baked into the locked panel that carries it, in the storyboard's own condensed uppercase face with its red full stop. No caption track is rendered and no headline is re-typeset, because re-typesetting a locked headline is rewriting it. The two corrections that were required were made inside the panel, in its own typography, changing only the unverifiable element.",
+  "audioCueSheet": [
+    {
+      "moment": "OPENING_NOTIFICATION",
+      "atSeconds": 0.0,
+      "intent": "A low hit under the first frame and a notification pulse a tenth of a second later, so the cut starts on a physical event and the alert is heard before it is read.",
+      "suppliedBy": "sfx-impact and sfx-confirmation-pulse - TEMPORARY synthetic placeholders",
+      "isTemporary": true
+    },
+    {
+      "moment": "BREADTH_ACCELERATION",
+      "atSeconds": 1.13,
+      "intent": "A rhythmic impact on the first slice, carried by the bed through the remaining four.",
+      "suppliedBy": "sfx-impact - TEMPORARY synthetic placeholder",
+      "isTemporary": true
+    },
+    {
+      "moment": "PRODUCT_REVEAL",
+      "atSeconds": 2.64,
+      "intent": "Arena crowd texture enters under the scene and a confirmation pulse marks the interface settling.",
+      "suppliedBy": "sfx-crowd and sfx-confirmation-pulse - TEMPORARY synthetic placeholders",
+      "isTemporary": true
+    },
+    {
+      "moment": "FIGHT_IMPACT",
+      "atSeconds": 8.02,
+      "intent": "The hardest moment in the cut: a bell and an impact together on the submission, both ducking the bed.",
+      "suppliedBy": "sfx-fight-bell and sfx-impact - TEMPORARY synthetic placeholders",
+      "isTemporary": true
+    },
+    {
+      "moment": "PREDICTION_CONFIRMATION",
+      "atSeconds": 7.18,
+      "intent": "A selection click precisely on the finger contact, so the tap is heard where it is seen.",
+      "suppliedBy": "sfx-ui-click - TEMPORARY synthetic placeholder",
+      "isTemporary": true
+    },
+    {
+      "moment": "SOCIAL_REACTION_LIFT",
+      "atSeconds": 8.9,
+      "intent": "A crowd bed lifting under the result with a confirmation pulse on the record improving.",
+      "suppliedBy": "sfx-crowd and sfx-confirmation-pulse - TEMPORARY synthetic placeholders",
+      "isTemporary": true
+    },
+    {
+      "moment": "DISCUSSION_TRANSITION",
+      "atSeconds": 10.7,
+      "intent": "The crowd drops to a low room texture so the discussion scene is the quietest in the cut.",
+      "suppliedBy": "sfx-crowd - TEMPORARY synthetic placeholder",
+      "isTemporary": true
+    },
+    {
+      "moment": "CTA_RESOLVE",
+      "atSeconds": 12.92,
+      "intent": "A riser into the mark, ducking the bed, then a clean hold to the last frame.",
+      "suppliedBy": "sfx-cta-emphasis - TEMPORARY synthetic placeholder",
+      "isTemporary": true
+    }
+  ],
+  "productAttentionMap": [
+    {
+      "beatId": "notification-hook",
+      "focus": "The notification card, then the eyes above it",
+      "productVisible": true,
+      "comprehensionGoal": "Register that the product tells you what is on before you go looking"
+    },
+    {
+      "beatId": "combat-sport-breadth",
+      "focus": "Each discipline slice as it arrives, then the headline",
+      "productVisible": false,
+      "comprehensionGoal": "Register that this is every combat sport, not one promotion"
+    },
+    {
+      "beatId": "event-discovery",
+      "focus": "The events list inside the phone at left",
+      "productVisible": true,
+      "comprehensionGoal": "Understand that fights from every promotion are listed in one place"
+    },
+    {
+      "beatId": "rankings-research",
+      "focus": "The ordered ranking rows inside the phone at right",
+      "productVisible": true,
+      "comprehensionGoal": "Understand that the division can be researched inside the product"
+    },
+    {
+      "beatId": "fighter-comparison",
+      "focus": "The comparison card between the two fighters",
+      "productVisible": true,
+      "comprehensionGoal": "Understand that records and recent form are given for both fighters"
+    },
+    {
+      "beatId": "free-prediction",
+      "focus": "The selected fighter card, then the free-prediction button",
+      "productVisible": true,
+      "comprehensionGoal": "Understand that a prediction can be made and that it is free"
+    },
+    {
+      "beatId": "prediction-submitted",
+      "focus": "The bell, then the confirmation pill",
+      "productVisible": true,
+      "comprehensionGoal": "Register that the prediction went in"
+    },
+    {
+      "beatId": "predictor-status-reward",
+      "focus": "The result card and the rank movement beside the celebration",
+      "productVisible": true,
+      "comprehensionGoal": "Understand that correct predictions build a standing"
+    },
+    {
+      "beatId": "community-discussion",
+      "focus": "The discussion feed inside the phone at right",
+      "productVisible": true,
+      "comprehensionGoal": "Understand that the argument happens inside the product too"
+    },
+    {
+      "beatId": "brand-cta",
+      "focus": "The mark, then the headline, then the button",
+      "productVisible": true,
+      "comprehensionGoal": "Know the name and know exactly what to do next"
+    }
+  ],
+  "assetFeasibility": [
+    {
+      "beatId": "notification-hook",
+      "storyboardFrameId": "FRAME-01",
+      "requiredAsset": "Talent footage, phone-in-hand hero plate, notification card, red energy element",
+      "feasibility": "SUBSTITUTED",
+      "note": "The locked panel already carries all four elements in one composition. It is animated rather than re-shot: no talent plate, phone plate or notification graphic exists in any pack that would reproduce this frame. The unverifiable event count was removed from the panel itself."
+    },
+    {
+      "beatId": "combat-sport-breadth",
+      "storyboardFrameId": "FRAME-02",
+      "requiredAsset": "Five licensed discipline clips and slice divider graphics",
+      "feasibility": "SUBSTITUTED",
+      "note": "No licensed clip exists for any of the five disciplines. The panel's own five slices are revealed in sequence, which delivers the storyboard's rhythmic build from art that already has the five disciplines in it."
+    },
+    {
+      "beatId": "event-discovery",
+      "storyboardFrameId": "FRAME-03",
+      "requiredAsset": "Real Combat Reviews events capture composited into the storyboard phone, against an arena plate",
+      "feasibility": "SUBSTITUTED",
+      "note": "A real events capture exists but shows different events from the panel. Compositing it would preserve the phone geometry and contradict the frame around it, so the panel's concept UI is retained and declared PRODUCT_MOCKUP."
+    },
+    {
+      "beatId": "rankings-research",
+      "storyboardFrameId": "FRAME-04",
+      "requiredAsset": "Real Combat Reviews rankings capture composited into the storyboard phone",
+      "feasibility": "SUBSTITUTED",
+      "note": "No rankings capture exists. The available capture is the challenge leaderboard, which is a different screen, so substituting it would change what the scene claims. The panel's concept UI is retained and declared PRODUCT_MOCKUP."
+    },
+    {
+      "beatId": "fighter-comparison",
+      "storyboardFrameId": "FRAME-05",
+      "requiredAsset": "Licensed fighter portrait plates and a real comparison capture",
+      "feasibility": "SUBSTITUTED",
+      "note": "No fighter portrait plates and no comparison capture exist. The panel is animated as composed."
+    },
+    {
+      "beatId": "free-prediction",
+      "storyboardFrameId": "FRAME-06",
+      "requiredAsset": "Real prediction capture, hand plate, selection glow and tap indicator",
+      "feasibility": "SUBSTITUTED",
+      "note": "No prediction capture and no hand plate exist. The panel already contains the selected state and the reaching finger; the tap indicator and its sound are added on the frame the finger arrives."
+    },
+    {
+      "beatId": "prediction-submitted",
+      "storyboardFrameId": "FRAME-07",
+      "requiredAsset": "Licensed bell or fight-start plate with a confirmation pill",
+      "feasibility": "SUBSTITUTED",
+      "note": "No bell or fight-start plate exists. The panel is animated with a hard push and a red confirmation flash. The pill's label was corrected because no evidence shows the product locks a prediction at submission."
+    },
+    {
+      "beatId": "predictor-status-reward",
+      "storyboardFrameId": "FRAME-08",
+      "requiredAsset": "Licensed celebration plate and a real predictor status capture",
+      "feasibility": "SUBSTITUTED",
+      "note": "No celebration plate and no predictor status capture exist. The rank movement in the panel is illustrative concept UI and is declared as such rather than presented as product data."
+    },
+    {
+      "beatId": "community-discussion",
+      "storyboardFrameId": "FRAME-09",
+      "requiredAsset": "Fan reaction plate and a sanitised real discussion capture",
+      "feasibility": "SUBSTITUTED",
+      "note": "No fan reaction plate exists, and the live discussion screen returns an unavailable state to the read-only capture path. The panel's concept UI is retained and declared PRODUCT_MOCKUP; its handles and comments are fictional and are never presented as real."
+    },
+    {
+      "beatId": "brand-cta",
+      "storyboardFrameId": "FRAME-10",
+      "requiredAsset": "Real logo lockup, real events capture and a CTA button graphic",
+      "feasibility": "SUBSTITUTED",
+      "note": "The panel carries the mark, the headline, the phone and the button in the locked end-card composition. It is animated to settle and hold rather than rebuilt from separate assets. No store badge appears, because no verified public listing exists."
+    }
+  ],
+  "prohibitedImplications": [
+    "That Combat Reviews is a betting product, or that anything in the cut is a wager",
+    "That any event, fighter, record, ranking or predictor rank shown in a panel is real product data",
+    "That any phone screen in this cut is a live capture of the product",
+    "That a prediction is locked or immutable once submitted",
+    "That the storyboard imagery is licensed public-production media",
+    "That any person shown in a panel endorses Combat Reviews",
+    "That the application is downloadable from a public app store",
+    "That this cut is finished, agency-grade or approved for publication",
+    "That the temporary synthetic audio represents the intended sound design",
+    "That deterministic upscaling of a panel created visual detail that was not in it"
+  ],
+  "benchmarkEvidenceReferences": [],
+  "originalityStatement": "Every frame in this cut originates in a storyboard the operator supplied and authorised for internal review. No agency, studio, director or existing campaign was named, referenced or imitated at any point, and the plan carries that prohibition explicitly because in this execution mode there is no prompt to carry it. The animation grammar - a contained panel over a backplate built from its own pixels, a bounded push that cannot crop, a sequential slice reveal, a timed confirmation flash - is general craft grammar rather than the signature of any particular piece of work. The deterministic originality gate runs on the projected plan before any source is selected, and a HIGH verdict stops the run before a frame is encoded."
+}

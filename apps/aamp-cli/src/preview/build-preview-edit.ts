@@ -172,21 +172,27 @@ export function buildPreviewEdit(options: BuildPreviewEditOptions): PreviewEdit 
     }
 
     const beatStart = starts[index] ?? 0;
-    const decorations = beat.decorations.map((decoration, decorationIndex) => ({
-      id: `${beat.id}-dec-${decorationIndex}`,
-      key: decoration.key,
-      colorHex: decoration.colour === 'PRIMARY' ? primaryColour : accentColour,
-      opacity: decoration.opacity,
-      xPx: decoration.xPx,
-      yPx: decoration.yPx,
-      widthPx: decoration.widthPx,
-      heightPx: decoration.heightPx,
-      thicknessPx: decoration.thicknessPx,
-      startSeconds: beatStart,
-      endSeconds: Number(
-        Math.min(beatStart + beat.durationSeconds, plan.targetDurationSeconds).toFixed(6),
-      ),
-    }));
+    const beatEnd = Math.min(beatStart + beat.durationSeconds, plan.targetDurationSeconds);
+    const decorations = beat.decorations.map((decoration, decorationIndex) => {
+      const from = beatStart + (decoration.startOffsetSeconds ?? 0);
+      const to =
+        decoration.durationSeconds === undefined
+          ? beatEnd
+          : Math.min(from + decoration.durationSeconds, plan.targetDurationSeconds);
+      return {
+        id: `${beat.id}-dec-${decorationIndex}`,
+        key: decoration.key,
+        colorHex: decoration.colour === 'PRIMARY' ? primaryColour : accentColour,
+        opacity: decoration.opacity,
+        xPx: decoration.xPx,
+        yPx: decoration.yPx,
+        widthPx: decoration.widthPx,
+        heightPx: decoration.heightPx,
+        thicknessPx: decoration.thicknessPx,
+        startSeconds: Number(Math.min(from, beatEnd).toFixed(6)),
+        endSeconds: Number(Math.max(Math.min(to, beatEnd), from + 1 / 30).toFixed(6)),
+      };
+    });
 
     return {
       id: beat.id,
@@ -282,30 +288,38 @@ export function buildPreviewEdit(options: BuildPreviewEditOptions): PreviewEdit 
           },
         }
       : {}),
-    branding: {
-      logoSourceId: logo.asset.id,
-      anchor: 'TOP_CENTER' as const,
-      offsetXPx: 0,
-      // Inside the declared top safe area, so the logo never collides with a
-      // platform's own overlaid UI.
-      offsetYPx: Math.max(48, Math.round(plan.brandConstraints.safeAreaTopPx / 2)),
-      widthPx: 300,
-      opacity: 0.92,
-      windows: plan.brandConstraints.logoWindows,
-    },
-    cta: {
-      headline: plan.cta.headline,
-      ...(plan.cta.subline ? { subline: plan.cta.subline } : {}),
-      startSeconds: ctaStartSeconds,
-      endSeconds: plan.targetDurationSeconds,
-      backgroundHex: primaryColour,
-      headlineColorHex: '#FFFFFF',
-      sublineColorHex: accentColour,
-      logoSourceId: logo.asset.id,
-      logoWidthPx: 420,
-      entrance: plan.cta.entrance,
-      holdSeconds: plan.cta.holdSeconds,
-    },
+    ...(plan.brandConstraints.showLogoOverlay
+      ? {
+          branding: {
+            logoSourceId: logo.asset.id,
+            anchor: 'TOP_CENTER' as const,
+            offsetXPx: 0,
+            // Inside the declared top safe area, so the logo never collides
+            // with a platform's own overlaid UI.
+            offsetYPx: Math.max(48, Math.round(plan.brandConstraints.safeAreaTopPx / 2)),
+            widthPx: 300,
+            opacity: 0.92,
+            windows: plan.brandConstraints.logoWindows,
+          },
+        }
+      : {}),
+    ...(plan.cta.renderEndCard
+      ? {
+          cta: {
+            headline: plan.cta.headline,
+            ...(plan.cta.subline ? { subline: plan.cta.subline } : {}),
+            startSeconds: ctaStartSeconds,
+            endSeconds: plan.targetDurationSeconds,
+            backgroundHex: primaryColour,
+            headlineColorHex: '#FFFFFF',
+            sublineColorHex: accentColour,
+            logoSourceId: logo.asset.id,
+            logoWidthPx: 420,
+            entrance: plan.cta.entrance,
+            holdSeconds: plan.cta.holdSeconds,
+          },
+        }
+      : {}),
     ...(hasAudio
       ? {
           audio: {

@@ -1,0 +1,83 @@
+{
+  "requestVersion": 1,
+  "name": "combat-reviews-flagship-02",
+  "workspaceId": "6f1d5f6c-6d3a-4a2e-9c5f-0f2a1b3c4d5e",
+  "campaignId": "e3b81f5a-9c47-4d02-b6a8-51fd7c204e93",
+  "brandName": "Combat Reviews",
+  "promptFile": "./campaign-prompt.txt",
+  "objective": "Animate the locked ten-panel storyboard into one 15-second internal-review motion proof that preserves its scene order, compositions, headlines and call to action exactly",
+  "targetAudience": "Combat sports fans aged 18-34 who follow more than one promotion and argue about results after every card",
+  "platform": "TIKTOK",
+  "targetDurationSeconds": 15,
+  "productFacts": [
+    {
+      "id": "coverage",
+      "label": "Coverage",
+      "detail": "Combat Reviews lists events across multiple combat-sports promotions in one app."
+    },
+    {
+      "id": "events-screen",
+      "label": "Events screen",
+      "detail": "The events screen shows upcoming fights with predictions, full cards, venues, broadcasters and live countdowns."
+    },
+    {
+      "id": "rankings",
+      "label": "Rankings",
+      "detail": "The product carries fighter rankings alongside the community challenge leaderboard."
+    },
+    {
+      "id": "predictions",
+      "label": "Predictions",
+      "detail": "Points are earned from correct predictions in the CombatReviews Challenge, ranked on a leaderboard by prediction accuracy."
+    },
+    {
+      "id": "free",
+      "label": "Free to predict",
+      "detail": "Making a prediction costs nothing. The CombatReviews Challenge is skill, not betting, and takes no stakes."
+    },
+    {
+      "id": "discussion",
+      "label": "Discussion",
+      "detail": "Each event carries a card-talk discussion region where fans talk about the card."
+    },
+    {
+      "id": "web-product",
+      "label": "How it is opened",
+      "detail": "Combat Reviews is reached on the web. There is no verified public App Store or Google Play listing, so no store badge and no download promise may appear."
+    },
+    {
+      "id": "no-lock",
+      "label": "Prediction state",
+      "detail": "No available evidence shows the product locks a prediction at submission, so the cut says only that a prediction was submitted."
+    }
+  ],
+  "eventFacts": [],
+  "keyMessages": [
+    "Every fight, from every combat sport, in one place",
+    "Research the division, read the matchup, then make a free prediction",
+    "Correct predictions build a record, and the argument carries on afterwards"
+  ],
+  "mandatories": [
+    "Follow the locked ten-panel storyboard exactly",
+    "End on NEVER MISS FIGHT NIGHT. and EXPLORE EVENTS",
+    "Never imply a betting product",
+    "Declare every concept screen as PRODUCT_MOCKUP"
+  ],
+  "cta": {
+    "headline": "NEVER MISS FIGHT NIGHT.",
+    "subline": "EXPLORE EVENTS",
+    "durationSeconds": 2.3
+  },
+  "brandKit": {
+    "logoAssetId": "logo-primary",
+    "primaryColorHex": "#08080C",
+    "accentColorHex": "#DA0318",
+    "captionFontFamily": "Arial",
+    "safeAreaTopPx": 220,
+    "safeAreaBottomPx": 420
+  },
+  "generation": {
+    "source": "SOURCE_ONLY",
+    "generatedShotCount": 0
+  }
+}

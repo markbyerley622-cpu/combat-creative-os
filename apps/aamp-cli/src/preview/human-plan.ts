@@ -152,6 +152,17 @@ export const PlanDecorationSchema = z
     widthPx: z.number().int().positive().max(1080),
     heightPx: z.number().int().positive().max(1920),
     thicknessPx: z.number().int().min(1).max(40).default(6),
+    /**
+     * When the decoration appears, measured from the start of its beat, and how
+     * long it lasts. Absent means the whole beat, which is the existing
+     * behaviour and stays the default.
+     *
+     * Needed because some decorations are events rather than states: a tap
+     * indicator that sits on screen for the whole shot is not a tap, and a
+     * confirmation flash that lasts a second and a half is not a flash.
+     */
+    startOffsetSeconds: z.number().min(0).max(60).optional(),
+    durationSeconds: z.number().positive().max(60).optional(),
   })
   .strict();
 
@@ -201,6 +212,15 @@ export const PlanCtaSchema = z
     /** How long of that it must sit fully settled. QA measures this. */
     holdSeconds: z.number().min(0).max(10),
     entrance: z.enum(CTA_ENTRANCE_KEYS).default('RISE_AND_SCALE'),
+    /**
+     * Whether the renderer draws its own full-bleed end card.
+     *
+     * True, and unchanged, for every plan that has one. False for a plan whose
+     * final beat already *is* the end card — a locked storyboard panel carrying
+     * the mark, the headline and the button. Drawing a second card over it
+     * would hide the art direction the plan exists to execute.
+     */
+    renderEndCard: z.boolean().default(true),
   })
   .strict();
 
@@ -251,6 +271,14 @@ export const PlanBrandConstraintsSchema = z
       )
       .max(16)
       .default([]),
+    /**
+     * Whether the mark is overlaid at all.
+     *
+     * `logoWindows` can narrow when it appears but cannot say "never", because
+     * an empty array already means "the whole cut". A plan whose panels carry
+     * their own branding needs to say never, and this is how it says it.
+     */
+    showLogoOverlay: z.boolean().default(true),
   })
   .strict();
 

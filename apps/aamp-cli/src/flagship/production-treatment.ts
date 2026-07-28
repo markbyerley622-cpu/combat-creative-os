@@ -65,7 +65,7 @@ export const AudioCueSheetEntrySchema = z
 export const BeatFeasibilitySchema = z
   .object({
     beatId: NonEmpty(60),
-    storyboardFrameId: z.string().regex(/^FRAME-0[1-8]$/),
+    storyboardFrameId: z.string().regex(/^FRAME-(0[1-9]|10)$/),
     /** What the storyboard asked for. */
     requiredAsset: NonEmpty(400),
     /** What exists, and whether it is the thing that was asked for. */
@@ -91,6 +91,16 @@ export const ProductionTreatmentSchema = z
     storyboardId: NonEmpty(120),
     approvedBy: NonEmpty(200),
     approvedAt: z.string().datetime({ offset: true }).or(z.string().datetime()),
+    /**
+     * How many storyboard panels this treatment has to answer for.
+     *
+     * Defaults to eight, which is what every treatment written before the
+     * locked ten-panel storyboard existed declares by omission. A treatment
+     * that says ten must answer for ten: the completeness check below reads
+     * this rather than a constant, so a longer storyboard cannot quietly pass
+     * with two panels nobody decided about.
+     */
+    storyboardFrameCount: z.number().int().min(1).max(24).default(8),
 
     /** One sentence. If it needs two, the idea is not finished. */
     strategicIdea: z.string().min(1).max(300),
@@ -101,12 +111,12 @@ export const ProductionTreatmentSchema = z
     cameraGrammar: NonEmpty(1200),
     lightingAndColourGrammar: NonEmpty(1200),
     motionGrammar: NonEmpty(1200),
-    transitionGrammar: z.array(TransitionMotivationSchema).min(1).max(16),
+    transitionGrammar: z.array(TransitionMotivationSchema).min(1).max(24),
     typographyGrammar: NonEmpty(1200),
 
     audioCueSheet: z.array(AudioCueSheetEntrySchema).min(1).max(16),
-    productAttentionMap: z.array(ProductAttentionEntrySchema).min(1).max(16),
-    assetFeasibility: z.array(BeatFeasibilitySchema).min(1).max(16),
+    productAttentionMap: z.array(ProductAttentionEntrySchema).min(1).max(24),
+    assetFeasibility: z.array(BeatFeasibilitySchema).min(1).max(24),
 
     /** What this cut must never be read as saying. */
     prohibitedImplications: z.array(NonEmpty(400)).min(1).max(24),
@@ -137,8 +147,8 @@ export const ProductionTreatmentSchema = z
     // Every one of the eight storyboard frames needs a feasibility answer. A
     // beat with no answer is one nobody decided about.
     const frames = new Set(treatment.assetFeasibility.map((entry) => entry.storyboardFrameId));
-    for (let index = 1; index <= 8; index += 1) {
-      const frameId = `FRAME-0${index}`;
+    for (let index = 1; index <= treatment.storyboardFrameCount; index += 1) {
+      const frameId = `FRAME-${String(index).padStart(2, '0')}`;
       if (!frames.has(frameId)) {
         addIssue(
           `no asset feasibility entry for ${frameId}; every storyboard frame needs an answer, including "OMITTED"`,

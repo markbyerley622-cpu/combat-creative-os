@@ -1,0 +1,74 @@
+{
+  "scenes": {
+    "NOTIFICATION_HOOK": {
+      "compositionNote": "Panel contained at full width; face, phone and notification card all preserved, nothing cropped.",
+      "animationPerformed": "slow cinematic push toward the face and phone, with a brand-red accent ring pulsing once around the notification card from 0.24s for 0.46s, synchronised to the notification cue",
+      "remainingMismatch": "The storyboard's converging red radial energy around the device is delivered as a single rectangular accent ring rather than as concentric radial energy; no radial-energy primitive exists in the catalogue.",
+      "productScreenSource": "PRODUCT_MOCKUP",
+      "missingProductionAsset": "A live-action talent plate with a phone in hand under red rim light, plus a real notification-card graphic."
+    },
+    "COMBAT_SPORT_BREADTH": {
+      "compositionNote": "Panel contained at full width; all five discipline slices and the centred headline preserved.",
+      "animationPerformed": "the panel's own five vertical slices revealed left to right across the first 60% of the scene, so the row assembles rhythmically and the headline resolves with the final slice",
+      "remainingMismatch": "The slices are revealed rather than moving footage; each is a still, because no licensed clip exists for any of the five disciplines.",
+      "productScreenSource": "NONE",
+      "missingProductionAsset": "Five licensed discipline clips: boxing, MMA, Muay Thai, kickboxing and grappling."
+    },
+    "EVENT_DISCOVERY": {
+      "compositionNote": "Panel contained at full width; phone left, arena right, two-line headline all preserved.",
+      "animationPerformed": "parallax depth between the backplate and the contained panel, with a focus dim isolating the events interface from 0.42s for 0.85s so the screen stays the thing being read",
+      "remainingMismatch": "Foreground phone, arena and background are separated into two planes rather than three, because the panel is a single flattened image and no per-element mattes exist.",
+      "productScreenSource": "PRODUCT_MOCKUP",
+      "missingProductionAsset": "A real Combat Reviews events capture matching this panel's event list, and an arena plate."
+    },
+    "RANKINGS_RESEARCH": {
+      "compositionNote": "Panel contained at full width; headline left, rankings phone right, ordered list preserved.",
+      "animationPerformed": "restrained push settling on the rankings phone, with a focus dim isolating the ordered list from 0.30s for 0.75s so the motion reads as research",
+      "remainingMismatch": "The ranking rows do not reveal individually; they are baked into the panel, and row-level animation would require the rows as separate assets.",
+      "productScreenSource": "PRODUCT_MOCKUP",
+      "missingProductionAsset": "A real Combat Reviews fighter-rankings capture. The available capture is the challenge leaderboard, which is a different screen."
+    },
+    "FIGHTER_COMPARISON": {
+      "compositionNote": "Panel contained at full width; symmetrical face-off and centred comparison card preserved.",
+      "animationPerformed": "steady push drawing both fighters and the comparison card toward the viewer, holding the symmetry the panel composed",
+      "remainingMismatch": "The two fighters push together with the whole frame rather than toward one another, and the records and recent-form markers do not reveal progressively; both would need the fighters and the card as separate layers.",
+      "productScreenSource": "PRODUCT_MOCKUP",
+      "missingProductionAsset": "Licensed fighter portrait plates and a real comparison capture."
+    },
+    "FREE_PREDICTION": {
+      "compositionNote": "Panel contained at full width; headline left, prediction phone right, selected card, check and reaching finger preserved.",
+      "animationPerformed": "deliberately restrained push so the interface stays legible, with a tap indicator landing on the free-prediction button at 0.54s for 0.38s, synchronised to the selection click",
+      "remainingMismatch": "The selection state is already resolved in the panel, so the card glow and the button depression cannot animate from unselected to selected; the tap indicator and its sound carry the interaction instead.",
+      "productScreenSource": "PRODUCT_MOCKUP",
+      "missingProductionAsset": "A real Combat Reviews prediction capture in both unselected and selected states, and a hand plate."
+    },
+    "PREDICTION_SUBMITTED": {
+      "compositionNote": "Panel contained at full width; bell, both fighters, referee and the confirmation pill preserved. The pill's label was corrected in the panel's own design.",
+      "animationPerformed": "hardest push in the cut, entered on an impact cut, with a full-frame brand-red confirmation flash for the first 0.20s landing on the bell and impact cues together",
+      "remainingMismatch": "The bell does not swing and the strike does not land; the panel is a single frame, so the impact is carried by the flash, the push and the audio rather than by movement in the image.",
+      "productScreenSource": "PRODUCT_MOCKUP",
+      "missingProductionAsset": "A licensed bell or fight-start plate with real movement."
+    },
+    "PREDICTOR_STATUS_REWARD": {
+      "compositionNote": "Panel contained at full width; celebration left, result card with the tick and the rank movement right, headline preserved.",
+      "animationPerformed": "push lifting with the celebration, with film grain across the frame for crowd energy and no treatment over the result card so the record improvement stays readable",
+      "remainingMismatch": "The rank movement is static in the panel rather than counting up, and no particles rise; both would need the card as a separate animated layer.",
+      "productScreenSource": "PRODUCT_MOCKUP",
+      "missingProductionAsset": "A licensed celebration plate and a real predictor-status capture. The rank movement shown is illustrative concept UI."
+    },
+    "COMMUNITY_DISCUSSION": {
+      "compositionNote": "Panel contained at full width; two fans left, discussion phone right, threaded feed and headline preserved.",
+      "animationPerformed": "slowest move in the cut so the feed can be read, with a single light sweep across the lower frame from 0.50s for 0.90s to keep the shot alive",
+      "remainingMismatch": "The discussion feed does not scroll and the reaction counts do not tick; the feed is baked into the panel. The handles and comments visible are fictional concept UI and are declared as such.",
+      "productScreenSource": "PRODUCT_MOCKUP",
+      "missingProductionAsset": "A fan reaction plate and a sanitised real discussion capture. The live discussion screen returns an unavailable state to the read-only capture path."
+    },
+    "BRAND_CTA": {
+      "compositionNote": "Panel contained at full width; mark, wordmark, headline, phone and the call-to-action button all preserved in the locked end-card composition.",
+      "animationPerformed": "almost imperceptible push entered on a dip to black so the card settles early, with the call-to-action button illuminated once from 0.50s for 0.42s and a clean stable hold across the final second",
+      "remainingMismatch": "The logo does not build; it is present from the first frame of the scene, because the mark is baked into the panel rather than supplied as a separate lockup.",
+      "productScreenSource": "PRODUCT_MOCKUP",
+      "missingProductionAsset": "A real Combat Reviews logo lockup as a separate asset, and a real events capture, so the end card could build rather than resolve."
+    }
+  }
+}

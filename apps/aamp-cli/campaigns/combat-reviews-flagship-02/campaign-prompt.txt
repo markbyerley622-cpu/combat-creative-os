@@ -1,0 +1,26 @@
+Combat Reviews flagship advertisement, locked ten-panel storyboard.
+
+The storyboard is the art direction. It is not a suggestion and it is not a
+starting point: its scene order, compositions, headlines, palette, phone
+placement, combat-to-product relationship, call to action and energy are all
+locked. This cut animates it and improves it. It does not reinterpret it.
+
+Ten scenes, fifteen seconds, no gaps: a push notification lands, the breadth of
+the sport opens up, the events interface arrives, the rankings are researched,
+two fighters are compared, a free prediction is made, the prediction is
+submitted on a bell, the predictor's record improves, the fans argue, and the
+brand resolves on one instruction.
+
+Constraints that are not negotiable:
+
+- Do not reorder, combine, remove or reinterpret a scene.
+- Do not replace a storyboard scene with unrelated footage because that footage
+  happens to be available.
+- Say nothing the product cannot back. Where the storyboard asserts something
+  unverifiable, change only that element and leave the scene alone.
+- Every phone screen in the storyboard is concept UI. Declare it as such.
+- No store badges, no download promise, no invented performance claim.
+- End on: NEVER MISS FIGHT NIGHT. / EXPLORE EVENTS.
+
+This is an internal-review motion proof. It is not licensed public-production
+media and it is not public-release ready.
