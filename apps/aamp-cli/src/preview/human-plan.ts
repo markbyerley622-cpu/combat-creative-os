@@ -4,6 +4,7 @@ import {
   CAPTION_ENTRANCE_KEYS,
   CTA_ENTRANCE_KEYS,
   DECORATION_TREATMENT_KEYS,
+  GRADE_TREATMENT_KEYS,
   SCENE_TREATMENT_KEYS,
   TRANSITION_TREATMENT_KEYS,
 } from '@combat/media';
@@ -110,6 +111,19 @@ export const PlanMotionSchema = z
   })
   .strict();
 
+/**
+ * Optional, and deliberately so: a product screen is usually left ungraded,
+ * because legibility of the real interface outranks palette unity. Absent
+ * means "this shot is shown as it was captured", which is a decision worth
+ * being able to make explicitly.
+ */
+export const PlanGradeSchema = z
+  .object({
+    key: z.enum(GRADE_TREATMENT_KEYS),
+    intensity: z.number().min(0).max(1).default(0.5),
+  })
+  .strict();
+
 export const PlanTransitionSchema = z
   .object({
     kind: z.enum(TRANSITION_TREATMENT_KEYS),
@@ -166,6 +180,8 @@ export const PlanBeatSchema = z
     durationSeconds: z.number().positive().max(60),
     source: PlanSourceSelectorSchema,
     motion: PlanMotionSchema,
+    /** Colour grade over the motion treatment. Absent leaves the shot as captured. */
+    grade: PlanGradeSchema.optional(),
     /** Absent on the first beat; required on every later one. */
     transitionIn: PlanTransitionSchema.optional(),
     caption: PlanCaptionSchema.optional(),
@@ -211,6 +227,30 @@ export const PlanBrandConstraintsSchema = z
     captionFontFamily: z.string().min(1).max(80),
     safeAreaTopPx: z.number().int().min(0).max(600),
     safeAreaBottomPx: z.number().int().min(0).max(900),
+    /**
+     * When the mark is on screen. Absent, or empty, keeps the existing
+     * behaviour: the whole cut.
+     *
+     * Worth being able to say, because a persistent mark over a product
+     * screenshot obscures the interface's own header — the corner of the
+     * screen a real app puts its own identity in. The end card carries the
+     * mark regardless, so dropping it across the product beats costs no brand
+     * presence and buys back the one part of the frame a viewer is reading.
+     */
+    logoWindows: z
+      .array(
+        z
+          .object({
+            startSeconds: z.number().min(0).max(120),
+            endSeconds: z.number().positive().max(120),
+          })
+          .strict()
+          .refine((window) => window.endSeconds > window.startSeconds, {
+            message: 'a logo window must end after it starts',
+          }),
+      )
+      .max(16)
+      .default([]),
   })
   .strict();
 

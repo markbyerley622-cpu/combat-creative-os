@@ -199,6 +199,7 @@ export function buildPreviewEdit(options: BuildPreviewEditOptions): PreviewEdit 
       // v1's `motion` stays at its default; the treatment supersedes it and is
       // the field a reader should look at.
       treatment: { key: beat.motion.treatment, intensity: beat.motion.intensity },
+      ...(beat.grade ? { grade: { key: beat.grade.key, intensity: beat.grade.intensity } } : {}),
       ...(decorations.length > 0 ? { decorations } : {}),
       ...(beat.transitionIn
         ? {
@@ -290,7 +291,7 @@ export function buildPreviewEdit(options: BuildPreviewEditOptions): PreviewEdit 
       offsetYPx: Math.max(48, Math.round(plan.brandConstraints.safeAreaTopPx / 2)),
       widthPx: 300,
       opacity: 0.92,
-      windows: [],
+      windows: plan.brandConstraints.logoWindows,
     },
     cta: {
       headline: plan.cta.headline,

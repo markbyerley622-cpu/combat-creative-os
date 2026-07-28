@@ -201,8 +201,89 @@ wrote, and nothing here has finished a master from a real campaign run. See the
 "Creative finishing" rules below and
 `docs/runbooks/premium-creative-finishing.md`.
 
+**The storyboard-driven flagship advertisement is done** — `pnpm aamp:flagship`
+turns the verified eight-panel storyboard, the real Combat Reviews material and
+an authored plan into one master through the existing preview path, unchanged.
+**Proven live, against real FFmpeg and the operator's real packs:** an
+ffprobe-verified 1080×1920 h264/yuv420p MP4 at exactly 15.000 s with AAC stereo
+at 48 kHz and QA `PASS`; eight beats landing exactly on the storyboard's eight
+slots; four real product screens on screen; every storyboard frame absent from
+the output by checksum **and** by path, proven before the render over the
+staging root and again after it over the render manifest; the corrected CTA;
+and byte-identical re-rendering. **Proven with fixtures, no Desktop and no
+network:** 63 contract tests plus a 9-test acceptance suite that runs with
+`REASONING_PROVIDER=claude` and no API key. **Not proven:** creative quality —
+seven of the ten scorecard dimensions carry `HUMAN_JUDGEMENT_REQUIRED` and no
+number, and the master is blocked from any agency-grade claim by its temporary
+audio alone. See the "Flagship advertisement" rules below and
+`docs/runbooks/flagship-advertisement.md`.
+
 **The next milestone is AAMP-1 step 4** — `apps/worker` against a live Temporal
 server (`docs/aamp-architecture.md` §6 task 6).
+
+## Flagship advertisement — permanent rules
+
+- **The storyboard is REFERENCE_ONLY, and that is proven twice, by content and
+  by location.** A package edited to say `outputEligible: true` — at package
+  level or on one frame — is refused by name, not silently downgraded. Every
+  file in the staging root is hashed against every storyboard checksum
+  **before** FFmpeg is invoked, and every manifest source is **re-hashed from
+  disk** afterwards rather than trusted from its `expectedChecksum`, because
+  the manifest is the thing being checked. A violation always throws; there is
+  no mode in which a run continues having failed to show reference material
+  stayed out.
+- **The prohibited-claim gate refuses, it never rewrites.** Deleting "12" and
+  rendering "FIGHT EVENTS THIS WEEKEND" would be application code editing the
+  advertisement's copy. Every rule names the claim it protects against and what
+  to write instead, because a refusal an author cannot argue with is one they
+  work around. It walks **authored strings only** — a real capture showing real
+  fighters is the product being honest about itself.
+- **No store badge and no download promise**, because no verified public
+  listing exists. The approved CTA is `NEVER MISS FIGHT NIGHT.` /
+  `OPEN COMBAT REVIEWS` / "Every combat sport. One place."
+- **The labels are constants, not options.** There is no `--execution-mode`, no
+  `--allow-paid-providers` and no `--output-use` on this path, and an
+  unrecognised flag is refused by name. Nothing here constructs or can import a
+  reasoning provider, a generation provider or a database client; the
+  acceptance suite runs where a campaign run exits 3.
+- **A mockup is honest by what it does not contain.** The discussion
+  `PRODUCT_MOCKUP` carries **no text at all** — no handle, comment, count,
+  timestamp or topic — so it cannot fabricate user-generated content however
+  its JSON describes it. Its only non-geometric element is the real `OWNED`
+  mark. It is `role: BRAND_CARD`, never `APP_SCREENSHOT`: calling a designed
+  graphic a screenshot would make the vocabulary itself say something untrue.
+- **External packs are read-only, always.** Selected media is _copied_ into a
+  staging root the run owns and the copy's checksum is re-computed and compared
+  before it stands. Staging is idempotent by content, so a second run copies
+  nothing. Never write, rename, move or delete inside a pack, and never
+  hardcode a pack path into application logic.
+- **Do not declare an asset missing until every pack has been checked.**
+  Discovery is exhaustive and the reconciliation table records what was passed
+  over as well as what won — a table of winners with no losers is not an
+  explanation. An absent pack is a recorded finding, not an error.
+- **Substitutions are authored, never inferred.** What a beat could not have
+  and why the thing it got is honest instead is a creative judgement;
+  `asset-substitutions.json` holds it in the author's own words and application
+  code only records it.
+- **Product screens are never graded.** Legibility of the real interface
+  outranks palette unity, and a tinted screenshot misrepresents the product.
+  Footage is graded so eight separately-shot licensed plates read as one film.
+- **`AGENCY_GRADE` is unreachable by construction.** Seven of the ten scorecard
+  dimensions, worth 73 of 100 points, carry `HUMAN_JUDGEMENT_REQUIRED` and
+  `awardedPoints: null` — not 0, because a zero is a judgement too and nobody
+  made it. The best a run reaches is `AWAITING_HUMAN_CRAFT_REVIEW`. Temporary
+  audio scores **0 of 7** rather than partial credit and blocks the gate on its
+  own: synthetic `lavfi` tones are not a mix, and a partial score would make the
+  number mean the opposite of what a reader assumes.
+- **Adding or changing a grade is a `MOTION_TREATMENT_CATALOGUE_VERSION`
+  bump.** It is 3 as of this milestone. Grades are a separate family from scene
+  treatments because grading is orthogonal to movement; folding them together
+  would multiply every key by every grade and leave the first unenumerated
+  combination ungraded.
+- **CI never reads the operator's Desktop.** Every contract is proven against
+  fixtures and temporary directories; the acceptance suite builds its own
+  storyboard, library and plan, needs a real FFmpeg, and skips **loudly**
+  without one.
 
 ## Creative finishing — permanent rules
 

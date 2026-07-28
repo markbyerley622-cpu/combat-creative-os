@@ -3400,6 +3400,91 @@ produce one, and the tests are not an exception. Nothing here has finished a
 master produced by a real campaign run either: the example round finishes a
 preview built from synthetic `lavfi` media.
 
+**Next milestone: the storyboard-driven flagship advertisement.**
+
+### Storyboard-driven flagship advertisement (2026-07-28)
+
+A **vertical production** milestone, not an infrastructure one: one visible,
+zero-paid-provider, 15-second Combat Reviews advertisement driven by the
+completed eight-panel storyboard. Runbook:
+`docs/runbooks/flagship-advertisement.md`.
+
+**Composition over construction.** `pnpm aamp:flagship`
+(`apps/aamp-cli/src/flagship/`) is an orchestration. Everything that makes the
+advertisement — asset preflight, rights enforcement, deterministic segment
+selection, the motion catalogue, the filter graph, actual-media QA — is the
+existing zero-cost footage-first preview, called unchanged. What the milestone
+adds is the storyboard contract around it: verify the reference package, hold
+the copy to what can be verified, reconcile before selecting, prove nothing
+reference-shaped can reach the encoder, and score the result honestly.
+
+**One new media primitive, and one small additive plan field.**
+`MOTION_TREATMENT_CATALOGUE_VERSION` goes to 3 with a `GRADE` family of two
+entries (`BRAND_NOIR`, `BRAND_EMBER`). Grades are a separate family from scene
+treatments because grading is orthogonal to movement — the same palette
+correction has to be available on a push-in, a parallax and a static hold, and
+folding them together would multiply every key by every grade. `scenes[].grade`
+is a strictly additive v2 field that `manifestVersion: 1` refuses by name. The
+plan also gained optional `brandConstraints.logoWindows`, so the mark can come
+off screen while a product screenshot is being read; absent keeps the previous
+whole-cut behaviour. Product screens are deliberately left ungraded: legibility
+of the real interface outranks palette unity.
+
+**Reference exclusion is proven twice, by content and by location.** The
+package's `REFERENCE_ONLY` declaration is a promise, so the milestone also
+takes evidence. Before the render, every file in the staging root — the only
+media root the renderer may read — is hashed against every storyboard checksum,
+so a reference frame could not enter the output even through a manifest defect.
+After the render, every manifest source is re-hashed from disk rather than
+trusted from its `expectedChecksum`, because the manifest is the thing being
+checked. Both proofs land in `reference-exclusion-proof.json`; a violation
+throws in every case.
+
+**Factual corrections are refusals, not rewrites.** The storyboard's panels
+carry placeholder data and say so in their own
+`factualClaimsRequiringValidation`. `factual-sanitisation.ts` turns that list
+into a closed rule set over authored strings, each rule naming what it protects
+against and what to write instead. Removed from the cut: the event count, the
+invented promotion and fighters, the fabricated vote totals and split, the
+countdown, both store badges, the download promise, the invented handles and
+the fictional schedule. The approved call to action is `NEVER MISS FIGHT
+NIGHT.` / `OPEN COMBAT REVIEWS` / "Every combat sport. One place."
+
+**The discussion beat is a declared `PRODUCT_MOCKUP`.** The live discussion
+screen returns an unavailable state to the read-only capture path, so no usable
+capture exists. The mockup is geometry in the brand's colours plus the real
+`OWNED` mark, and carries **no text at all** — so it cannot fabricate
+user-generated content however its JSON describes it. It is `role: BRAND_CARD`,
+never `APP_SCREENSHOT`.
+
+**External packs stayed read-only.** Selected media is copied into a staging
+root the run owns, with the copy's checksum recomputed and compared before it
+stands; staging is idempotent by content, so a second run copies nothing.
+Reconciliation is exhaustive across every declared pack and records what was
+passed over as well as what won — an absent pack is a finding, not an error.
+
+**Proven live, against real FFmpeg 8.1.2 and the operator's real packs.** An
+ffprobe-verified 1080×1920 h264/yuv420p MP4 at exactly 15.000 s, AAC stereo at
+48 kHz, faststart, actual-media QA `PASS`. Eight beats landing exactly on the
+storyboard's eight slots. Four real Combat Reviews product screens on screen.
+Every storyboard frame absent from the output by checksum and by path. The
+corrected CTA. Byte-identical re-rendering from identical inputs.
+
+**Proven with fixtures, no Desktop and no network.** 63 contract tests
+(storyboard integrity and tampering, prohibited claims, storyboard conformance,
+reference exclusion both ways, reconciliation and staging, mockup geometry, the
+scorecard, and every promoting flag refused) plus a 9-test acceptance suite
+that builds its own storyboard, library and plan, runs with
+`REASONING_PROVIDER=claude` and no API key, and skips loudly with no FFmpeg.
+
+**Not proven: creative quality.** Seven of the ten scorecard dimensions, worth
+73 of 100 points, carry `HUMAN_JUDGEMENT_REQUIRED` and `awardedPoints: null` —
+not 0, because a zero is a judgement too and nobody made it. `AGENCY_GRADE` is
+unreachable from this path by construction, and the master is blocked from any
+such claim by its temporary audio alone: no real music or sound-effect file
+exists in any available pack, so `MUSIC_SOUND_DESIGN` scores 0 of 7 rather than
+partial credit.
+
 **Next milestone: AAMP-1 step 4 — `apps/worker` against a live Temporal server**
 (`docs/aamp-architecture.md` §6 task 6).
 

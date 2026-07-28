@@ -5,9 +5,11 @@ import {
   captionEntranceOverride,
   catalogueInventory,
   compileDecorationTreatment,
+  compileSceneGrade,
   compileSceneTreatment,
   compileTransitionTreatment,
   ctaEntranceOverride,
+  GRADE_TREATMENT_KEYS,
   MOTION_TREATMENT_CATALOGUE_VERSION,
   MotionTreatmentError,
   SCENE_TREATMENT_KEYS,
@@ -477,5 +479,92 @@ describe('motion-treatment catalogue — typography', () => {
   it('refuses an unknown entrance rather than silently rendering static type', () => {
     expect(() => captionEntranceOverride('SPIN' as 'FADE', anchor)).toThrow(MotionTreatmentError);
     expect(() => ctaEntranceOverride('SPIN' as 'FADE_HOLD', anchor)).toThrow(MotionTreatmentError);
+  });
+});
+
+describe('colour grades', () => {
+  it('wires the chain from the label it was given to the label it was asked for', () => {
+    const compiled = compileSceneGrade('BRAND_NOIR', {
+      inputLabel: 'g3',
+      outputLabel: 'v3',
+      intensity: 0.5,
+    });
+    expect(compiled.graph.startsWith('[g3]')).toBe(true);
+    expect(compiled.graph.endsWith('[v3]')).toBe(true);
+    expect(compiled.family).toBe('GRADE');
+    expect(compiled.catalogueVersion).toBe(MOTION_TREATMENT_CATALOGUE_VERSION);
+  });
+
+  it('leaves the picture alone at zero intensity', () => {
+    const compiled = compileSceneGrade('BRAND_NOIR', {
+      inputLabel: 'a',
+      outputLabel: 'b',
+      intensity: 0,
+    });
+    expect(compiled.graph).toContain('contrast=1');
+    expect(compiled.graph).toContain('saturation=1');
+    expect(compiled.graph).toContain('gamma=1');
+  });
+
+  it('tints only in BRAND_EMBER — BRAND_NOIR unifies without moving a hue', () => {
+    const noir = compileSceneGrade('BRAND_NOIR', {
+      inputLabel: 'a',
+      outputLabel: 'b',
+      intensity: 1,
+    });
+    const ember = compileSceneGrade('BRAND_EMBER', {
+      inputLabel: 'a',
+      outputLabel: 'b',
+      intensity: 1,
+    });
+    expect(noir.graph).not.toContain('colorbalance');
+    expect(ember.graph).toContain('colorbalance');
+  });
+
+  it('keeps the red lift out of the highlights, so a grade never becomes a cast', () => {
+    const ember = compileSceneGrade('BRAND_EMBER', {
+      inputLabel: 'a',
+      outputLabel: 'b',
+      intensity: 1,
+    });
+    // Shadows (`rs`) and midtones (`rm`) only. A highlight term would be `rh`.
+    expect(ember.graph).toMatch(/colorbalance=rs=[^:]+:rm=[^:]+:bs=[^:]+:bm=[^:\]]+/);
+    expect(ember.graph).not.toContain('rh=');
+  });
+
+  it('is deterministic — the same input compiles to byte-identical grammar', () => {
+    const once = compileSceneGrade('BRAND_EMBER', {
+      inputLabel: 'g0',
+      outputLabel: 'v0',
+      intensity: 0.62,
+    });
+    const twice = compileSceneGrade('BRAND_EMBER', {
+      inputLabel: 'g0',
+      outputLabel: 'v0',
+      intensity: 0.62,
+    });
+    expect(once.graph).toBe(twice.graph);
+  });
+
+  it('refuses an unknown grade rather than passing the picture through ungraded', () => {
+    expect(() =>
+      compileSceneGrade('SEPIA' as 'BRAND_NOIR', {
+        inputLabel: 'a',
+        outputLabel: 'b',
+        intensity: 0.5,
+      }),
+    ).toThrow(MotionTreatmentError);
+  });
+
+  it('refuses an out-of-range intensity', () => {
+    for (const intensity of [-0.1, 1.4, Number.NaN]) {
+      expect(() =>
+        compileSceneGrade('BRAND_NOIR', { inputLabel: 'a', outputLabel: 'b', intensity }),
+      ).toThrow(MotionTreatmentError);
+    }
+  });
+
+  it('lists the grade family in the catalogue inventory', () => {
+    expect(catalogueInventory().GRADE).toEqual(GRADE_TREATMENT_KEYS);
   });
 });

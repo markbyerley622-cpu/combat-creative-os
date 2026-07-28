@@ -375,3 +375,43 @@ describe('render manifest — validation', () => {
     expect(parsed.overlays).toEqual([]);
   });
 });
+
+describe('render manifest — the v2 colour grade', () => {
+  it('refuses a grade on a v1 manifest by name', async () => {
+    const error = expectRejected(
+      await fixtureWith((m) => {
+        m.manifestVersion = 1;
+        m.scenes[0].grade = { key: 'BRAND_NOIR', intensity: 0.5 };
+      }),
+    );
+    expect((error as ManifestValidationError).message).toContain('scene.grade');
+  });
+
+  it('accepts a grade on a v2 manifest and defaults its intensity', async () => {
+    const manifest = parseRenderManifest(
+      await fixtureWith((m) => {
+        m.manifestVersion = 2;
+        m.scenes[0].grade = { key: 'BRAND_EMBER' };
+      }),
+    );
+    expect(manifest.scenes[0]?.grade).toEqual({ key: 'BRAND_EMBER', intensity: 0.5 });
+  });
+
+  it('leaves an ungraded scene ungraded rather than defaulting one in', async () => {
+    const manifest = parseRenderManifest(
+      await fixtureWith((m) => {
+        m.manifestVersion = 2;
+      }),
+    );
+    expect(manifest.scenes[0]?.grade).toBeUndefined();
+  });
+
+  it('refuses a grade key the catalogue does not have', async () => {
+    expectRejected(
+      await fixtureWith((m) => {
+        m.manifestVersion = 2;
+        m.scenes[0].grade = { key: 'SEPIA' };
+      }),
+    );
+  });
+});

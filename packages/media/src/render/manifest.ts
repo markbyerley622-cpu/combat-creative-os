@@ -4,6 +4,7 @@ import {
   CAPTION_ENTRANCE_KEYS,
   CTA_ENTRANCE_KEYS,
   DECORATION_TREATMENT_KEYS,
+  GRADE_TREATMENT_KEYS,
   SCENE_TREATMENT_KEYS,
   sceneTreatmentAccepts,
 } from './motion-treatments';
@@ -187,6 +188,27 @@ export const SceneTreatmentSchema = z
   .strict();
 export type SceneTreatment = z.infer<typeof SceneTreatmentSchema>;
 
+export const GradeKeySchema = z.enum(GRADE_TREATMENT_KEYS);
+export type GradeKeyValue = z.infer<typeof GradeKeySchema>;
+
+/**
+ * **v2 only.** A colour grade laid over whatever motion treatment produced the
+ * scene.
+ *
+ * Separate from `treatment` because grading is orthogonal to movement: the
+ * same palette correction has to be available on a push-in, a parallax and a
+ * static hold. Folding it into the scene treatment vocabulary would multiply
+ * every key by every grade and leave the first unenumerated combination
+ * ungraded.
+ */
+export const SceneGradeSchema = z
+  .object({
+    key: GradeKeySchema,
+    intensity: z.number().min(0).max(1).default(0.5),
+  })
+  .strict();
+export type SceneGrade = z.infer<typeof SceneGradeSchema>;
+
 export const DecorationKeySchema = z.enum(DECORATION_TREATMENT_KEYS);
 
 /**
@@ -231,6 +253,8 @@ export const SceneSchema = z
     motionIntensity: z.number().min(0).max(1).default(0.5),
     /** **v2 only.** Catalogue treatment; supersedes `motion` when present. */
     treatment: SceneTreatmentSchema.optional(),
+    /** **v2 only.** Colour grade, applied after the motion treatment. */
+    grade: SceneGradeSchema.optional(),
     /** **v2 only.** Brand-colour callouts and accent outlines over this scene. */
     decorations: z.array(SceneDecorationSchema).optional(),
     /** Absent on the first scene; required on every later one. */
@@ -578,6 +602,7 @@ export const RenderManifestSchema = RenderManifestObjectSchema.superRefine((mani
     };
     manifest.scenes.forEach((scene, index) => {
       if (scene.treatment) requiresV2('scene.treatment', ['scenes', index, 'treatment']);
+      if (scene.grade) requiresV2('scene.grade', ['scenes', index, 'grade']);
       if (scene.decorations) requiresV2('scene.decorations', ['scenes', index, 'decorations']);
     });
     if (manifest.captions?.entrance) {

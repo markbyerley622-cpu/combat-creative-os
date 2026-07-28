@@ -11,6 +11,7 @@ import {
 } from './manifest';
 import {
   compileDecorationTreatment,
+  compileSceneGrade,
   compileSceneTreatment,
   compileTransitionTreatment,
   ctaEntranceOverride,
@@ -92,6 +93,8 @@ export interface AppliedTreatment {
   readonly description: string;
   readonly transitionKey: string | null;
   readonly decorationKeys: readonly string[];
+  /** Null when the scene was left ungraded — a product screen usually is. */
+  readonly gradeKey: string | null;
 }
 
 export interface RenderPlan {
@@ -166,7 +169,12 @@ interface SceneChainInput {
  */
 function buildSceneChain(input: SceneChainInput): {
   readonly graph: string;
-  readonly applied: { key: string; intensity: number; description: string };
+  readonly applied: {
+    key: string;
+    intensity: number;
+    description: string;
+    gradeKey: string | null;
+  };
 } {
   const { scene, inputIndex, frameRate, widthPx, heightPx } = input;
   const key: SceneTreatmentKeyValue = scene.treatment
@@ -174,9 +182,14 @@ function buildSceneChain(input: SceneChainInput): {
     : V1_MOTION_TO_TREATMENT[scene.motion];
   const intensity = scene.treatment ? scene.treatment.intensity : scene.motionIntensity;
 
+  // With a grade the treatment lands on an intermediate label and the grade
+  // carries it the rest of the way, so every downstream stage still reads
+  // `v{index}` and knows nothing about whether a grade ran.
+  const treatmentOutput = scene.grade ? `g${inputIndex}` : `v${inputIndex}`;
+
   const compiled = compileSceneTreatment(key, {
     inputLabel: `${inputIndex}:v`,
-    outputLabel: `v${inputIndex}`,
+    outputLabel: treatmentOutput,
     scopeTag: `t${inputIndex}`,
     intensity,
     durationSeconds: scene.durationSeconds,
@@ -187,9 +200,22 @@ function buildSceneChain(input: SceneChainInput): {
     framing: scene.framing,
   });
 
+  const graded = scene.grade
+    ? compileSceneGrade(scene.grade.key, {
+        inputLabel: treatmentOutput,
+        outputLabel: `v${inputIndex}`,
+        intensity: scene.grade.intensity,
+      })
+    : null;
+
   return {
-    graph: compiled.graph,
-    applied: { key, intensity, description: compiled.description },
+    graph: graded ? `${compiled.graph};${graded.graph}` : compiled.graph,
+    applied: {
+      key,
+      intensity,
+      description: graded ? `${compiled.description}, ${graded.description}` : compiled.description,
+      gradeKey: scene.grade ? scene.grade.key : null,
+    },
   };
 }
 
@@ -344,6 +370,7 @@ export function buildRenderPlan(input: BuildRenderPlanInput): RenderPlan {
       description: chain.applied.description,
       transitionKey: scene.transitionIn?.kind ?? null,
       decorationKeys: (scene.decorations ?? []).map((decoration) => decoration.key),
+      gradeKey: chain.applied.gradeKey,
     });
 
     const overlap = scene.transitionIn?.durationSeconds ?? 0;

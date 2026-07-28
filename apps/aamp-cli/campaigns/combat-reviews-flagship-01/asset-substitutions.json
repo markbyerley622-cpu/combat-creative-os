@@ -1,0 +1,83 @@
+{
+  "note": "What each beat could not have, and why what it got is honest instead. Authored, not inferred: application code records these, it does not write them.",
+  "substitutions": [
+    {
+      "beatId": "hook-missed-it",
+      "requiredAsset": "Cinematic person-with-phone hook plus real notification-style graphic: talent footage, phone-in-hand hero shot, notification card, red energy VFX",
+      "substitutionReason": "No talent plate exists in any pack. All three phone-in-hand clips are lit against white, grey or green backgrounds and would open the cut on a low-contrast frame that breaks the black-and-red system on frame one. The red-bokeh plate is the only asset that delivers the storyboard's actual requirement — immediate red on black — from the footage rather than from graphics, so the hook is carried by tension and palette instead of by a person.",
+      "factualLimitations": [
+        "No notification card is rendered: a push notification would imply a notification capability nobody has verified",
+        "No event count appears, because '12 fight events this weekend' is placeholder data"
+      ],
+      "unresolvedGap": null
+    },
+    {
+      "beatId": "breadth-the-sport",
+      "requiredAsset": "Rapid combat montage across five disciplines with labelled clip cards: MMA, Muay Thai, boxing, kickboxing, BJJ",
+      "substitutionReason": "No licensed clip exists for four of the five disciplines, and labelling one clip 'MUAY THAI' when it shows boxing gloves would be a fabricated claim about coverage. Breadth is carried instead by the app's own words — 'every card that matters' is on the real events screen — over a single on-palette combat object.",
+      "factualLimitations": [
+        "The cut never names the five disciplines, because the product's per-discipline coverage has not been verified asset by asset"
+      ],
+      "unresolvedGap": "A five-discipline montage needs five licensed clips that do not exist in any pack"
+    },
+    {
+      "beatId": "product-events",
+      "requiredAsset": "Real Combat Reviews event or fight-card capture inside a premium phone treatment",
+      "substitutionReason": null,
+      "factualLimitations": [
+        "The capture shows real public fighters and real news items; that is the product being itself, but name and likeness clearance would be required before any paid media use"
+      ],
+      "unresolvedGap": null
+    },
+    {
+      "beatId": "impact-lock-your-pick",
+      "requiredAsset": "Licensed high-impact combat footage with an arena crowd plate and a red edge-glow outline on the struck fighter",
+      "substitutionReason": "No arena plate exists and no rotoscoped edge-glow can be produced from this footage without a mask nobody has. The gym sparring clip carries real contact with faces obscured by headgear, which is both the strongest impact available and the lowest-risk. The red energy is delivered by the grade rather than by an outline that would have to be faked.",
+      "factualLimitations": [
+        "'LOCK YOUR PICK.' is campaign copy over footage, never a UI label, so it cannot be read as a product state that does not exist",
+        "No arena, no promotion and no bout is implied"
+      ],
+      "unresolvedGap": null
+    },
+    {
+      "beatId": "prediction-interface",
+      "requiredAsset": "Real Combat Reviews prediction capture with focus region, tap indicator and confirmation treatment",
+      "substitutionReason": null,
+      "factualLimitations": [
+        "The prediction split shown is the product's own real data, framed by the capture; no percentage, vote total or countdown is typeset by this cut",
+        "The capture includes real fighter names, so clearance would be required before paid media use"
+      ],
+      "unresolvedGap": null
+    },
+    {
+      "beatId": "leaderboard-rank",
+      "requiredAsset": "Three-person reaction footage in a bar or living-room setting, phone insert and prediction callout badge",
+      "substitutionReason": "No reaction footage of any kind exists in any pack, and fabricating people celebrating a result the cut cannot verify would be the single most dishonest thing available. The social payoff is delivered product-led instead: the real leaderboard already turns a private prediction into a public standing, and its identities are redacted at capture.",
+      "factualLimitations": [
+        "No result is implied, and no person is shown reacting to one",
+        "Leaderboard identities are redacted in the capture, so no handle or account is visible"
+      ],
+      "unresolvedGap": "A reaction plate would need a shoot or a licensed clip; neither exists"
+    },
+    {
+      "beatId": "discussion-mockup",
+      "requiredAsset": "Safe Combat Reviews discussion capture, or an explicitly approved product mockup",
+      "substitutionReason": "The live discussion screen returns an 'unavailable' state to the read-only capture path, so no usable real capture exists. A declared PRODUCT_MOCKUP is used: geometry in the brand's colours plus the real owned mark, carrying no handles, no comments, no counts, no timestamps and no text at all.",
+      "factualLimitations": [
+        "The mockup is not a capture and no artefact says otherwise",
+        "It shows the shape of the discussion interface, not its content, because inventing content would be fabricating user-generated material"
+      ],
+      "unresolvedGap": "A real read-only discussion capture requires the discussion screen to be reachable and populated"
+    },
+    {
+      "beatId": "cta-open-combat-reviews",
+      "requiredAsset": "Real logo lockup, real home-screen capture, CTA button graphic, verified store badges",
+      "substitutionReason": "No verified public App Store or Google Play listing exists, so both badges and the 'DOWNLOAD FREE' promise are removed rather than reproduced. The CTA is the truthful web instruction over the designed end card carrying the real mark.",
+      "factualLimitations": [
+        "No store badge and no download promise appears anywhere in the cut",
+        "No upcoming-event dates, times or engagement counts are typeset, because all of the storyboard's were fictional"
+      ],
+      "unresolvedGap": null
+    }
+  ]
+}

@@ -1,0 +1,469 @@
+{
+  "planVersion": 1,
+  "workspaceId": "6f1d5f6c-6d3a-4a2e-9c5f-0f2a1b3c4d5e",
+  "campaignId": "c4a7e1d2-3b58-4f6a-9e21-7d05c8b3f419",
+  "authoredBy": "Riki Taylor (creative decisions), executed deterministically by the AAMP flagship pipeline",
+  "authoredAt": "2026-07-28T00:00:00.000Z",
+  "campaignPromptSha256": "2b4424353615c2cc5dc0aea56c50995ecf485e1e09cca28c10faa2118539f6fe",
+  "targetDurationSeconds": 15,
+  "strategy": {
+    "audienceName": "Multi-promotion combat sports fans, 18-34",
+    "painPoints": [
+      "The cards they care about sit across different promotions, broadcasters and time zones",
+      "The schedule lives in a group chat nobody maintains, so they find out after the fact",
+      "Having an opinion about a fight and having nowhere to put it before the result lands"
+    ],
+    "positioning": "The one place the whole of combat sports is already organised: what is on, who is fighting, what the room thinks, and where you rank once it is over.",
+    "targetAudienceSummary": "Combat sports fans aged 18-34 who follow more than one promotion and argue about results after every card",
+    "keyMessages": [
+      "Every card that matters, in one place",
+      "Predict before the first bell, then see where you rank",
+      "The discussion is part of the product, not an afterthought"
+    ],
+    "toneGuidelines": [
+      "Certain, never shouty — the product does the talking",
+      "Fight-night late-night, not broadcast-graphics bright",
+      "Red is a signal, not a wash"
+    ]
+  },
+  "creativeDirection": {
+    "logline": "The missed start becomes the reason to open it, and the product answers in four escalating moves.",
+    "visualDirection": "Black base, crushed shadows, one saturated red. Footage graded into a single palette so eight separately-shot plates read as one film; product screens left ungraded because legibility outranks palette unity. Movement is always toward the product: a slow push on the hook, a controlled ramp through the sport, then bezelled phone compositions that hold still long enough to be read. Type is one uppercase display voice, bottom-anchored inside the safe area, never crossing an interface. Glow is reserved for the accent, and the accent is reserved for the two moments that matter — the prediction and the call to action.",
+    "narrativeArc": "Tension first: you missed it again. Then breadth, so the fix is not one promotion. Then the real events screen, which is the first honest proof. Then a landed strike, which is the reason anyone cared in the first place, resolving straight into the real prediction interface. Then the leaderboard, which turns a private opinion into a public position. Then the discussion, which is where the argument goes. Then the mark, and one true instruction.",
+    "referenceNotes": [
+      "Pacing accelerates through the middle and decelerates hard into the CTA hold",
+      "Each product beat holds long enough that a viewer could actually read one line",
+      "Every transition is motivated: impact, match or interface reveal, never a template wipe"
+    ]
+  },
+  "hook": {
+    "strategy": "Open on the tension rather than the product. A near-black frame with one red source and a line that names the failure the audience already has.",
+    "latencySeconds": 0.4,
+    "onScreenLine": "YOU MISSED IT AGAIN."
+  },
+  "beats": [
+    {
+      "id": "hook-missed-it",
+      "index": 0,
+      "role": "HOOK",
+      "description": "Near-black plate, red light drifting behind rain. Slow push in. The line lands almost immediately and names the failure before anything is sold.",
+      "durationSeconds": 1.2,
+      "source": {
+        "assetId": "clip-red-bokeh",
+        "requiredTags": [],
+        "inSeconds": 12.6
+      },
+      "motion": {
+        "treatment": "PUSH_IN",
+        "intensity": 0.55
+      },
+      "grade": {
+        "key": "BRAND_NOIR",
+        "intensity": 0.3
+      },
+      "caption": {
+        "text": "YOU MISSED IT AGAIN.",
+        "entrance": "SNAP"
+      },
+      "decorations": [
+        {
+          "key": "EDGE_VIGNETTE",
+          "colour": "PRIMARY",
+          "opacity": 0.35,
+          "xPx": 0,
+          "yPx": 0,
+          "widthPx": 1080,
+          "heightPx": 1920,
+          "thicknessPx": 6
+        }
+      ],
+      "audioCues": [
+        {
+          "role": "IMPACT",
+          "atOffsetSeconds": 0,
+          "gainDb": -6,
+          "ducksMusic": true
+        }
+      ],
+      "useSourceAudio": false
+    },
+    {
+      "id": "breadth-the-sport",
+      "index": 1,
+      "role": "INFORMATION",
+      "description": "A black glove over a deep red-lit floor, opening quick and settling. The sport itself, in the brand's own two colours, under the app's own words.",
+      "durationSeconds": 1.5,
+      "source": {
+        "assetId": "clip-glove-red-floor",
+        "requiredTags": [],
+        "inSeconds": 6.8
+      },
+      "motion": {
+        "treatment": "SAFE_SPEED_RAMP",
+        "intensity": 0.6
+      },
+      "grade": {
+        "key": "BRAND_EMBER",
+        "intensity": 0.75
+      },
+      "transitionIn": {
+        "kind": "IMPACT_CUT",
+        "durationSeconds": 0.2
+      },
+      "caption": {
+        "text": "EVERY CARD THAT MATTERS.",
+        "entrance": "RISE"
+      },
+      "decorations": [
+        {
+          "key": "EDGE_VIGNETTE",
+          "colour": "PRIMARY",
+          "opacity": 0.5,
+          "xPx": 0,
+          "yPx": 0,
+          "widthPx": 1080,
+          "heightPx": 1920,
+          "thicknessPx": 6
+        }
+      ],
+      "audioCues": [
+        {
+          "role": "FIGHT_BELL",
+          "atOffsetSeconds": 0.05,
+          "gainDb": -8,
+          "ducksMusic": true
+        }
+      ],
+      "useSourceAudio": false
+    },
+    {
+      "id": "product-events",
+      "index": 2,
+      "role": "EVENT_DETAIL",
+      "description": "The real events screen, bezelled on a blurred backplate and held still for two seconds so the heading and the upcoming card can actually be read. The first honest proof in the cut.",
+      "durationSeconds": 2.3,
+      "source": {
+        "assetId": "screen-events",
+        "requiredTags": []
+      },
+      "motion": {
+        "treatment": "FRAMED_PHONE_UI",
+        "intensity": 0.4
+      },
+      "transitionIn": {
+        "kind": "MASKED_UI_REVEAL",
+        "durationSeconds": 0.3
+      },
+      "caption": {
+        "text": "ONE PLACE. EVERY EVENT.",
+        "entrance": "RISE"
+      },
+      "decorations": [
+        {
+          "key": "EDGE_VIGNETTE",
+          "colour": "PRIMARY",
+          "opacity": 0.4,
+          "xPx": 0,
+          "yPx": 0,
+          "widthPx": 1080,
+          "heightPx": 1920,
+          "thicknessPx": 6
+        }
+      ],
+      "audioCues": [
+        {
+          "role": "CONFIRMATION_PULSE",
+          "atOffsetSeconds": 0.3,
+          "gainDb": -10,
+          "ducksMusic": false
+        }
+      ],
+      "useSourceAudio": false
+    },
+    {
+      "id": "impact-lock-your-pick",
+      "index": 3,
+      "role": "PREDICTION",
+      "description": "Real contact in a dark gym, entering on a whip and landing on a flash. The reason anyone has an opinion, placed immediately before the interface that takes it.",
+      "durationSeconds": 1.7,
+      "source": {
+        "assetId": "clip-sparring-contact",
+        "requiredTags": []
+      },
+      "motion": {
+        "treatment": "IMPACT_FLASH",
+        "intensity": 0.5
+      },
+      "grade": {
+        "key": "BRAND_EMBER",
+        "intensity": 0.6
+      },
+      "transitionIn": {
+        "kind": "WHIP_PAN",
+        "durationSeconds": 0.2
+      },
+      "caption": {
+        "text": "LOCK YOUR PICK.",
+        "entrance": "SNAP"
+      },
+      "decorations": [
+        {
+          "key": "EDGE_VIGNETTE",
+          "colour": "PRIMARY",
+          "opacity": 0.55,
+          "xPx": 0,
+          "yPx": 0,
+          "widthPx": 1080,
+          "heightPx": 1920,
+          "thicknessPx": 6
+        },
+        {
+          "key": "FILM_GRAIN",
+          "colour": "PRIMARY",
+          "opacity": 0.18,
+          "xPx": 0,
+          "yPx": 0,
+          "widthPx": 1080,
+          "heightPx": 1920,
+          "thicknessPx": 6
+        }
+      ],
+      "audioCues": [
+        {
+          "role": "IMPACT",
+          "atOffsetSeconds": 0.1,
+          "gainDb": -3,
+          "ducksMusic": true
+        }
+      ],
+      "useSourceAudio": false
+    },
+    {
+      "id": "prediction-interface",
+      "index": 4,
+      "role": "PREDICTION",
+      "description": "The real fight card, framed on the bout and the community split. A tap indicator marks the prediction bar. Everything on this screen is the product's own data, not typeset copy.",
+      "durationSeconds": 2.8,
+      "source": {
+        "assetId": "screen-fight-card",
+        "requiredTags": []
+      },
+      "motion": {
+        "treatment": "APP_SCREENSHOT_PARALLAX",
+        "intensity": 0.35
+      },
+      "transitionIn": {
+        "kind": "MASKED_UI_REVEAL",
+        "durationSeconds": 0.3
+      },
+      "caption": {
+        "text": "PREDICT BEFORE THE FIRST BELL.",
+        "entrance": "RISE"
+      },
+      "decorations": [
+        {
+          "key": "TAP_INDICATOR",
+          "colour": "ACCENT",
+          "opacity": 0.85,
+          "xPx": 440,
+          "yPx": 1300,
+          "widthPx": 200,
+          "heightPx": 200,
+          "thicknessPx": 8
+        },
+        {
+          "key": "EDGE_VIGNETTE",
+          "colour": "PRIMARY",
+          "opacity": 0.4,
+          "xPx": 0,
+          "yPx": 0,
+          "widthPx": 1080,
+          "heightPx": 1920,
+          "thicknessPx": 6
+        }
+      ],
+      "audioCues": [
+        {
+          "role": "UI_CLICK",
+          "atOffsetSeconds": 0.55,
+          "gainDb": -14,
+          "ducksMusic": false
+        },
+        {
+          "role": "CONFIRMATION_PULSE",
+          "atOffsetSeconds": 0.9,
+          "gainDb": -8,
+          "ducksMusic": false
+        }
+      ],
+      "useSourceAudio": false
+    },
+    {
+      "id": "leaderboard-rank",
+      "index": 5,
+      "role": "DISCUSSION",
+      "description": "The real leaderboard, with its own explanation of the challenge visible and its identities already redacted. This is the social payoff: a private opinion becomes a public position.",
+      "durationSeconds": 2.3,
+      "source": {
+        "assetId": "screen-predictions",
+        "requiredTags": []
+      },
+      "motion": {
+        "treatment": "APP_SCREENSHOT_PARALLAX",
+        "intensity": 0.3
+      },
+      "transitionIn": {
+        "kind": "CROSSFADE",
+        "durationSeconds": 0.3
+      },
+      "caption": {
+        "text": "THEN SEE WHERE YOU RANK.",
+        "entrance": "RISE"
+      },
+      "decorations": [
+        {
+          "key": "EDGE_VIGNETTE",
+          "colour": "PRIMARY",
+          "opacity": 0.4,
+          "xPx": 0,
+          "yPx": 0,
+          "widthPx": 1080,
+          "heightPx": 1920,
+          "thicknessPx": 6
+        }
+      ],
+      "audioCues": [
+        {
+          "role": "CROWD",
+          "atOffsetSeconds": 0,
+          "gainDb": -20,
+          "ducksMusic": false
+        }
+      ],
+      "useSourceAudio": false
+    },
+    {
+      "id": "discussion-mockup",
+      "index": 6,
+      "role": "DISCUSSION",
+      "description": "A declared PRODUCT_MOCKUP of the card-talk discussion interface, bezelled and held. Geometry in the brand's colours with the real mark: no handles, no comments, no counts, no text of any kind.",
+      "durationSeconds": 2.5,
+      "source": {
+        "assetId": "product-mockup-discussion",
+        "requiredTags": []
+      },
+      "motion": {
+        "treatment": "FRAMED_PHONE_UI",
+        "intensity": 0.3
+      },
+      "transitionIn": {
+        "kind": "CROSSFADE",
+        "durationSeconds": 0.3
+      },
+      "caption": {
+        "text": "THEN ARGUE ABOUT IT.",
+        "entrance": "RISE"
+      },
+      "decorations": [
+        {
+          "key": "EDGE_VIGNETTE",
+          "colour": "PRIMARY",
+          "opacity": 0.4,
+          "xPx": 0,
+          "yPx": 0,
+          "widthPx": 1080,
+          "heightPx": 1920,
+          "thicknessPx": 6
+        }
+      ],
+      "audioCues": [
+        {
+          "role": "UI_CLICK",
+          "atOffsetSeconds": 0.4,
+          "gainDb": -16,
+          "ducksMusic": false
+        }
+      ],
+      "useSourceAudio": false
+    },
+    {
+      "id": "cta-open-combat-reviews",
+      "index": 7,
+      "role": "CTA",
+      "description": "Dip to black onto the designed end card carrying the real mark, then the headline and the one true instruction, held still to the last frame.",
+      "durationSeconds": 2.7,
+      "source": {
+        "assetId": "brand-card",
+        "requiredTags": []
+      },
+      "motion": {
+        "treatment": "STATIC_HOLD",
+        "intensity": 0
+      },
+      "transitionIn": {
+        "kind": "DIP_TO_BLACK",
+        "durationSeconds": 0.4
+      },
+      "decorations": [],
+      "audioCues": [
+        {
+          "role": "CTA_EMPHASIS",
+          "atOffsetSeconds": 0.2,
+          "gainDb": -6,
+          "ducksMusic": true
+        }
+      ],
+      "useSourceAudio": false
+    }
+  ],
+  "cta": {
+    "headline": "NEVER MISS FIGHT NIGHT.",
+    "subline": "OPEN COMBAT REVIEWS · Every combat sport. One place.",
+    "durationSeconds": 2.3,
+    "holdSeconds": 1.7,
+    "entrance": "RISE_AND_SCALE"
+  },
+  "audio": {
+    "musicAssetId": "music-bed",
+    "musicGainDb": -9,
+    "sourceAudioGainDb": -18,
+    "cueDuckingDb": 7,
+    "musicCrossfadeSeconds": 0.25,
+    "peakCeilingDbtp": -1.5,
+    "targetLufs": -14,
+    "cueAssetIds": {
+      "FIGHT_BELL": "sfx-fight-bell",
+      "CROWD": "sfx-crowd",
+      "IMPACT": "sfx-impact",
+      "UI_CLICK": "sfx-ui-click",
+      "CONFIRMATION_PULSE": "sfx-confirmation-pulse",
+      "CTA_EMPHASIS": "sfx-cta-emphasis"
+    }
+  },
+  "factualConstraints": [
+    "PRODUCT — Coverage: Combat Reviews lists events across multiple combat-sports promotions in one app.",
+    "PRODUCT — Events screen: the events screen shows upcoming fights with predictions, full cards, venues, broadcasters and live countdowns.",
+    "PRODUCT — Fight card: an event's fight card shows bout order, round counts and estimated start times, with the community prediction split shown per bout.",
+    "PRODUCT — Predictions: points are earned from correct predictions in the CombatReviews Challenge, ranked on a leaderboard by prediction accuracy.",
+    "PRODUCT — Not betting: the CombatReviews Challenge is skill, not betting. Combat Reviews is not a betting product and takes no stakes.",
+    "PRODUCT — Discussion: each event carries a card-talk discussion region where fans talk about the card.",
+    "PRODUCT — How it is opened: Combat Reviews is reached on the web; there is no verified public store listing, so no store badge and no download promise may appear.",
+    "PROHIBITION — no authored copy names a fighter, an event, a date, a vote total, a percentage split or a countdown.",
+    "PROHIBITION — the storyboard is REFERENCE_ONLY; no frame of it may appear.",
+    "PROHIBITION — no agency, studio or existing campaign may be named or imitated."
+  ],
+  "brandConstraints": {
+    "logoAssetId": "logo-primary",
+    "primaryColorHex": "#08080C",
+    "accentColorHex": "#DA0318",
+    "captionFontFamily": "Arial",
+    "safeAreaTopPx": 220,
+    "safeAreaBottomPx": 420,
+    "logoWindows": [
+      {
+        "startSeconds": 0,
+        "endSeconds": 2.5
+      }
+    ]
+  }
+}

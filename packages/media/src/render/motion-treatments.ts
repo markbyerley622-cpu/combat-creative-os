@@ -43,12 +43,13 @@ import {
 
 /**
  * Bumped to 2 by the premium creative finishing milestone, which added the
- * five finishing decorations. A storyboard or provenance record saying
- * "catalogue v1" describes a catalogue that had five fewer ways to treat a
- * frame; leaving the number at 1 would make two different catalogues
+ * five finishing decorations, and to 3 by the flagship milestone, which added
+ * the two colour grades. A storyboard or provenance record saying
+ * "catalogue v1" describes a catalogue that had seven fewer ways to treat a
+ * frame; leaving the number behind would make two different catalogues
  * indistinguishable in the artefacts that cite them.
  */
-export const MOTION_TREATMENT_CATALOGUE_VERSION = 2 as const;
+export const MOTION_TREATMENT_CATALOGUE_VERSION = 3 as const;
 
 export class MotionTreatmentError extends Error {
   constructor(message: string) {
@@ -63,6 +64,7 @@ export const MOTION_TREATMENT_FAMILIES = [
   'TRANSITION',
   'DECORATION',
   'TYPOGRAPHY',
+  'GRADE',
 ] as const;
 export type MotionTreatmentFamily = (typeof MOTION_TREATMENT_FAMILIES)[number];
 
@@ -518,6 +520,124 @@ export function compileSceneTreatment(
 }
 
 // ---------------------------------------------------------------------------
+// Colour grades
+// ---------------------------------------------------------------------------
+
+/**
+ * Grades are a separate family from scene treatments on purpose.
+ *
+ * A scene declares exactly one motion treatment, and grading is orthogonal to
+ * movement: a push-in and a pull-out both need the same palette if they are to
+ * read as one film. Folding "graded push-in" into the scene vocabulary would
+ * multiply every existing key by every grade, and the first shot that wanted a
+ * combination nobody had enumerated would get an ungraded one.
+ *
+ * The problem this solves is real and specific: a library assembled from
+ * separately-shot licensed clips has no shared palette. One shot is teal, the
+ * next is tungsten-yellow, the third is a white studio wall. Cut together they
+ * read as a stock-footage reel however well-timed the edit is. A grade is the
+ * cheapest honest way to make heterogeneous footage belong to one brand — and
+ * it is deliberately *not* applied to product screens, where legibility of the
+ * real interface outranks palette unity.
+ */
+export const GRADE_TREATMENT_KEYS = [
+  /**
+   * Contrast, crushed blacks and reduced saturation. Unifies without tinting,
+   * so a shot that already carries the brand's red keeps it.
+   */
+  'BRAND_NOIR',
+  /**
+   * `BRAND_NOIR` plus a red lift through the shadows and midtones. Pulls a
+   * neutral or cool shot into the black-and-red system rather than leaving it
+   * as the one clip that does not belong.
+   */
+  'BRAND_EMBER',
+] as const;
+export type GradeTreatmentKey = (typeof GRADE_TREATMENT_KEYS)[number];
+
+export interface GradeCompileInput {
+  readonly inputLabel: string;
+  readonly outputLabel: string;
+  /** 0 leaves the picture alone; 1 is the strongest correction the grade allows. */
+  readonly intensity: number;
+}
+
+interface GradeDefinition {
+  readonly summary: string;
+  readonly compile: (input: GradeCompileInput) => string;
+}
+
+/**
+ * Ceilings chosen so a full-intensity grade is still a grade and never a
+ * posterisation. `eq` gamma below 1 darkens; the saturation floor keeps skin
+ * and glove leather from going monochrome, because a fully desaturated shot
+ * beside a saturated product screen reads as a fault rather than a look.
+ */
+const GRADE_MAX_CONTRAST_LIFT = 0.35;
+const GRADE_MAX_SATURATION_CUT = 0.45;
+const GRADE_MAX_GAMMA_CUT = 0.22;
+const GRADE_MAX_RED_LIFT = 0.18;
+const GRADE_MAX_BLUE_CUT = 0.12;
+
+function noirChain(intensity: number): string {
+  const contrast = 1 + GRADE_MAX_CONTRAST_LIFT * intensity;
+  const saturation = 1 - GRADE_MAX_SATURATION_CUT * intensity;
+  const gamma = 1 - GRADE_MAX_GAMMA_CUT * intensity;
+  return `eq=contrast=${num(contrast)}:saturation=${num(saturation)}:gamma=${num(gamma)}`;
+}
+
+const GRADE_TREATMENTS: Readonly<Record<GradeTreatmentKey, GradeDefinition>> = {
+  BRAND_NOIR: {
+    summary: 'contrast lift, crushed blacks and reduced saturation',
+    compile: (input) => noirChain(input.intensity),
+  },
+  BRAND_EMBER: {
+    summary: 'noir base with a red lift through the shadows and midtones',
+    compile: (input) => {
+      const redLift = GRADE_MAX_RED_LIFT * input.intensity;
+      const blueCut = -GRADE_MAX_BLUE_CUT * input.intensity;
+      // Shadows and midtones only. Lifting red in the highlights is what turns
+      // a grade into a colour cast, and the product screens that follow these
+      // shots would then look wrong rather than clean.
+      const balance = `colorbalance=rs=${num(redLift)}:rm=${num(redLift * 0.7)}:bs=${num(blueCut)}:bm=${num(blueCut * 0.7)}`;
+      return `${noirChain(input.intensity)},${balance}`;
+    },
+  },
+};
+
+export function gradeTreatmentKeys(): readonly GradeTreatmentKey[] {
+  return GRADE_TREATMENT_KEYS;
+}
+
+/**
+ * Compiles one grade into the filter text that carries it.
+ *
+ * Returns the chain wired from `inputLabel` to `outputLabel`, so the caller
+ * appends it after whatever motion treatment produced the scene rather than
+ * knowing anything about the grammar inside.
+ */
+export function compileSceneGrade(
+  key: GradeTreatmentKey,
+  input: GradeCompileInput,
+): CompiledTreatment {
+  const definition = GRADE_TREATMENTS[key];
+  if (!definition) {
+    throw new MotionTreatmentError(
+      `unknown grade "${key}"; the catalogue has ${GRADE_TREATMENT_KEYS.join(', ')}`,
+    );
+  }
+  assertIntensity(input.intensity);
+
+  return {
+    treatmentKey: key,
+    family: 'GRADE',
+    catalogueVersion: MOTION_TREATMENT_CATALOGUE_VERSION,
+    graph: `[${input.inputLabel}]${definition.compile(input)}[${input.outputLabel}]`,
+    description: definition.summary,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Transitions
 // ---------------------------------------------------------------------------
 
@@ -962,6 +1082,7 @@ export function catalogueInventory(): Readonly<Record<MotionTreatmentFamily, rea
     TRANSITION: TRANSITION_TREATMENT_KEYS,
     DECORATION: DECORATION_TREATMENT_KEYS,
     TYPOGRAPHY: [...CAPTION_ENTRANCE_KEYS, ...CTA_ENTRANCE_KEYS],
+    GRADE: GRADE_TREATMENT_KEYS,
   };
 }
 

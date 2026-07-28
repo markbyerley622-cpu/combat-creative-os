@@ -1,0 +1,78 @@
+{
+  "requestVersion": 1,
+  "name": "combat-reviews-flagship-01",
+  "workspaceId": "6f1d5f6c-6d3a-4a2e-9c5f-0f2a1b3c4d5e",
+  "campaignId": "c4a7e1d2-3b58-4f6a-9e21-7d05c8b3f419",
+  "brandName": "Combat Reviews",
+  "promptFile": "./campaign-prompt.txt",
+  "objective": "Make combat-sports fans understand that Combat Reviews brings events, fight cards, predictions, the leaderboard and discussion into one place, and get them to open it",
+  "targetAudience": "Combat sports fans aged 18-34 who follow more than one promotion and argue about results after every card",
+  "platform": "TIKTOK",
+  "targetDurationSeconds": 15,
+  "productFacts": [
+    {
+      "id": "coverage",
+      "label": "Coverage",
+      "detail": "Combat Reviews lists events across multiple combat-sports promotions in one app."
+    },
+    {
+      "id": "events-screen",
+      "label": "Events screen",
+      "detail": "The events screen shows upcoming fights with predictions, full cards, venues, broadcasters and live countdowns, under the heading 'every card that matters'."
+    },
+    {
+      "id": "fight-card",
+      "label": "Fight card",
+      "detail": "An event's fight card shows bout order, round counts and estimated start times, with the community prediction split shown per bout."
+    },
+    {
+      "id": "predictions",
+      "label": "Predictions",
+      "detail": "Points are earned from correct predictions in the CombatReviews Challenge, ranked on a leaderboard by prediction accuracy."
+    },
+    {
+      "id": "not-betting",
+      "label": "Not betting",
+      "detail": "The CombatReviews Challenge is skill, not betting. Combat Reviews is not a betting product and takes no stakes."
+    },
+    {
+      "id": "discussion",
+      "label": "Discussion",
+      "detail": "Each event carries a card-talk discussion region where fans talk about the card."
+    },
+    {
+      "id": "web-product",
+      "label": "How it is opened",
+      "detail": "Combat Reviews is reached on the web. There is no verified public App Store or Google Play listing, so no store badge and no download promise may appear."
+    }
+  ],
+  "eventFacts": [],
+  "keyMessages": [
+    "Every card that matters, in one place",
+    "Predict before the first bell, then see where you rank",
+    "The discussion is part of the product, not an afterthought"
+  ],
+  "mandatories": [
+    "Show at least three real Combat Reviews product screens",
+    "End on NEVER MISS FIGHT NIGHT. and OPEN COMBAT REVIEWS",
+    "Never imply a betting product",
+    "No storyboard pixels, no store badges, no invented data"
+  ],
+  "cta": {
+    "headline": "NEVER MISS FIGHT NIGHT.",
+    "subline": "OPEN COMBAT REVIEWS · Every combat sport. One place.",
+    "durationSeconds": 2.3
+  },
+  "brandKit": {
+    "logoAssetId": "logo-primary",
+    "primaryColorHex": "#08080C",
+    "accentColorHex": "#DA0318",
+    "captionFontFamily": "Arial",
+    "safeAreaTopPx": 220,
+    "safeAreaBottomPx": 420
+  },
+  "generation": {
+    "source": "SOURCE_ONLY",
+    "generatedShotCount": 0
+  }
+}
