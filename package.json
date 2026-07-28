@@ -26,6 +26,7 @@
     "aamp:finish": "pnpm --filter aamp-cli run build && node --env-file-if-exists=.env apps/aamp-cli/dist/finishing/finishing-main.js",
     "aamp:flagship": "pnpm --filter aamp-cli run build && node --env-file-if-exists=.env apps/aamp-cli/dist/flagship/flagship-main.js",
     "aamp:flagship2": "pnpm --filter aamp-cli run build && node --env-file-if-exists=.env apps/aamp-cli/dist/flagship/flagship2-main.js",
+    "aamp:storyboard-video": "pnpm --filter aamp-cli run build && node --env-file-if-exists=.env apps/aamp-cli/dist/storyboard-video/storyboard-video-main.js",
     "db:generate": "pnpm --filter @combat/database run generate",
     "db:migrate": "pnpm --filter @combat/database run migrate",
     "db:validate": "pnpm --filter @combat/database run validate"

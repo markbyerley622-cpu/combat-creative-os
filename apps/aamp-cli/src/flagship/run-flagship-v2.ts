@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 
 import {
@@ -75,12 +75,41 @@ export const V2_PAID_PROVIDER_CALLS = 0 as const;
  */
 export const PANEL_STAGE_SCALE = 3;
 
+/**
+ * A scene whose visual source is moving footage rather than a still panel.
+ *
+ * The seam the storyboard-to-video path uses. When a scene supplies one, its
+ * staged asset becomes this clip — under exactly the asset id the plan already
+ * binds — so the whole downstream chain (preflight, rights resolution, clip
+ * analysis, segment selection, filter graph, actual-media QA, gallery) runs
+ * unchanged. Absent, every scene stages its panel as before, which is what
+ * keeps every plan written before this milestone rendering identically.
+ */
+export interface GeneratedSceneMedia {
+  /** Absolute path to the trimmed, normalised clip. */
+  readonly absolutePath: string;
+  readonly widthPx: number;
+  readonly heightPx: number;
+  readonly durationSeconds: number;
+  /** Where the moving picture came from. Travels into provenance verbatim. */
+  readonly provenance: string;
+  /** One line for the artefacts, in the resolver's own words. */
+  readonly description: string;
+}
+
 export interface FlagshipV2Options {
   readonly storyboardRoot: string;
   readonly workPackRoot: string;
   /** Storyboard-01's package, proven absent from this run when supplied. */
   readonly storyboard01Root?: string;
   readonly campaignDirectory: string;
+  /**
+   * The plan to render. Defaults to the campaign directory's own
+   * `creative-plan.json`, which is what every existing caller gets.
+   */
+  readonly planPath?: string;
+  /** Moving footage per scene sequence (1-based). Absent scenes stage their panel. */
+  readonly generatedSceneMedia?: ReadonlyMap<number, GeneratedSceneMedia>;
   readonly outputDirectory: string;
   readonly binaries: FfmpegBinaries;
   readonly workflowRunId: string;
@@ -198,6 +227,7 @@ export async function runFlagshipV2(options: FlagshipV2Options): Promise<Flagshi
   const runner = options.runner ?? new NodeCommandRunner();
   const runDirectory = resolve(options.outputDirectory);
   const onProgress = options.onProgress;
+  const generatedSceneMedia = options.generatedSceneMedia ?? new Map<number, GeneratedSceneMedia>();
   await mkdir(runDirectory, { recursive: true });
 
   const labels = {
@@ -249,6 +279,9 @@ export async function runFlagshipV2(options: FlagshipV2Options): Promise<Flagshi
 
   // --- 2. the committed campaign source -------------------------------------
   const campaignDirectory = resolve(options.campaignDirectory);
+  const planPath = options.planPath
+    ? resolve(options.planPath)
+    : join(campaignDirectory, 'creative-plan.json');
   const workPackRoot = resolve(options.workPackRoot);
   const libraryManifestPath = join(workPackRoot, 'asset-root', 'assets.json');
   let libraryManifest;
@@ -316,6 +349,39 @@ export async function runFlagshipV2(options: FlagshipV2Options): Promise<Flagshi
   }[] = [];
   for (const [index, panel] of panels.entries()) {
     const frame = storyboard.frames[index] as (typeof storyboard.frames)[number];
+
+    // A scene with moving footage stages that instead of its panel, under the
+    // same asset id the plan already binds — so nothing downstream has to know
+    // this scene is different from any other.
+    const moving = generatedSceneMedia.get(frame.sequence);
+    if (moving) {
+      const stagedPath = join(stagingRoot, 'panels', `${panel.asset.id}.mp4`);
+      // eslint-disable-next-line no-await-in-loop -- deterministic order
+      await copyFile(moving.absolutePath, stagedPath);
+      stagedPanels.push({
+        asset: {
+          ...panel.asset,
+          path: `./panels/${panel.asset.id}.mp4`,
+          kind: 'VIDEO' as const,
+          role: 'SOURCE_CLIP' as const,
+          description: moving.description.slice(0, 300),
+          declaredWidthPx: moving.widthPx,
+          declaredHeightPx: moving.heightPx,
+          declaredDurationSeconds: moving.durationSeconds,
+          rights: {
+            ...panel.asset.rights,
+            restrictions: [
+              ...panel.asset.rights.restrictions,
+              `moving-source provenance: ${moving.provenance}`,
+            ],
+          },
+        },
+        widthPx: moving.widthPx,
+        heightPx: moving.heightPx,
+      });
+      continue;
+    }
+
     const widthPx = frame.widthPx * PANEL_STAGE_SCALE;
     const heightPx = frame.heightPx * PANEL_STAGE_SCALE;
     // Staged above the delivery width the panel treatment will ask for, so the
@@ -361,7 +427,7 @@ export async function runFlagshipV2(options: FlagshipV2Options): Promise<Flagshi
   try {
     onProgress?.('validating the plan against the brief and the locked storyboard');
     plan = await loadHumanPlan(
-      join(campaignDirectory, 'creative-plan.json'),
+      planPath,
       await materialiseRequest({
         campaignDirectory,
         runDirectory,
@@ -438,7 +504,7 @@ export async function runFlagshipV2(options: FlagshipV2Options): Promise<Flagshi
   onProgress?.('rendering the locked storyboard through the zero-cost preview path');
   const preview = await runPreviewCampaign({
     request,
-    planPath: join(campaignDirectory, 'creative-plan.json'),
+    planPath,
     assetRoot: stagingRoot,
     runDirectory,
     repositoryRoot: campaignDirectory,

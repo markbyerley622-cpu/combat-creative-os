@@ -29,12 +29,24 @@ export type CliExecutionMode = (typeof CLI_EXECUTION_MODES)[number];
 
 export interface ExecutionModeInputs {
   readonly reasoningProvider: 'mock' | 'claude';
-  readonly videoGenerationProvider: 'mock' | 'comfyui';
+  readonly videoGenerationProvider: 'mock' | 'comfyui' | 'ltx-hosted';
 }
+
+/**
+ * Generation providers that produce real model output.
+ *
+ * Listed by name rather than derived as "not mock", so a provider added later
+ * has to be classified deliberately. A new adapter that defaulted into "real"
+ * would relabel a run without anyone deciding it should be.
+ */
+const REAL_GENERATION_PROVIDERS: readonly ExecutionModeInputs['videoGenerationProvider'][] = [
+  'comfyui',
+  'ltx-hosted',
+];
 
 export function resolveExecutionMode(inputs: ExecutionModeInputs): CliExecutionMode {
   const realReasoning = inputs.reasoningProvider === 'claude';
-  const realGeneration = inputs.videoGenerationProvider === 'comfyui';
+  const realGeneration = REAL_GENERATION_PROVIDERS.includes(inputs.videoGenerationProvider);
   if (realReasoning && realGeneration) return 'REAL_REASONING_AND_REAL_GENERATION';
   if (realReasoning) return 'REAL_REASONING_AND_FIXTURE_GENERATION';
   if (realGeneration) return 'FIXTURE_REASONING_AND_REAL_GENERATION';

@@ -9,7 +9,8 @@
  *
  * The ComfyUI fake server is deliberately absent — it is imported by path from
  * that module's own protocol tests and has no consumer outside this package.
- * The media-acquisition fake is here because `aamp-cli`'s acceptance suite has
- * to drive the real adapters against it across a package boundary.
+ * The media-acquisition and LTX fakes are here because `aamp-cli`'s suites have
+ * to drive the real adapters against them across a package boundary.
  */
 export * from './media-acquisition/testing/fake-media-api';
+export * from './ltx/testing/fake-ltx-server';

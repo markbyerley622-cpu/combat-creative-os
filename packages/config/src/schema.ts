@@ -173,7 +173,7 @@ export function refineAuthConfig(
  * `createLogger`'s pino configuration.
  */
 export const videoGenerationEnvSchema = z.object({
-  VIDEO_GENERATION_PROVIDER: z.enum(['mock', 'comfyui']).default('mock'),
+  VIDEO_GENERATION_PROVIDER: z.enum(['mock', 'comfyui', 'ltx-hosted']).default('mock'),
   COMFYUI_BASE_URL: z.string().optional(),
   /**
    * End-to-end deadline for one shot, not a per-HTTP-request timeout. Video
@@ -196,6 +196,29 @@ export const videoGenerationEnvSchema = z.object({
   COMFYUI_API_KEY: z.string().optional(),
   /** Where retrieved generated clips land. Repository-relative unless absolute. */
   COMFYUI_OUTPUT_DIR: z.string().min(1).default('.aamp-output/generated'),
+
+  /**
+   * LTX hosted generation.
+   *
+   * `LTXV_API_KEY` has no default and never will. It is the only credential in
+   * this repository whose absence must stop a run rather than degrade it: a
+   * hosted generation API spends money, and a fallback would spend it
+   * accidentally. Read only through this schema, never `process.env` in adapter
+   * code, and redacted by `createLogger`'s pino configuration.
+   */
+  LTXV_API_KEY: z.string().optional(),
+  /** Overridable for the opt-in live test only; the adapter's own default is the official origin. */
+  LTX_BASE_URL: z.string().optional(),
+  /** Model name validated against the real registry when the provider is constructed. */
+  LTX_MODEL: z.string().min(1).default('ltx-2-3-fast'),
+  /** End-to-end deadline for one generation, from submission to a retrievable result. */
+  LTX_OUTPUT_TIMEOUT_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(20 * 60_000),
+  /** Where downloaded LTX originals land. Repository-relative unless absolute. */
+  LTX_OUTPUT_DIR: z.string().min(1).default('.aamp-output/ltx-generated'),
 });
 export type VideoGenerationEnv = z.infer<typeof videoGenerationEnvSchema>;
 
@@ -221,6 +244,37 @@ export function refineVideoGenerationConfig(
         message:
           'VIDEO_GENERATION_PROVIDER=mock is refused in production — the mock produces no real media, so a production process running it would deliver fabricated output',
       });
+    }
+    return;
+  }
+
+  if (env.VIDEO_GENERATION_PROVIDER === 'ltx-hosted') {
+    if (!env.LTXV_API_KEY?.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['LTXV_API_KEY'],
+        message:
+          'LTXV_API_KEY is required when VIDEO_GENERATION_PROVIDER=ltx-hosted — refusing to start rather than falling back to a provider that produces no real media',
+      });
+    }
+    if (env.LTX_BASE_URL?.trim()) {
+      let parsedLtx: URL | undefined;
+      try {
+        parsedLtx = new URL(env.LTX_BASE_URL);
+      } catch {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['LTX_BASE_URL'],
+          message: `LTX_BASE_URL is not a valid URL: ${env.LTX_BASE_URL}`,
+        });
+      }
+      if (parsedLtx && parsedLtx.protocol !== 'http:' && parsedLtx.protocol !== 'https:') {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['LTX_BASE_URL'],
+          message: `LTX_BASE_URL must be http: or https:, got ${parsedLtx.protocol}`,
+        });
+      }
     }
     return;
   }

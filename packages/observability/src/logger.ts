@@ -59,6 +59,16 @@ export const REDACTED_FIELD_NAMES: readonly string[] = [
   'MINIO_SECRET_KEY',
   'MINIO_ACCESS_KEY',
   'POSTGRES_PASSWORD',
+  'LTXV_API_KEY',
+  'ltxvApiKey',
+  // Signed transfer URLs. Short-lived, but a signature in a log is a
+  // credential in a log for as long as it lives.
+  'upload_url',
+  'uploadUrl',
+  'video_url',
+  'videoUrl',
+  'storage_uri',
+  'required_headers',
   // Model payloads (confidential creative material, not credentials)
   'prompt',
   'promptText',

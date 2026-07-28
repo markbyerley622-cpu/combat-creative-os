@@ -3,7 +3,9 @@ import {
   isComfyUIWorkflowProfileKey,
   type ComfyUIWorkflowProfileKey,
 } from './comfyui/workflow-profiles';
+import { assertSupportedLtxModel, type LtxModel } from './ltx/models';
 import { ComfyUIVideoGenerationProvider } from './video-generation.comfyui';
+import { LtxHostedVideoGenerationProvider } from './video-generation.ltx-hosted';
 import { MockVideoGenerationProvider } from './video-generation.mock';
 import type { VideoGenerationProvider } from './video-generation';
 
@@ -22,7 +24,7 @@ import type { VideoGenerationProvider } from './video-generation';
  * env onto this shape.
  */
 
-export const VIDEO_GENERATION_PROVIDER_KINDS = ['mock', 'comfyui'] as const;
+export const VIDEO_GENERATION_PROVIDER_KINDS = ['mock', 'comfyui', 'ltx-hosted'] as const;
 export type VideoGenerationProviderKind = (typeof VIDEO_GENERATION_PROVIDER_KINDS)[number];
 
 export interface ComfyUIProviderConfig {
@@ -38,10 +40,30 @@ export interface ComfyUIProviderConfig {
   readonly now?: () => Date;
 }
 
+/**
+ * LTX hosted configuration.
+ *
+ * `apiKey` is required and is the only place a credential enters this module.
+ * It is passed straight into the provider's private client and is never stored
+ * on the config object beyond construction, never logged, and never returned.
+ */
+export interface LtxHostedProviderFactoryConfig {
+  readonly apiKey: string;
+  readonly model: string;
+  readonly baseUrl?: string;
+  readonly outputTimeoutMs: number;
+  readonly requestTimeoutMs?: number;
+  /** Absolute path. The composition root resolves any repository-relative value. */
+  readonly outputDirectory: string;
+  readonly fetchImpl?: typeof fetch;
+  readonly now?: () => Date;
+}
+
 export interface VideoGenerationProviderConfig {
   readonly kind: VideoGenerationProviderKind;
   readonly nodeEnv: 'development' | 'test' | 'production';
   readonly comfyui?: ComfyUIProviderConfig;
+  readonly ltxHosted?: LtxHostedProviderFactoryConfig;
 }
 
 export class VideoGenerationProviderConfigError extends Error {
@@ -86,6 +108,10 @@ export function createVideoGenerationProvider(
     return new MockVideoGenerationProvider();
   }
 
+  if (config.kind === 'ltx-hosted') {
+    return createLtxHostedProvider(config.ltxHosted);
+  }
+
   const comfyui = config.comfyui;
   if (!comfyui) {
     throw new VideoGenerationProviderConfigError(
@@ -105,5 +131,46 @@ export function createVideoGenerationProvider(
       : { costCentsPerSecond: comfyui.costCentsPerSecond }),
     ...(comfyui.fetchImpl ? { fetchImpl: comfyui.fetchImpl } : {}),
     ...(comfyui.now ? { now: comfyui.now } : {}),
+  });
+}
+
+/**
+ * Builds the LTX hosted provider, refusing at startup rather than at first
+ * dispatch when the key is absent.
+ *
+ * Refusing here is what makes "this process cannot spend money without a key"
+ * a property of the object graph. A provider that constructed successfully and
+ * failed on the first paid call would have already uploaded a frame.
+ */
+export function createLtxHostedProvider(
+  config: LtxHostedProviderFactoryConfig | undefined,
+): VideoGenerationProvider {
+  if (!config) {
+    throw new VideoGenerationProviderConfigError(
+      'VIDEO_GENERATION_PROVIDER=ltx-hosted was selected but no LTX configuration was supplied',
+    );
+  }
+  if (!config.apiKey || config.apiKey.trim().length === 0) {
+    throw new VideoGenerationProviderConfigError(
+      'LTXV_API_KEY is not set. The LTX hosted provider is refused rather than started without a credential — there is no unauthenticated mode and no fallback to a fixture.',
+    );
+  }
+  let model: LtxModel;
+  try {
+    model = assertSupportedLtxModel(config.model);
+  } catch (error) {
+    throw new VideoGenerationProviderConfigError(
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+  return new LtxHostedVideoGenerationProvider({
+    apiKey: config.apiKey,
+    model,
+    outputTimeoutMs: config.outputTimeoutMs,
+    outputDirectory: config.outputDirectory,
+    ...(config.baseUrl ? { baseUrl: config.baseUrl } : {}),
+    ...(config.requestTimeoutMs === undefined ? {} : { requestTimeoutMs: config.requestTimeoutMs }),
+    ...(config.fetchImpl ? { fetchImpl: config.fetchImpl } : {}),
+    ...(config.now ? { now: config.now } : {}),
   });
 }
