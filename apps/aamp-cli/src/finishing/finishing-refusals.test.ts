@@ -1,4 +1,5 @@
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
@@ -9,6 +10,7 @@ import {
   parseCreativeFinishingBrief,
   sha256OfJson,
   type CreativeFinishingBrief,
+  type FinishingSelection,
 } from './finishing-contracts';
 import {
   parseStageDirectiveSet,
@@ -22,6 +24,7 @@ import {
   CRAFT_DIMENSIONS,
   parsePremiumScorecard,
 } from './finishing-scorecard';
+import { readStageSelection, writeStageSelection } from './finishing-store';
 
 /**
  * What the finishing workflow refuses.
@@ -433,5 +436,39 @@ describe('the premium verdict', () => {
     });
     expect(verdict.verdict).toBe('NOT_PREMIUM_READY');
     expect(verdict.blockers.join(' ')).toContain('Score the file that exists');
+  });
+});
+
+describe('a selection is validated before it is persisted', () => {
+  it('refuses an over-long reason without leaving a selection behind', async () => {
+    const runDirectory = await mkdtemp(join(tmpdir(), 'finishing-selection-'));
+    try {
+      const refused = {
+        stage: 'HOOK',
+        selectedCandidateId: 'screen-first',
+        selectedPlanSha256: 'b'.repeat(64),
+        reviewer: 'A Reviewer',
+        selectedAt: '2026-07-28T09:20:00.000Z',
+        reason: 'x'.repeat(1001),
+        feedback: [],
+      } as unknown as FinishingSelection;
+
+      await expect(writeStageSelection(runDirectory, refused)).rejects.toThrow(/at most 1000/);
+
+      // The point of refusing *before* the write: a selection the schema rejects
+      // used to land on disk anyway, fail every later read of the run, and then
+      // block the corrected one under the write-once rule.
+      expect(await readStageSelection(runDirectory, 'HOOK')).toBeUndefined();
+
+      const corrected: FinishingSelection = {
+        ...refused,
+        reason:
+          'The events screen is on frame one, which is what the note about the opening asked for.',
+      };
+      await writeStageSelection(runDirectory, corrected);
+      expect((await readStageSelection(runDirectory, 'HOOK'))?.reason).toBe(corrected.reason);
+    } finally {
+      await rm(runDirectory, { recursive: true, force: true });
+    }
   });
 });

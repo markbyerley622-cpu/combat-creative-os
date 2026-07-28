@@ -278,6 +278,36 @@ fixture reviewer wrote. The scorecard's entire purpose is that no code can
 produce one, and the tests are no exception. Whether a finished cut is actually
 good is a judgement this repository records and never makes.
 
-Also not proven: nothing here has run against a master produced by a real
-campaign run, because the example round finishes a preview built from synthetic
-`lavfi` media.
+## 11. The first real-media round
+
+A round has now run against the real Combat Reviews Concept B v2 master — the
+licensed Pexels footage and the read-only captures of the deployed application,
+not `lavfi` fixtures. Twelve candidates across all four stages rendered, every
+one an ffprobe-verified 1080×1920 h264/AAC MP4 at exactly 15.000 s with actual-
+media QA `PASS`. The `control` candidate reproduced the existing B v2 master
+**byte for byte**, which is the strongest available statement that this path
+consumes a real campaign artefact without changing it. The round needed no
+adapter: `brief`, `open`, `directives`, `propose`, `select` and `inspect` all
+took the real request, plan and master exactly as the earlier milestone produced
+them.
+
+It found one defect. `select` **persisted `selection.json` before validating
+it**: validation lived only in `readStageSelection`, so an over-long `reason`
+was written to disk, every later read of the run then failed on it, and
+`writeOnce` refused the corrected selection — the run was bricked by an artefact
+the tool wrote itself. `writeStageSelection` now parses before it writes, and
+`finishing-refusals.test.ts` covers the exact failure. This is the same
+discipline `propose` already had, where the directives file is written only once
+the proposal stands.
+
+Two things worth knowing before authoring directives against real captures.
+`addressesDefectIds` is checked against the **brief's** defects only, so a note
+carried into the next stage through `--feedback` cannot be cited by a later
+candidate. And `asset-provenance.json` enumerates the whole preflighted library
+rather than the bound sources, so auditing rights from it alone reads as though
+the cut used every available asset; `render-manifest.json`'s `sources` is what
+actually reached FFmpeg.
+
+Still not proven, and unchanged by that round: creative quality, and a finished
+master — the real-media round deliberately stopped at the CTA human selection
+gate, so no scorecard exists and no verdict was reached.

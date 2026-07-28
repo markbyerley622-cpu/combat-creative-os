@@ -335,11 +335,29 @@ export async function readStageComparison(
   );
 }
 
+/**
+ * Validated on the way *out*, not only on the way back in.
+ *
+ * A selection is the one artefact assembled from raw operator input — a
+ * reviewer name typed at the prompt and a reason file — and `writeOnce` makes
+ * the first write permanent. Validating only in `readStageSelection` meant a
+ * record the schema refuses was persisted anyway, every later read of the run
+ * failed on it, and the write-once rule then blocked the corrected selection
+ * from ever being written: the run was bricked by an artefact this tool wrote
+ * itself. Found running a real campaign master through the round, where an
+ * over-long `reason` did exactly that. Same discipline as `propose`, which
+ * writes the directives only once the proposal stands.
+ */
 export async function writeStageSelection(
   runDirectory: string,
   selection: FinishingSelection,
 ): Promise<string> {
-  return writeOnce(runDirectory, stageSelectionFile(selection.stage), selection);
+  const validated = parseOrThrow(
+    FinishingSelectionSchema,
+    selection,
+    `selection for stage ${selection.stage}`,
+  );
+  return writeOnce(runDirectory, stageSelectionFile(validated.stage), validated);
 }
 
 export async function readStageSelection(
