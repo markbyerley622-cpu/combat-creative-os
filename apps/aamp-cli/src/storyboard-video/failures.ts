@@ -55,6 +55,17 @@ export const STORYBOARD_VIDEO_EXIT_CODES = {
   FINAL_RENDER_FAILURE: 36,
   /** The finished master failed actual-media QA or storyboard fidelity. */
   QA_FAILURE: 37,
+  /**
+   * A required moving scene has no standing human approval — never reviewed,
+   * rejected, or approved against a clip that has since changed. Nothing was
+   * composited: the gate runs before FFmpeg.
+   */
+  MOTION_REVIEW_BLOCKED: 38,
+  /**
+   * A required moving scene's clip failed local technical inspection. A
+   * different clip is needed; no approval can clear this.
+   */
+  MOTION_INSPECTION_FAILED: 39,
 } as const;
 
 export type StoryboardVideoExitCode =
@@ -80,6 +91,8 @@ export const STORYBOARD_VIDEO_FAILURE_KINDS = [
   'NO_USABLE_SOURCE',
   'FINAL_RENDER_FAILURE',
   'QA_FAILURE',
+  'MOTION_REVIEW_BLOCKED',
+  'MOTION_INSPECTION_FAILED',
 ] as const;
 export type StoryboardVideoFailureKind = (typeof STORYBOARD_VIDEO_FAILURE_KINDS)[number];
 

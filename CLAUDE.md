@@ -253,6 +253,79 @@ is configured, every adapter carries `DOCUMENTED_NOT_EXECUTED`, and **no
 LTX-driven master exists**. See the "LTX storyboard-to-video" rules below and
 `docs/runbooks/ltx-storyboard-to-video.md`.
 
+**The storyboard motion quality gate is done** — `pnpm aamp:motion-review`
+measures every resolved moving clip locally, shows a person what it found beside
+the approved keyframe, records their decision immutably, and the final render
+fails closed until every moving scene carries a standing approval of the exact
+bytes that will be used. **Proven live against the operator's real material,
+read-only and at zero cost:** scenes 1 and 7 `MANUAL_LTX_STUDIO`, scene 2 the
+acquired plate, 3/4/6/10 deterministic, 5/8/9 missing generation at 108¢ — and
+both hand-animated clips surfaced as landscape 1920×1080 against portrait plates
+with keyframe layout agreement 0.4432 and 0.1441 against a floor of 0.85, so
+neither opens on the approved composition. **Proven with fixtures and the fake
+LTX server, no paid call:** an ffprobe-verified 15.000 s 1080×1920 h264/AAC
+master with QA `PASS` reached only after a rejected scene was replaced and the
+replacement approved, plus 51 contract tests and 6 source-hygiene tests. **Not
+proven:** creative quality — the gate proves a named person decided about
+specific bytes, not that they were right. See the "Motion quality gate" rules
+below and `docs/runbooks/storyboard-motion-quality-gate.md`.
+
+## Motion quality gate — permanent rules
+
+- **A deterministic measurement is never evidence about creative quality.**
+  Nothing here scores a shot, a face, a hand or a story, and no function may be
+  added that does. Every craft judgement is a named person's recorded decision.
+  The gate's own report carries that notice; do not remove it.
+- **Two tiers, and the difference is who can clear them.**
+  `BINDING_TECHNICAL` means the file is unusable and no approval clears it;
+  `FIDELITY_FINDING` means the file is usable and disagrees with the brief,
+  which is a person's call. An approval is refused while a finding is open and
+  unnamed. Never promote a finding to binding to "make the gate stricter" — that
+  removes the human decision the finding exists to force.
+- **An unmeasurable binding check is not a satisfied one.** `NOT_MEASURED`
+  carries its reason and is never a pass, the same rule the preview path holds.
+- **The naive measurements do not work, and the replacements are calibrated
+  against real material.** Mean frame difference scores a still 1.22 and a real
+  slow push-in 1.31; whole-frame similarity scores a clip 0.871 against its own
+  keyframe and 0.871 against a different scene's. Do not "simplify" the
+  noise-cutoff motion measure or the luma-layout correlation back to either.
+  Changing a floor or the profile is a `MOTION_INSPECTION_PROFILE_VERSION` /
+  `MOTION_REQUIREMENT_PROFILE_VERSION` bump.
+- **An approval is bound to four inputs, never to a scene number** — the clip's
+  bytes, the authoritative keyframe, the generation prompt and the scene
+  contract. Change one and it stops applying, and the gate names which moved.
+  The scene's prose `intent` is deliberately outside the digest, and so is the
+  inspection: measurements move with the FFmpeg build, and an approval that
+  evaporated on a patch release would train reviewers to click through.
+- **The ledger is append-only, self-verifying and never edited.** A changed mind
+  is a new line naming the one it supersedes. A line whose recorded id does not
+  match its content was tampered with and is refused on read; a malformed line
+  is an error, because treating it as an unreviewed scene would silently discard
+  a human judgement.
+- **Feedback is refused, never interpreted.** A whole-field mood cannot become
+  the recorded reason for a decision, and a rejection must say what was observed
+  and what must change — it is an instruction to spend money regenerating.
+- **The gate runs before anything is trimmed, staged or composited**, and there
+  is no `--skip-review`, `--force` or environment variable. A gate with a bypass
+  is a gate that gets bypassed on the afternoon somebody needs the file quickly.
+- **A still is never asked for a motion approval.**
+  `DETERMINISTIC_MOTION_GRAPHICS` and `REAL_PRODUCT_CAPTURE` have no generated
+  motion to review, and asking would train reviewers to approve without looking.
+- **Regeneration bypasses the cache for the scenes it names.** Every cache-key
+  input of a rejected clip is unchanged, so without `bypassCache` the lookup
+  hits and the regeneration the reviewer asked for silently does not happen.
+  `--regenerate-rejected` resolves the ledger **before** the cost estimate, so
+  refused scenes are priced into the ceiling the operator authorises.
+- **There is one source-resolution stage.** `source-resolution-stage.ts` is
+  called by both the run and the review. Never add a second resolver: two that
+  agree today would disagree after the first fix, and the review would then be
+  reviewing clips that are not the ones being rendered.
+- **Nothing on the review path constructs a provider or reads a credential.** No
+  provider factory, no database client, no `fetch`; the entry point hands in two
+  FFmpeg locations rather than `process.env`, and `aamp:motion-review` omits
+  `--env-file` so `.env` never loads. `motion-review-source-hygiene.test.ts`
+  asserts all of it — keep it passing rather than exempting a file.
+
 ## LTX storyboard-to-video — permanent rules
 
 - **The five-level source precedence is a statement about truthfulness, not

@@ -3554,6 +3554,94 @@ Each is recorded per scene in `asset-gap-report.json` as a remaining mismatch
 against the storyboard's own stated motion intent, with the production asset it
 would need.
 
+### Storyboard motion quality gate and selective regeneration (2026-07-29)
+
+`pnpm aamp:motion-review` is the pass between "a clip exists for this scene" and
+"this clip renders". It measures every resolved moving clip locally, shows a
+person what it found beside the approved keyframe, records their decision
+immutably, and the final render fails closed until every moving scene carries a
+standing approval of the exact bytes that will be used. Runbook:
+`docs/runbooks/storyboard-motion-quality-gate.md`.
+
+**No parallel pipeline.** The first six stages of `runStoryboardVideo` — the
+storyboard, the plan, the keyframes, the manual clips, the footage pack, the
+prompts and the source decisions — moved into
+`source-resolution-stage.ts` and are now called by both the run and the review.
+Two resolvers that agreed today would disagree the first time one was fixed, and
+the review would then be reviewing a different set of clips from the ones that
+render, which is the one way a review gate can be worse than no gate.
+
+**Two tiers, and the difference is who can clear them.** Fifteen
+`BINDING_TECHNICAL` checks say the file is unusable and no approval clears them;
+two `FIDELITY_FINDING` checks — `FIRST_FRAME_MATCHES_AUTHORITATIVE_KEYFRAME` and
+`DELIVERS_WITHOUT_UPSCALE` — say the file is usable and disagrees with the brief,
+which is a person's call. An approval is refused while a finding is open and
+unnamed; the reviewer names each one they accept. A check that could not be taken
+is `NOT_MEASURED` and is never a pass.
+
+**Both measurements replaced a naive version that does not work, and the failures
+are recorded because they look correct.** Mean frame-to-frame difference scores a
+still at 1.22 and a real slow push-in at 1.31 — it measures quantisation noise.
+Zeroing per-pixel differences at or below 16 first gives 0.0000 against 1.72, and
+11.53 for a hard impact. Whole-frame similarity scores clip 1 at 0.871 against
+its own keyframe and 0.871 against a different scene's; Pearson over raw pixels
+gives 0.232 against 0.210. A 4×8 luma-layout correlation at delivery framing
+gives 0.984 for a 6% push-in of the approved frame and 0.001–0.019 for a
+different one.
+
+**An approval is bound to four inputs, not to a scene number.** The clip's bytes,
+the authoritative keyframe, the generation prompt and the scene contract. Change
+one and the approval stops applying and the gate names which moved. The scene's
+prose intent is deliberately excluded: a reviewer's judgement about the picture is
+not invalidated by somebody improving a sentence about it. The identity is not a
+hash of the inspection, because measurements move with the FFmpeg build and an
+approval that evaporated on a patch release would train reviewers to click
+through.
+
+**The ledger is append-only and self-verifying.** JSON Lines under
+`.aamp-output`; every line carries the digest of its own content, so a
+hand-edited approval is refused on read; a superseded decision stays beside the
+one that replaced it; a malformed line is an error rather than an empty ledger,
+because continuing would silently discard a human judgement.
+
+**Selective regeneration bypasses the cache.** `--regenerate-rejected` reads the
+ledger before the cost estimate, so refused scenes are priced into the ceiling
+the operator authorises. Both it and `--regenerate-scene` now set `bypassCache`
+for the named scenes: without that, every cache-key input of a rejected scene is
+unchanged, the lookup hits, and the regeneration silently does not happen.
+
+**Nothing on the review path can spend money.** No provider factory, no
+credential read, no `fetch`; the entry point hands in two FFmpeg locations rather
+than the process environment, and the `aamp:motion-review` script omits
+`--env-file`, so `.env` never loads. A source-level test asserts all of it.
+
+**Proven live against the operator's real material, read-only and at zero cost.**
+Scenes 1 and 7 `MANUAL_LTX_STUDIO`, scene 2 the acquired
+`CRF02-BOXING_ACTION-PX4761763` plate, scenes 3/4/6/10 deterministic graphics,
+scenes 5/8/9 missing generation at 108¢ total. Both hand-animated clips measure
+`TECHNICALLY_SOUND` but fail both fidelity findings: they are landscape
+1920×1080 against portrait 1080×1920 plates, with layout agreement 0.4432 and
+0.1441 against a floor of 0.85. Neither opens on the approved composition, and
+before this milestone both would have rendered without anybody being told.
+
+**Proven with fixtures and the fake LTX server, no paid call.** An 11-test
+acceptance suite building its own storyboard, keyframes, manual clips, footage
+pack and work pack: ten sources resolve; a run with nothing reviewed refuses
+before FFmpeg composition starts and writes no render manifest; one rejected
+scene blocks it and the remedy repeats the reviewer's words; replacing that scene
+invalidates the earlier decision while every other approval stands; approving the
+replacement unblocks it; the master is an ffprobe-verified 15.000 s 1080×1920
+h264/yuv420p/AAC file with QA `PASS`; provenance names every source, its checksum
+and its approver; no preview or contact-sheet file reaches the render manifest;
+and no credential appears in any artefact. Plus 51 contract tests and 6
+source-hygiene tests that need no FFmpeg.
+
+**Not proven: creative quality.** Nothing here measures it and nothing claims to.
+The gate proves a named person made a decision about specific bytes at a specific
+time; it cannot prove they were right. Whether the two hand-animated clips are
+usable is now a surfaced question, and the honest answer may be that those scenes
+need re-animating at delivery framing.
+
 **Next milestone: AAMP-1 step 4 — `apps/worker` against a live Temporal server**
 (`docs/aamp-architecture.md` §6 task 6).
 

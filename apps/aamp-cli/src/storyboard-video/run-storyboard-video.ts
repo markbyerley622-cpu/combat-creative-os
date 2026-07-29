@@ -18,7 +18,6 @@ import {
   type VideoGenerationProvider,
 } from '@combat/providers';
 
-import { loadCampaignRequest } from '../campaign-request';
 import {
   runFlagshipV2,
   V2_EXECUTION_MODE,
@@ -27,9 +26,6 @@ import {
   V2_OUTPUT_USE,
   type GeneratedSceneMedia,
 } from '../flagship/run-flagship-v2';
-import { LOCKED_SCENE_ROLES, verifyStoryboardV2 } from '../flagship/storyboard-v2';
-import { loadHumanPlan, type HumanCreativePlan } from '../preview/human-plan';
-import { parseProductionAssetManifest, type ProductionAssetManifest } from '../production-assets';
 import { assertStoryboardVideoArtefactSafe } from './artefact-safety';
 import {
   assertWithinCostCeiling,
@@ -43,37 +39,36 @@ import {
   StoryboardVideoError,
   type StoryboardVideoExitCode,
 } from './failures';
-import { readFootagePack, type FootagePack } from './footage-pack';
 import { GenerationCache } from './generation-cache';
-import { resolveKeyframeLibrary } from './keyframe-library';
 import {
-  DEFAULT_PRE_GENERATED_SUBDIRECTORY,
-  MANUAL_GENERATION_PROVENANCE,
-  resolvePreGeneratedClips,
-  type PreGeneratedClipLibrary,
-} from './pre-generated-clips';
-import { assertPromptsAreSafe } from './prompt-safety';
+  assertMotionGateClears,
+  sceneNeedsMotionReview,
+  type MotionGateReport,
+} from './motion-review-gate';
+import { runMotionReview, type MotionReviewOutcome } from './motion-review-run';
+import { DEFAULT_MOTION_REVIEW_DIRECTORY, MotionReviewLedger } from './motion-review-store';
+import { MANUAL_GENERATION_PROVENANCE, type PreGeneratedClipLibrary } from './pre-generated-clips';
 import {
   generateSceneClip,
   prepareSceneClip,
   probeClip,
-  SCENE_TRIM_HANDLE_SECONDS,
   type GeneratedSceneClip,
   type PreparedSceneClip,
 } from './scene-media';
+import { modeReachesGenerationProvider, type SceneManifest } from './scene-manifest';
 import {
-  loadSceneManifest,
-  modeReachesGenerationProvider,
-  type SceneManifest,
-} from './scene-manifest';
+  movingSourcePathFor,
+  resolveStoryboardVideoContext,
+  type StoryboardVideoContext,
+} from './source-resolution-stage';
 import {
   assertNoSilentStillFallback,
   buildSourceDecisionReport,
   nextRequiredGenerationScene,
-  resolveSceneSources,
   type GenerationOutcomeForReport,
   type SceneSourceDecision,
 } from './source-precedence';
+import type { FootagePack } from './footage-pack';
 
 /**
  * Storyboard package to finished MP4, in one command.
@@ -111,6 +106,18 @@ export interface StoryboardVideoOptions {
   readonly generateAudio: boolean;
   readonly reuseGenerated: boolean;
   readonly regenerateScenes: ReadonlySet<number>;
+  /**
+   * Where human motion decisions live. Deliberately outside the run directory,
+   * because an approval outlives the run that prompted it.
+   */
+  readonly reviewDirectory?: string;
+  /**
+   * Also regenerate every scene a reviewer rejected, without naming them.
+   *
+   * Additive to `regenerateScenes`: the two together are the complete set of
+   * scenes this run may spend on beyond the ones that have no source at all.
+   */
+  readonly regenerateRejected?: boolean;
   readonly binaries: FfmpegBinaries;
   readonly workflowRunId: string;
   readonly now: Date;
@@ -142,6 +149,11 @@ export interface StoryboardVideoResult {
   readonly artefacts: readonly string[];
   readonly failure?: string;
   readonly failureKind?: string;
+  /** The motion gate as it stood when the run reached it. Absent on a dry run. */
+  readonly motionGate?: MotionGateReport;
+  readonly motionReviewGalleryPath?: string;
+  /** Scenes regenerated because a reviewer had rejected them. */
+  readonly regeneratedRejectedScenes?: readonly number[];
 }
 
 async function writeArtefact(runDirectory: string, name: string, value: unknown): Promise<string> {
@@ -161,6 +173,11 @@ export async function runStoryboardVideo(
   const artefacts: string[] = [];
   await mkdir(runDirectory, { recursive: true });
 
+  // Held outside the try so a failure can still report the gate a person needs
+  // to act on. A refusal that will not say which scenes blocked it is a
+  // refusal an operator has to reproduce before they can fix anything.
+  let motionReview: MotionReviewOutcome | null = null;
+
   const fail = (error: unknown): StoryboardVideoResult => {
     const typed =
       error instanceof StoryboardVideoError
@@ -179,98 +196,102 @@ export async function runStoryboardVideo(
       artefacts,
       failure: typed.message,
       failureKind: typed.kind,
+      ...(motionReview ? { motionGate: motionReview.gate } : {}),
+      ...(motionReview?.galleryPath ? { motionReviewGalleryPath: motionReview.galleryPath } : {}),
     };
   };
 
   try {
-    // --- 1. the locked storyboard, the plan and the scene manifest ---------
-    onProgress?.('verifying the locked storyboard package');
-    const storyboard = await verifyStoryboardV2(options.storyboardRoot);
+    // --- 1–6. the storyboard, the plan, the keyframes, the sources ----------
+    // One shared resolution stage, so the review command and this run always
+    // decide over identical inputs. A second implementation would eventually
+    // review a different set of clips from the ones that get rendered.
+    const reviewDirectory = resolve(
+      options.reviewDirectory ?? join(runDirectory, DEFAULT_MOTION_REVIEW_DIRECTORY),
+    );
+    const ledger = await MotionReviewLedger.open(reviewDirectory);
 
-    const campaignDirectory = resolve(options.campaignDirectory);
-    const workPackRoot = resolve(options.workPackRoot);
-    const libraryManifestPath = join(workPackRoot, 'asset-root', 'assets.json');
-    let captureLibrary: ProductionAssetManifest | null = null;
-    try {
-      captureLibrary = parseProductionAssetManifest(
-        JSON.parse(await readFile(libraryManifestPath, 'utf8')),
-        libraryManifestPath,
-      );
-    } catch {
-      captureLibrary = null;
-    }
+    const resolveContext = async (
+      regenerateScenes: ReadonlySet<number>,
+    ): Promise<StoryboardVideoContext> =>
+      resolveStoryboardVideoContext({
+        storyboardRoot: options.storyboardRoot,
+        framesDirectory: options.framesDirectory,
+        workPackRoot: options.workPackRoot,
+        campaignDirectory: options.campaignDirectory,
+        ...(options.footagePackRoot ? { footagePackRoot: options.footagePackRoot } : {}),
+        ...(options.preGeneratedClipsDirectory
+          ? { preGeneratedClipsDirectory: options.preGeneratedClipsDirectory }
+          : {}),
+        ...(options.sceneManifestPath ? { sceneManifestPath: options.sceneManifestPath } : {}),
+        scratchDirectory: runDirectory,
+        regenerateScenes,
+        runner,
+        binaries: options.binaries,
+        ...(onProgress ? { onProgress } : {}),
+      });
 
-    const basePlan = await loadBasePlan(campaignDirectory, runDirectory, libraryManifestPath);
+    let context = await resolveContext(options.regenerateScenes);
+    let regenerateScenes = new Set(options.regenerateScenes);
+    let regeneratedRejectedScenes: number[] = [];
 
-    const sceneManifestPath =
-      options.sceneManifestPath ?? join(campaignDirectory, 'scene-manifest.json');
-    onProgress?.('reading the ordered scene manifest');
-    const sceneManifest = await loadSceneManifest(sceneManifestPath, storyboard);
-
-    // How much source material each scene needs: its beat plus the handles the
-    // deterministic selector will demand at each end.
-    const requiredSecondsByScene = buildRequiredSeconds(basePlan);
-    const requiredFor = (sceneNumber: number): number =>
-      requiredSecondsByScene.get(sceneNumber) ?? 0;
-
-    // --- 2. the authoritative keyframes ------------------------------------
-    onProgress?.(`resolving the ten approved keyframes from ${options.framesDirectory}`);
-    const keyframes = await resolveKeyframeLibrary({
-      framesDirectory: options.framesDirectory,
-      runner,
-      binaries: options.binaries,
-    });
-
-    // --- 3. hand-animated clips, if any ------------------------------------
-    const preGeneratedDirectory =
-      options.preGeneratedClipsDirectory ??
-      join(options.framesDirectory, DEFAULT_PRE_GENERATED_SUBDIRECTORY);
-    const preGeneratedClips = await resolvePreGeneratedClips({
-      directory: preGeneratedDirectory,
-      runner,
-      binaries: options.binaries,
-      requiredSecondsByScene,
-    });
-    if (preGeneratedClips.clips.length > 0) {
+    if (context.preGeneratedClips.clips.length > 0) {
       onProgress?.(
-        `found ${preGeneratedClips.clips.length} hand-animated clip(s) (${preGeneratedClips.clips
+        `found ${context.preGeneratedClips.clips.length} hand-animated clip(s) (${context.preGeneratedClips.clips
           .map((clip) => clip.frameId)
           .join(', ')}) — provenance ${MANUAL_GENERATION_PROVENANCE}, reused without any API call`,
       );
     }
-
-    // --- 4. the footage pack -----------------------------------------------
-    let footagePack: FootagePack | null = null;
-    if (options.footagePackRoot) {
-      onProgress?.('reading the footage acquisition pack');
-      footagePack = await readFootagePack({
-        packRoot: options.footagePackRoot,
-        runner,
-        binaries: options.binaries,
-      });
+    if (context.footagePack) {
       onProgress?.(
-        `${footagePack.originals.length} verified original(s); ${footagePack.refusedByLocationCount} preview/contact-sheet file(s) refused by location`,
+        `${context.footagePack.originals.length} verified original(s); ${context.footagePack.refusedByLocationCount} preview/contact-sheet file(s) refused by location`,
       );
     }
 
-    // --- 5. prompts, before anything is uploaded ---------------------------
-    const checkedPrompts = assertPromptsAreSafe(sceneManifest.scenes, (scene) =>
-      modeReachesGenerationProvider(scene.generationMode),
-    );
+    // Rejected scenes become regeneration targets before the cost is computed,
+    // so what a reviewer refused is priced into the ceiling rather than
+    // discovered after the estimate was printed.
+    if (options.regenerateRejected) {
+      const rejected = await findRejectedScenes({
+        context,
+        ledger,
+        reviewDirectory,
+        runner,
+        binaries: options.binaries,
+        now: options.now,
+      });
+      regeneratedRejectedScenes = rejected.filter(
+        (sceneNumber) => !regenerateScenes.has(sceneNumber),
+      );
+      if (regeneratedRejectedScenes.length > 0) {
+        onProgress?.(
+          `a reviewer rejected scene(s) ${regeneratedRejectedScenes.join(', ')} — they are added to the regeneration set`,
+        );
+        regenerateScenes = new Set([...regenerateScenes, ...regeneratedRejectedScenes]);
+        context = await resolveContext(regenerateScenes);
+      }
+    }
 
-    // --- 6. sources ---------------------------------------------------------
-    const decisions = resolveSceneSources({
+    const {
+      storyboard,
       sceneManifest,
-      storyboardRolesBySceneNumber: new Map(
-        LOCKED_SCENE_ROLES.map((role, index) => [index + 1, role]),
-      ),
+      sceneManifestPath,
+      basePlan,
       keyframes,
-      footagePack,
       preGeneratedClips,
-      regenerateScenes: options.regenerateScenes,
-      captureLibrary,
-      requiredSourceSecondsForScene: (scene) => requiredFor(scene.sceneNumber),
-    });
+      footagePack,
+      decisions,
+      checkedPrompts,
+      campaignDirectory,
+      workPackRoot,
+    } = context;
+    const requiredFor = (sceneNumber: number): number =>
+      context.requiredSecondsByScene.get(sceneNumber) ?? 0;
+
+    // Byte-identity of everything a reviewer already approved is a promise the
+    // run keeps rather than states. The checksums are taken before generation
+    // and compared after it.
+    const approvedChecksumsBefore = collectApprovedClipChecksums(context, ledger);
 
     // --- 7. cost, before any upload ----------------------------------------
     const costEstimate = buildCostEstimate({
@@ -296,7 +317,9 @@ export async function runStoryboardVideo(
         generateAudio: options.generateAudio,
         dryRun: options.dryRun,
         reuseGenerated: options.reuseGenerated,
-        regenerateScenes: [...options.regenerateScenes].sort((a, b) => a - b),
+        regenerateScenes: [...regenerateScenes].sort((a, b) => a - b),
+        regeneratedBecauseRejected: [...regeneratedRejectedScenes].sort((a, b) => a - b),
+        reviewDirectory,
         framesDirectory: keyframes.framesDirectory,
         keyframes: keyframes.frames.map((frame) => ({
           frameId: frame.frameId,
@@ -425,6 +448,10 @@ export async function runStoryboardVideo(
         sleep,
         runner,
         binaries: options.binaries,
+        // A scene the operator or a reviewer targeted must not resolve to the
+        // cached clip that was rejected: every cache-key input is unchanged, so
+        // the lookup would hit and the regeneration would silently not happen.
+        bypassCache: regenerateScenes.has(decision.sceneNumber),
         ...(onProgress ? { onProgress } : {}),
       });
       generated.set(decision.sceneNumber, clip);
@@ -433,17 +460,61 @@ export async function runStoryboardVideo(
     // No scene may quietly become a still because its generation never happened.
     assertNoSilentStillFallback(decisions, new Set(generated.keys()));
 
+    // --- 9b. the motion gate, before anything is trimmed or composited -----
+    //
+    // This is the last point at which the run has produced no timeline and no
+    // file. Everything downstream — the trim, the staging, the filter graph,
+    // FFmpeg — is skipped when a scene has no standing human approval of the
+    // exact clip about to be used.
+    onProgress?.('inspecting every resolved moving clip and evaluating the motion gate');
+    const review = (motionReview = await runMotionReview({
+      context,
+      generatedPathsByScene: new Map(
+        [...generated.entries()].map(([sceneNumber, clip]) => [sceneNumber, clip.originalPath]),
+      ),
+      reviewDirectory,
+      ledger,
+      runner,
+      binaries: options.binaries,
+      now: options.now,
+      writeGallery: true,
+      ...(onProgress ? { onProgress } : {}),
+    }));
+
+    assertApprovedClipsUnchanged({
+      before: approvedChecksumsBefore,
+      after: review.inspectionsByScene,
+    });
+
+    if (!review.gate.clears) {
+      // Written before throwing, so the operator has the gate report and the
+      // gallery in hand rather than only an error message.
+      artefacts.push(
+        await writeArtefact(runDirectory, 'motion-gate-blocked.json', {
+          runVersion: STORYBOARD_VIDEO_RUN_VERSION,
+          workflowRunId: options.workflowRunId,
+          reviewDirectory,
+          galleryPath: review.galleryPath,
+          renderStarted: false,
+          ffmpegCompositionStarted: false,
+          gate: review.gate,
+        }),
+      );
+    }
+    assertMotionGateClears(review.gate);
+    onProgress?.(
+      `motion gate cleared — ${review.gate.rows.length} moving scene(s) carry a standing approval`,
+    );
+
     // --- 10. prepare every moving source -----------------------------------
     const prepared = new Map<number, PreparedSceneClip>();
     const trimmedDirectory = join(runDirectory, 'trimmed-scenes');
     for (const decision of decisions) {
-      const source = await resolveMovingSourcePath({
+      const source = resolveMovingSourcePath({
         decision,
         generated,
         preGeneratedClips,
         footagePack,
-        runner,
-        binaries: options.binaries,
       });
       if (!source) continue;
 
@@ -554,13 +625,33 @@ export async function runStoryboardVideo(
         planAuthoredBy: basePlan.authoredBy,
         sceneManifestAuthoredBy: sceneManifest.authoredBy,
         derivedPlanChanges: derived.changes,
-        sceneProvenance: decisions.map((decision) => ({
-          sceneNumber: decision.sceneNumber,
-          sceneRole: decision.sceneRole,
-          sourceType: decision.selectedSourceType,
-          identifier: decision.selectedIdentifier,
-          generationProvenance: decision.generationProvenance ?? null,
-        })),
+        sceneProvenance: decisions.map((decision) => {
+          const row = review.gate.rows.find(
+            (candidate) => candidate.sceneNumber === decision.sceneNumber,
+          );
+          const inspection = review.inspectionsByScene.get(decision.sceneNumber);
+          return {
+            sceneNumber: decision.sceneNumber,
+            sceneRole: decision.sceneRole,
+            sourceType: decision.selectedSourceType,
+            identifier: decision.selectedIdentifier,
+            generationProvenance: decision.generationProvenance ?? null,
+            sourceClipChecksumSha256: inspection?.clipChecksumSha256 ?? null,
+            motionReviewStatus: row?.status ?? 'NOT_REVIEWABLE',
+            motionApprovedBy: row?.decidedBy ?? null,
+            motionApprovedAt: row?.decidedAt ?? null,
+            motionDecisionId: row?.decisionId ?? null,
+            acknowledgedFidelityFindings: inspection?.openFidelityFindings ?? [],
+          };
+        }),
+        motionGate: {
+          evaluatedAt: review.gate.evaluatedAt,
+          clears: review.gate.clears,
+          reviewDirectory,
+          galleryPath: review.galleryPath,
+          notice: review.gate.notice,
+        },
+        regeneratedBecauseRejected: [...regeneratedRejectedScenes].sort((a, b) => a - b),
         manualClipNotice:
           preGeneratedClips.clips.length > 0
             ? `${preGeneratedClips.clips.length} scene(s) use footage animated by hand in LTX Studio (${MANUAL_GENERATION_PROVENANCE}). This pipeline did not produce those bytes and does not claim to have generated them.`
@@ -592,6 +683,9 @@ export async function runStoryboardVideo(
         ...(flagship.outputPath ? { outputPath: flagship.outputPath } : {}),
         ...(flagship.qaVerdict ? { qaVerdict: flagship.qaVerdict } : {}),
         artefacts,
+        motionGate: review.gate,
+        ...(review.galleryPath ? { motionReviewGalleryPath: review.galleryPath } : {}),
+        regeneratedRejectedScenes,
         failure: flagship.failure ?? 'the render path failed',
       };
     }
@@ -611,6 +705,9 @@ export async function runStoryboardVideo(
       ...(flagship.measured ? { measured: flagship.measured } : {}),
       ...(flagship.galleryPath ? { galleryPath: flagship.galleryPath } : {}),
       artefacts,
+      motionGate: review.gate,
+      ...(review.galleryPath ? { motionReviewGalleryPath: review.galleryPath } : {}),
+      regeneratedRejectedScenes,
     };
   } catch (error) {
     return fail(error);
@@ -622,59 +719,83 @@ export async function runStoryboardVideo(
 // ---------------------------------------------------------------------------
 
 /**
- * The campaign plan, loaded against a provisional request.
+ * Which scenes a reviewer has refused, as things stand.
  *
- * `loadHumanPlan` binds a plan to a brief by prompt hash, so the request has
- * to be materialised first even though the render will materialise its own
- * later. Cheap, and it means a plan written for a different brief is refused
- * here rather than after the money has been spent.
+ * Costs one inspection pass and no money. It runs *before* the cost estimate
+ * so a rejected scene's regeneration is priced into the ceiling the operator
+ * authorises, rather than discovered after the estimate was printed.
  */
-async function loadBasePlan(
-  campaignDirectory: string,
-  runDirectory: string,
-  libraryManifestPath: string,
-): Promise<HumanCreativePlan> {
-  const template = JSON.parse(
-    await readFile(join(campaignDirectory, 'request.template.json'), 'utf8'),
-  ) as Record<string, unknown> & { promptFile?: string };
-  const promptFile = template.promptFile;
-  if (typeof promptFile !== 'string') {
-    throw new StoryboardVideoError(
-      'INVALID_STORYBOARD',
-      'the request template must declare a promptFile',
-    );
-  }
-  const campaignPrompt = (await readFile(resolve(campaignDirectory, promptFile), 'utf8')).trim();
-  const { promptFile: _omitted, ...rest } = template;
-  const target = join(runDirectory, 'storyboard-video-request.preflight.json');
-  await mkdir(dirname(target), { recursive: true });
-  await writeFile(
-    target,
-    `${JSON.stringify(
-      {
-        ...rest,
-        campaignPrompt,
-        sourceAssetManifest: libraryManifestPath,
-        outputDirectory: runDirectory,
-      },
-      null,
-      2,
-    )}\n`,
-    'utf8',
-  );
-  const request = await loadCampaignRequest(target);
-  return loadHumanPlan(join(campaignDirectory, 'creative-plan.json'), request);
+async function findRejectedScenes(input: {
+  context: StoryboardVideoContext;
+  ledger: MotionReviewLedger;
+  reviewDirectory: string;
+  runner: CommandRunner;
+  binaries: FfmpegBinaries;
+  now: Date;
+}): Promise<readonly number[]> {
+  const review = await runMotionReview({
+    context: input.context,
+    reviewDirectory: input.reviewDirectory,
+    ledger: input.ledger,
+    runner: input.runner,
+    binaries: input.binaries,
+    now: input.now,
+    writeGallery: false,
+  });
+  return review.gate.rows
+    .filter((row) => row.status === 'REJECTED')
+    .filter(
+      (row) => row.sourceType === 'LTX_GENERATED' || row.sourceType === 'PRE_GENERATED_MANUAL_CLIP',
+    )
+    .map((row) => row.sceneNumber);
 }
 
-/** Beat duration plus the handles the deterministic selector requires. */
-function buildRequiredSeconds(plan: HumanCreativePlan): Map<number, number> {
-  const required = new Map<number, number>();
-  plan.beats.forEach((beat, index) => {
-    const head = beat.transitionIn ? SCENE_TRIM_HANDLE_SECONDS : 0;
-    const tail = plan.beats[index + 1]?.transitionIn ? SCENE_TRIM_HANDLE_SECONDS : 0;
-    required.set(index + 1, Number((beat.durationSeconds + head + tail).toFixed(6)));
-  });
-  return required;
+/**
+ * The clip checksums a reviewer has already approved, taken before generation.
+ *
+ * The point is not to detect a deliberate replacement — an identity change
+ * already invalidates the approval and blocks the gate. It is to catch a
+ * selective regeneration that touched a scene it was never asked to touch,
+ * which would otherwise show up only as a gate refusal with no explanation of
+ * what moved.
+ */
+function collectApprovedClipChecksums(
+  context: StoryboardVideoContext,
+  ledger: MotionReviewLedger,
+): ReadonlyMap<number, string> {
+  const approved = new Map<number, string>();
+  for (const decision of context.decisions) {
+    if (!sceneNeedsMotionReview(decision)) continue;
+    const latest = ledger.latestAny(decision.sceneNumber);
+    if (latest?.verdict === 'APPROVED') {
+      approved.set(decision.sceneNumber, latest.identity.clipChecksumSha256);
+    }
+  }
+  return approved;
+}
+
+function assertApprovedClipsUnchanged(input: {
+  before: ReadonlyMap<number, string>;
+  after: ReadonlyMap<number, { readonly clipChecksumSha256: string }>;
+}): void {
+  const changed: string[] = [];
+  for (const [sceneNumber, checksum] of input.before) {
+    const now = input.after.get(sceneNumber)?.clipChecksumSha256;
+    // A scene that dropped out of the inspection set entirely is not a change
+    // to an approved file; the gate reports that as its own status.
+    if (now && now !== checksum) {
+      changed.push(
+        `scene ${sceneNumber} (approved ${checksum.slice(0, 16)}…, now ${now.slice(0, 16)}…)`,
+      );
+    }
+  }
+  if (changed.length === 0) return;
+  throw new StoryboardVideoError(
+    'MOTION_REVIEW_BLOCKED',
+    `this run changed the bytes of ${changed.length} scene(s) a reviewer had already approved: ${changed.join(
+      '; ',
+    )}. Selective regeneration must leave approved clips byte-identical; nothing has been composited.`,
+  );
 }
 
 interface MovingSource {
@@ -682,42 +803,48 @@ interface MovingSource {
   readonly durationSeconds: number;
 }
 
-async function resolveMovingSourcePath(input: {
+/**
+ * The clip a scene renders, and how long it runs.
+ *
+ * The path comes from `movingSourcePathFor`, the same function the review uses,
+ * so the file that was inspected and the file that is trimmed are the same
+ * file by construction rather than by two implementations happening to agree.
+ * Only the measured duration is looked up here, because the review has no use
+ * for it.
+ *
+ * A capture or a deterministic-motion-graphics scene has no moving source and
+ * keeps its still panel, which the flagship path stages exactly as it always
+ * has.
+ */
+function resolveMovingSourcePath(input: {
   decision: SceneSourceDecision;
   generated: ReadonlyMap<number, GeneratedSceneClip>;
   preGeneratedClips: PreGeneratedClipLibrary;
   footagePack: FootagePack | null;
-  runner: CommandRunner;
-  binaries: FfmpegBinaries;
-}): Promise<MovingSource | null> {
+}): MovingSource | null {
   const { decision } = input;
+  const absolutePath = movingSourcePathFor({
+    decision,
+    preGeneratedClips: input.preGeneratedClips,
+    footagePack: input.footagePack,
+    generatedPathsByScene: new Map(
+      [...input.generated.entries()].map(([sceneNumber, clip]) => [sceneNumber, clip.originalPath]),
+    ),
+  });
+  if (!absolutePath) return null;
 
-  if (decision.selectedSourceType === 'LTX_GENERATED') {
-    const clip = input.generated.get(decision.sceneNumber);
-    return clip
-      ? { absolutePath: clip.originalPath, durationSeconds: clip.originalDurationSeconds }
-      : null;
-  }
-  if (decision.selectedSourceType === 'PRE_GENERATED_MANUAL_CLIP') {
-    const clip = input.preGeneratedClips.clips.find(
-      (candidate) => candidate.sceneNumber === decision.sceneNumber,
-    );
-    return clip ? { absolutePath: clip.absolutePath, durationSeconds: clip.durationSeconds } : null;
-  }
-  if (decision.selectedSourceType === 'ACQUIRED_PRODUCTION_FOOTAGE') {
-    const original = input.footagePack?.originals.find(
-      (candidate) => candidate.assetId === decision.acquiredAssetId,
-    );
-    return original
-      ? {
-          absolutePath: original.absolutePath,
-          durationSeconds: original.measured.durationSeconds,
-        }
-      : null;
-  }
-  // A capture or a deterministic-motion-graphics scene keeps its still panel,
-  // which the flagship path stages exactly as it always has.
-  return null;
+  const durationSeconds =
+    decision.selectedSourceType === 'LTX_GENERATED'
+      ? input.generated.get(decision.sceneNumber)?.originalDurationSeconds
+      : decision.selectedSourceType === 'PRE_GENERATED_MANUAL_CLIP'
+        ? input.preGeneratedClips.clips.find(
+            (candidate) => candidate.sceneNumber === decision.sceneNumber,
+          )?.durationSeconds
+        : input.footagePack?.originals.find(
+            (candidate) => candidate.assetId === decision.acquiredAssetId,
+          )?.measured.durationSeconds;
+
+  return durationSeconds === undefined ? null : { absolutePath, durationSeconds };
 }
 
 function describeProvenance(decision: SceneSourceDecision | undefined): string {

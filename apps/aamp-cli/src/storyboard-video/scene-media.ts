@@ -101,6 +101,16 @@ export interface GenerateSceneClipOptions {
   readonly sleep: (ms: number) => Promise<void>;
   readonly runner: CommandRunner;
   readonly binaries: FfmpegBinaries;
+  /**
+   * Skip the cache for this scene and buy a fresh generation.
+   *
+   * Set only when the operator named the scene with `--regenerate-scene`, or
+   * when a reviewer rejected the clip currently bound to it. Without this, a
+   * rejected scene would re-resolve to the very clip that was rejected: every
+   * cache-key input is unchanged, so the lookup is a hit, and the regeneration
+   * the reviewer asked for would silently not happen.
+   */
+  readonly bypassCache?: boolean;
   readonly onProgress?: (message: string) => void;
 }
 
@@ -131,7 +141,7 @@ export async function generateSceneClip(
     cameraMotion: scene.cameraMotion,
   });
 
-  const cached = await options.cache.lookup(cacheKey);
+  const cached = options.bypassCache ? null : await options.cache.lookup(cacheKey);
   if (cached) {
     options.onProgress?.(
       `scene ${scene.sceneNumber}: reusing a byte-verified cached generation — no upload, no request, no charge`,

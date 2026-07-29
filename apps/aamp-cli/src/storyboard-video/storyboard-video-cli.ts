@@ -6,6 +6,7 @@ import { assertSupportedLtxModel, LtxModelSupportError, type LtxModel } from '@c
 
 import { V2_CAMPAIGN_DIRECTORY } from '../flagship/flagship2-cli';
 import { STORYBOARD_VIDEO_EXIT_CODES, type StoryboardVideoExitCode } from './failures';
+import { DEFAULT_MOTION_REVIEW_DIRECTORY } from './motion-review-store';
 import { DEFAULT_PRE_GENERATED_SUBDIRECTORY } from './pre-generated-clips';
 import { runStoryboardVideo } from './run-storyboard-video';
 
@@ -43,7 +44,9 @@ interface Options {
   provider?: string;
   model?: string;
   maxCostCents?: string;
+  reviewDir?: string;
   regenerateScenes: number[];
+  regenerateRejected: boolean;
   dryRun: boolean;
   json: boolean;
   reuseGenerated: boolean;
@@ -67,6 +70,8 @@ const USAGE = `aamp:storyboard-video — animate the locked storyboard into one 
   --campaign-dir <dir>             committed campaign source; defaults to the packaged one
   --storyboard-01 <dir>            Storyboard-01's package; proven absent from this run
   --regenerate-scene <n>           regenerate this scene even if a clip exists (repeatable)
+  --regenerate-rejected            also regenerate every scene a reviewer rejected
+  --review-dir <dir>               where human motion decisions live (defaults to <output-dir>/${DEFAULT_MOTION_REVIEW_DIRECTORY})
   --reuse-generated                prefer cached generations (default)
   --generate-audio                 ask LTX for an audio track (mixed only as optional ambience)
   --dry-run                        plan and price it; reads no API key, makes no request, spends nothing
@@ -76,11 +81,17 @@ const USAGE = `aamp:storyboard-video — animate the locked storyboard into one 
 Scenes that preserve exact product UI or exact typography never reach a
 generation provider — they are animated deterministically from the approved
 frame, because a model asked to redraw a rankings table invents its contents.
+
+Every scene with moving footage must carry a standing human approval of the
+exact clip before anything is composited. There is no flag that skips it: run
+"pnpm aamp:motion-review inspect" to look at the footage, then approve or
+reject each scene.
 `;
 
 export function parseStoryboardVideoArgs(argv: readonly string[]): Options {
   const options: Options = {
     regenerateScenes: [],
+    regenerateRejected: false,
     dryRun: false,
     json: false,
     reuseGenerated: true,
@@ -150,6 +161,13 @@ export function parseStoryboardVideoArgs(argv: readonly string[]): Options {
         index += 1;
         break;
       }
+      case '--regenerate-rejected':
+        options.regenerateRejected = true;
+        break;
+      case '--review-dir':
+        options.reviewDir = value;
+        index += 1;
+        break;
       case '--reuse-generated':
         options.reuseGenerated = true;
         break;
@@ -277,6 +295,8 @@ export async function runStoryboardVideoCli(
     generateAudio: options.generateAudio,
     reuseGenerated: options.reuseGenerated,
     regenerateScenes: new Set(options.regenerateScenes),
+    regenerateRejected: options.regenerateRejected,
+    ...(options.reviewDir ? { reviewDirectory: resolve(context.cwd, options.reviewDir) } : {}),
     binaries: resolveFfmpegBinaries(context.env),
     workflowRunId: context.workflowRunId ?? randomUUID(),
     now: context.now ?? new Date(),
@@ -300,6 +320,9 @@ export async function runStoryboardVideoCli(
           qaVerdict: result.qaVerdict ?? null,
           measured: result.measured ?? null,
           galleryPath: result.galleryPath ?? null,
+          motionReviewGalleryPath: result.motionReviewGalleryPath ?? null,
+          motionGate: result.motionGate ?? null,
+          regeneratedRejectedScenes: result.regeneratedRejectedScenes ?? [],
           artefacts: result.artefacts,
           failureKind: result.failureKind ?? null,
           failure: result.failure ?? null,
