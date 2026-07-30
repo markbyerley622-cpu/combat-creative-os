@@ -81,6 +81,37 @@ Note that first-frame agreement of 0.9988 is not in tension with this. It
 measures the _opening_ composition against the plate, which is excellent; drift
 is what happens after, and no automated measure in this repository scores it.
 
+### Recorded decisions
+
+**Scene 1 — REJECTED by Riki Taylor**, for `COMPOSITION_DRIFT` and `GAZE_LIFT`,
+recorded in the append-only motion-review ledger against the run's own review
+identity. The take is not approved and is not reused in the final
+advertisement. Regeneration needs a materially smaller push held to the
+approved framing, with the eyeline kept down on the device throughout — and it
+is a fresh, separately authorised paid request.
+
+```sh
+pnpm aamp:ltx-scene-01 decide --verdict REJECTED   --reviewer "<name>" --feedback "<what was observed and what must change>"
+```
+
+The `decide` subcommand reads no key and makes no request: recording a
+rejection can never spend money, and the regeneration it implies is a separate
+deliberate act.
+
+**Scenes 8 and 9 — two-stage `HANDHELD_DRIFT`.** The authored creative
+intention is preserved rather than substituted: the provider is asked for
+`static`, and AAMP supplies the drift afterwards.
+
+| Scene | Provider | Post-motion                                                  | Preserves                                          |
+| ----- | -------- | ------------------------------------------------------------ | -------------------------------------------------- |
+| 8     | `static` | smooth **2%** push, no rotation, no shake, no drift          | the right-side predictor-rank interface space      |
+| 9     | `static` | smooth **1%** drift **left**, no zoom, no rotation, no shake | the phone geometry and discussion-interface region |
+
+Neither is mapped to `dolly_in`, `dolly_out` or any other LTX move. **The FFmpeg
+execution of the second stage is not implemented, and neither scene has been
+generated.** What exists today is the typed contract, its enforcement and its
+tests.
+
 ### The two transfer-host grants, and why there are two
 
 `LTX_ALLOWED_UPLOAD_HOSTS` and `LTX_ALLOWED_RESULT_HOSTS` each permit the single

@@ -302,28 +302,32 @@ bottom navigation visible and no wide-breakpoint navigation anywhere; hero
 mapping uniformity 1.0003. See the rules below and
 `docs/runbooks/product-motion-proof.md`.
 
-**The first real paid AAMP storyboard-to-LTX generation is done, and the clip
-is not approved.** `pnpm aamp:ltx-scene-01` took the authoritative high-quality
-Scene-1 plate through one capped `ltx-2-3-fast` request to a genuine
-1080x1920 clip. **Proven live:** exactly **1 of 1** authorised billable
-submission; **36¢** charged against a **40¢** ceiling; the plate uploaded
-through a signed PUT on `storage.googleapis.com` and the result downloaded from
-the same host under a _separate_ grant; an ffprobe-verified 1080x1920 h264
-yuv420p MP4 at 24.000 fps and 6.042 s with **no audio stream**; first-frame
-agreement **0.9988** against FRAME-01 and motion energy **2.0534**; 17 of 17
-binding checks `PASS`, zero measured defects; the post-LTX `FIGHTS THIS WEEKEND`
-notification composited over real generated footage; and no credential, signed
-URL or query string in any artefact. **Also proven at zero cost:** 68 tests,
-including a camera-motion boundary that refuses before any network access and a
-`--dry-run` that reads no key. **Not proven — creative quality, and the clip
-fails its own brief:** the brief asked for a ~3% push holding the same framing,
-and the model delivered roughly **1.75x**, ending with the subject's eyes
-outside the frame, plus a gaze lift to the lens in the opening seconds. Identity,
-hands, rear-facing phone rigidity and the absence of invented graphics are all
-correct. **Recommendation on the evidence: reject on composition drift.** The
-review is `PENDING`, nothing was retried, and Scenes 2–10 were not generated.
-See the "Scene-1 acceptance" rules below and
-`docs/runbooks/ltx-scene-01-acceptance.md`.
+**The first real paid AAMP storyboard-to-LTX generation is done, and a named
+reviewer rejected the take.** `pnpm aamp:ltx-scene-01` turned the authoritative
+FRAME-01 plate into a genuine 1080x1920 clip on one capped `ltx-2-3-fast`
+request. **Proven live:** exactly **1 of 1** authorised billable submission;
+**36¢** charged against a **40¢** ceiling; the plate uploaded through a signed
+PUT on `storage.googleapis.com` and the result downloaded from the same host
+under a _separate_ grant; an ffprobe-verified 1080x1920 h264/yuv420p MP4 at
+24.000 fps and 6.042 s with **no audio stream**; first-frame agreement
+**0.9988** and motion energy **2.0534**; 17 of 17 binding checks `PASS`; the
+post-LTX `FIGHTS THIS WEEKEND` notification composited over real generated
+footage; and no credential, signed URL or query string in any artefact.
+**Rejected by Riki Taylor** for `COMPOSITION_DRIFT` and `GAZE_LIFT` — the brief
+asked for a ~3% push holding the framing and the model delivered roughly 1.75x,
+ending with the subject's eyes outside frame, plus a gaze lift to the lens in
+the opening seconds. The decision is recorded in the append-only motion-review
+ledger; the take is not reused. Identity, hands, rear-facing phone rigidity and
+the absence of invented graphics were all correct. See the "Scene-1 acceptance"
+rules below and `docs/runbooks/ltx-scene-01-acceptance.md`.
+
+**Scenes 8 and 9 carry their authored `HANDHELD_DRIFT` in two stages.** The
+provider has no handheld value, so it is asked for `static` and AAMP supplies
+the drift deterministically afterwards — scene 8 a smooth 2% push preserving the
+predictor-rank interface space, scene 9 a smooth 1% leftward drift preserving
+the phone geometry and discussion-interface region. Neither is substituted with
+`dolly_in`, `dolly_out` or any other LTX move. **The FFmpeg execution of the
+second stage is not implemented yet and neither scene has been generated.**
 
 ## Scene-1 LTX acceptance — permanent rules
 
@@ -339,6 +343,22 @@ See the "Scene-1 acceptance" rules below and
   allowance that quietly covered it would be the widening this guard exists to
   prevent. Never add a per-invocation override or let a host arrive from
   configuration.
+- **A motion the provider cannot express is either routed in two stages or
+  refused — never substituted.** `HANDHELD_DRIFT` routes: the provider is asked
+  for `static` and a deterministic post-motion supplies the authored drift.
+  Routing is an explicit contract, not a fallback: a caller that does not
+  declare it will apply the second stage is **refused**, because a bare `static`
+  would be a locked-off shot labelled as a moving one. `toLtxCameraMotion`
+  cannot resolve a routed motion at all — only `routeLtxCameraMotion` can — so
+  no code path can obtain `static` for a drift by accident.
+- **A routed scene must state its second stage, and a native scene must not.**
+  `parseSceneManifest` enforces both, so every reader of a manifest gets the
+  rule. The post-motion block is authored: treatment, magnitude, direction,
+  what must be preserved and what is prohibited are all a person's words, with
+  no defaults — a drift nobody specified is a drift nobody approved. The
+  treatment vocabulary is closed and contains only smooth deterministic
+  transforms: no rotation, no random shake, nothing that could differ between
+  two runs of the same plan.
 - **The camera-motion vocabulary is provider-neutral and stays whole.** LTX
   accepting eight strings is not a reason to delete a move from AAMP.
   `ltx/camera-motion.ts` is the single serialization boundary, and it maps only

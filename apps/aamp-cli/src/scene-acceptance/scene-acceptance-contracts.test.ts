@@ -28,6 +28,7 @@ import {
   requirePlate,
   resolvePlateLibrary,
 } from './plate-library';
+import { recordSceneAcceptanceDecision } from './record-decision';
 import { buildPendingReviewRecord } from './review-record';
 import { assertRawClipUsable, runSceneAcceptance } from './run-scene-acceptance';
 import { parseArguments } from './scene-acceptance-cli';
@@ -594,5 +595,100 @@ describe('the command line', () => {
     expect(() => parseArguments(['--plates-dir', 'x', '--max-cost-cents', '0'])).toThrow(
       /positive whole number/,
     );
+  });
+});
+
+describe('recording a human decision', () => {
+  async function runDirectoryWithRecord(): Promise<string> {
+    const directory = await mkdtemp(join(tmpdir(), 'aamp-decide-'));
+    const brief = await loadCommittedBrief();
+    const record = buildPendingReviewRecord({
+      scene: brief.scene,
+      sceneRole: 'NOTIFICATION_HOOK',
+      clipChecksumSha256: 'a'.repeat(64),
+      plateChecksumSha256: 'b'.repeat(64),
+      motionPromptSha256: 'c'.repeat(64),
+      inspectionSha256: 'd'.repeat(64),
+      openHumanJudgementQuestions: [],
+    });
+    await writeFile(
+      join(directory, 'human-review-record.json'),
+      `${JSON.stringify(record, null, 2)}\n`,
+      'utf8',
+    );
+    return directory;
+  }
+
+  it('records a named rejection against the run’s own identity', async () => {
+    const directory = await runDirectoryWithRecord();
+    const recorded = await recordSceneAcceptanceDecision({
+      runDirectory: directory,
+      reviewer: 'Riki Taylor',
+      verdict: 'REJECTED',
+      feedback:
+        'The push is far larger than the brief asked for and the eyes leave frame. Regenerate with a materially smaller push held to the approved framing.',
+      now: new Date('2026-07-30T15:00:00.000Z'),
+    });
+
+    expect(recorded.verdict).toBe('REJECTED');
+    expect(recorded.reviewer).toBe('Riki Taylor');
+    expect(recorded.sceneNumber).toBe(1);
+    expect(recorded.decisionId).toMatch(/^[0-9a-f]{64}$/);
+    expect(recorded.supersedesDecisionId).toBeNull();
+
+    const line = await readFile(recorded.ledgerPath, 'utf8');
+    expect(line).toContain('REJECTED');
+    expect(line).toContain('Riki Taylor');
+  });
+
+  it('refuses a decision with no named person', async () => {
+    expect(() =>
+      parseArguments(['decide', '--verdict', 'REJECTED', '--feedback', 'x'.repeat(40)]),
+    ).toThrow(/--reviewer/);
+  });
+
+  it('refuses a rejection that says nothing actionable', async () => {
+    const directory = await runDirectoryWithRecord();
+    await expect(
+      recordSceneAcceptanceDecision({
+        runDirectory: directory,
+        reviewer: 'Riki Taylor',
+        verdict: 'REJECTED',
+        feedback: 'bad',
+        now: new Date('2026-07-30T15:00:00.000Z'),
+      }),
+    ).rejects.toThrow(/mood, not a direction/i);
+  });
+
+  it('refuses a review record that was edited after it was written', async () => {
+    const directory = await runDirectoryWithRecord();
+    const path = join(directory, 'human-review-record.json');
+    const record = JSON.parse(await readFile(path, 'utf8')) as Record<string, unknown>;
+    (record.identity as Record<string, unknown>).clipChecksumSha256 = 'e'.repeat(64);
+    await writeFile(path, `${JSON.stringify(record, null, 2)}\n`, 'utf8');
+
+    await expect(
+      recordSceneAcceptanceDecision({
+        runDirectory: directory,
+        reviewer: 'Riki Taylor',
+        verdict: 'REJECTED',
+        feedback:
+          'The push is far larger than the brief asked for and the eyes leave frame. Regenerate smaller.',
+        now: new Date('2026-07-30T15:00:00.000Z'),
+      }),
+    ).rejects.toThrow(/edited after it was written/i);
+  });
+
+  it('has nothing to decide about before a run has produced bytes', async () => {
+    const empty = await mkdtemp(join(tmpdir(), 'aamp-decide-empty-'));
+    await expect(
+      recordSceneAcceptanceDecision({
+        runDirectory: empty,
+        reviewer: 'Riki Taylor',
+        verdict: 'APPROVED',
+        feedback: 'looks right',
+        now: new Date('2026-07-30T15:00:00.000Z'),
+      }),
+    ).rejects.toThrow(/nothing to decide about/i);
   });
 });

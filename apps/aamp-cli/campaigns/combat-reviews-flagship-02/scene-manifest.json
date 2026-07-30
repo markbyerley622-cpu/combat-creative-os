@@ -105,7 +105,19 @@
       "preserveExactTypography": false,
       "preserveExactProductUi": false,
       "acceptableFootageRoles": ["WINNER_CELEBRATION"],
-      "intent": "The reward. The right of frame is protected plate for the result panel that is composited over it."
+      "intent": "The reward. The right of frame is protected plate for the result panel that is composited over it.",
+      "postMotion": {
+        "treatment": "SMOOTH_PUSH",
+        "magnitudePercent": 2,
+        "preservedRegion": "the right-side space the predictor-rank interface occupies",
+        "prohibitions": [
+          "no rotation",
+          "no random shake",
+          "no horizontal or vertical drift",
+          "must not crop or obscure the predictor-rank interface region"
+        ],
+        "rationale": "The authored move is a restrained handheld drift, which ltx-hosted has no value for. The provider is asked for a locked-off frame and the drift is applied deterministically, so the intention survives without asking a model for a move it cannot make."
+      }
     },
     {
       "sceneNumber": 9,
@@ -118,7 +130,21 @@
       "preserveExactTypography": false,
       "preserveExactProductUi": false,
       "acceptableFootageRoles": ["FAN_GROUP_REACTION"],
-      "intent": "The community beat. Real human reaction on the left; the product panel is composited on protected plate at the right."
+      "intent": "The community beat. Real human reaction on the left; the product panel is composited on protected plate at the right.",
+      "postMotion": {
+        "treatment": "SMOOTH_HORIZONTAL_DRIFT",
+        "magnitudePercent": 1,
+        "direction": "LEFT",
+        "preservedRegion": "the phone geometry and the discussion-interface region",
+        "prohibitions": [
+          "no zoom",
+          "no rotation",
+          "no random shake",
+          "must not distort the phone geometry",
+          "must not crop or obscure the discussion-interface region"
+        ],
+        "rationale": "The authored move is a restrained handheld drift, which ltx-hosted has no value for. The provider is asked for a locked-off frame and a one percent lateral drift is applied deterministically, preserving the phone's geometry."
+      }
     },
     {
       "sceneNumber": 10,

@@ -2,6 +2,8 @@ import { readFile } from 'node:fs/promises';
 
 import { z } from 'zod';
 
+import { routeLtxCameraMotion } from '@combat/providers';
+
 import {
   LOCKED_SCENE_ROLES,
   LOCKED_SCENE_SLOTS,
@@ -80,6 +82,49 @@ export type CameraMotion = (typeof CAMERA_MOTIONS)[number];
  */
 export const MOTION_PROMPT_MAX_WORDS = 200;
 
+/**
+ * The deterministic second stage of a two-stage camera motion.
+ *
+ * Authored, never inferred. When a scene's move cannot be expressed by the
+ * generation provider, the provider is asked for a locked-off frame and this
+ * block says exactly what AAMP applies afterwards — the treatment, how far, in
+ * which direction, and what must not be disturbed.
+ *
+ * Every field is a creative decision a person made. There is no default
+ * magnitude and no default treatment, because a drift nobody specified is a
+ * drift nobody approved. The vocabulary is closed and lists only treatments
+ * that are implementable as a smooth, deterministic transform: no rotation, no
+ * random shake, and nothing that could vary between two runs of the same plan.
+ */
+export const POST_MOTION_TREATMENTS = ['SMOOTH_PUSH', 'SMOOTH_HORIZONTAL_DRIFT'] as const;
+export type PostMotionTreatment = (typeof POST_MOTION_TREATMENTS)[number];
+
+export const POST_MOTION_DIRECTIONS = ['LEFT', 'RIGHT'] as const;
+
+/** Restrained by contract. A "drift" above this is a move, and a move needs its own scene. */
+export const POST_MOTION_MAX_MAGNITUDE_PERCENT = 5;
+
+const PostMotionSchema = z
+  .object({
+    treatment: z.enum(POST_MOTION_TREATMENTS),
+    /** How far, as a percentage of frame. Restrained by the ceiling above. */
+    magnitudePercent: z.number().positive().max(POST_MOTION_MAX_MAGNITUDE_PERCENT),
+    /** Required by a horizontal drift, meaningless to a push. */
+    direction: z.enum(POST_MOTION_DIRECTIONS).optional(),
+    /**
+     * What the move must not crop, obscure or distort, in the author's words.
+     * A drift that walked an interface out of frame would be a defect the
+     * transform itself cannot detect.
+     */
+    preservedRegion: z.string().min(1).max(200),
+    /** What this treatment may never do. Stated so a reviewer can check it. */
+    prohibitions: z.array(z.string().min(1).max(120)).min(1).max(8),
+    /** Why the provider cannot carry this move itself, in the author's words. */
+    rationale: z.string().min(1).max(300),
+  })
+  .strict();
+export type ScenePostMotion = z.infer<typeof PostMotionSchema>;
+
 const SceneSchema = z
   .object({
     sceneNumber: z.number().int().min(1).max(KEYFRAME_COUNT),
@@ -103,6 +148,14 @@ const SceneSchema = z
      * creative judgement and belongs to the author, not to a matcher.
      */
     acceptableFootageRoles: z.array(z.string().min(1).max(80)).max(8).default([]),
+    /**
+     * The deterministic second stage, for a motion the provider cannot express.
+     *
+     * Optional so every manifest written before two-stage routing existed still
+     * parses unchanged. Whether it is *required* is a cross-field rule, checked
+     * against the scene's own camera motion below.
+     */
+    postMotion: PostMotionSchema.optional(),
     /** Why this scene is what it is, in the author's own words. Travels into the report. */
     intent: z.string().min(1).max(600),
   })
@@ -135,7 +188,77 @@ export function parseSceneManifest(value: unknown, path?: string): SceneManifest
         .join('\n')}`,
     );
   }
+  assertPostMotionCoherent(result.data, path);
   return result.data;
+}
+
+/**
+ * The structural half of two-stage camera motion.
+ *
+ * Checked at parse time rather than against the storyboard, because it is a
+ * property of the scene alone: its generation mode, its camera motion, and
+ * whether the provider can carry that motion by itself. Every reader of a
+ * manifest gets it, so no downstream stage has to remember the rule.
+ *
+ * A scene whose move the provider cannot express must say what carries it
+ * instead — otherwise the provider is asked for a locked-off frame and nothing
+ * supplies the movement, producing a still labelled as a drift. A scene whose
+ * move the provider *can* express must not claim a second stage it does not
+ * need, or two moves would be applied to one shot.
+ */
+export function assertPostMotionCoherent(manifest: SceneManifest, path?: string): void {
+  const problems: string[] = [];
+
+  for (const scene of manifest.scenes) {
+    if (!modeReachesGenerationProvider(scene.generationMode)) {
+      if (scene.postMotion) {
+        problems.push(
+          `scene ${scene.sceneNumber} states a postMotion but is ${scene.generationMode}, which never calls a generation provider and animates deterministically already`,
+        );
+      }
+    } else {
+      let requiresPostMotion = false;
+      try {
+        requiresPostMotion = routeLtxCameraMotion(
+          scene.cameraMotion,
+        ).deterministicPostMotionRequired;
+      } catch {
+        // The provider refuses this motion outright. That is its own failure,
+        // raised before any upload; it is not a post-motion question.
+        requiresPostMotion = false;
+      }
+      if (requiresPostMotion && !scene.postMotion) {
+        problems.push(
+          `scene ${scene.sceneNumber} declares ${scene.cameraMotion}, which the generation provider cannot express, but states no postMotion. The provider would be asked for a locked-off frame and nothing would supply the move, producing a still labelled as a drift.`,
+        );
+      }
+      if (!requiresPostMotion && scene.postMotion) {
+        problems.push(
+          `scene ${scene.sceneNumber} states a postMotion but its camera motion ${scene.cameraMotion} is carried by the provider itself. Two moves would be applied to one shot.`,
+        );
+      }
+    }
+
+    if (scene.postMotion?.treatment === 'SMOOTH_HORIZONTAL_DRIFT' && !scene.postMotion.direction) {
+      problems.push(
+        `scene ${scene.sceneNumber}'s horizontal drift states no direction; left and right are different shots`,
+      );
+    }
+    if (scene.postMotion?.treatment === 'SMOOTH_PUSH' && scene.postMotion.direction) {
+      problems.push(
+        `scene ${scene.sceneNumber}'s push states a horizontal direction, which a push along the lens axis does not have`,
+      );
+    }
+  }
+
+  if (problems.length > 0) {
+    throw new StoryboardVideoError(
+      'INVALID_STORYBOARD',
+      `the scene manifest${path ? ` at ${path}` : ''} does not describe a coherent two-stage motion:\n${problems
+        .map((problem) => `  - ${problem}`)
+        .join('\n')}`,
+    );
+  }
 }
 
 /**

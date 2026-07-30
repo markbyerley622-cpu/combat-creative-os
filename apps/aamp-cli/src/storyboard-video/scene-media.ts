@@ -216,6 +216,10 @@ export async function generateSceneClip(
         providerOptions: {
           generateAudio: options.generateAudio,
           cameraMotion: scene.cameraMotion,
+          // The caller's undertaking to apply the second stage. Derived from
+          // the scene's own authored block rather than passed as a flag, so a
+          // scene that never declared a post-motion cannot claim one.
+          deterministicPostMotion: Boolean(scene.postMotion),
         },
       },
     });

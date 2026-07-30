@@ -3,6 +3,7 @@ import { join, resolve } from 'node:path';
 import { resolveFfmpegBinaries } from '@combat/media';
 
 import { STORYBOARD_VIDEO_EXIT_CODES } from '../storyboard-video/failures';
+import { recordSceneAcceptanceDecision } from './record-decision';
 import { runSceneAcceptance, type SceneAcceptanceResult } from './run-scene-acceptance';
 
 /**
@@ -32,6 +33,12 @@ aamp:ltx-scene-01 — prove one Scene-1 LTX generation from the authoritative pl
   --dry-run                  Resolve, price and report. No key is read, no request is made.
   --json                     Print the result as JSON.
   --help
+
+  decide --verdict APPROVED|REJECTED --reviewer "<name>" --feedback "<why>"
+                             Record a named person's judgement about the clip the
+                             run produced. Reads no key and makes no request:
+                             recording a rejection can never spend money.
+  --acknowledge <FINDING>    A fidelity finding accepted despite. Repeatable.
 
 Exactly one paid generation is ever submitted. There is no retry, no second
 variation and no fallback provider. Scenes 2-10 are not generated and no
@@ -76,6 +83,37 @@ export async function runSceneAcceptanceCli(options: SceneAcceptanceCliOptions):
   }
 
   const now = options.now ?? new Date();
+
+  if (parsed.decide) {
+    try {
+      const recorded = await recordSceneAcceptanceDecision({
+        runDirectory: resolve(options.cwd, parsed.outputDirectory ?? DEFAULT_OUTPUT_DIRECTORY),
+        reviewer: parsed.reviewer as string,
+        verdict: parsed.verdict as 'APPROVED' | 'REJECTED',
+        feedback: parsed.feedback as string,
+        acknowledgedFindings: parsed.acknowledged,
+        ...(parsed.reviewDirectory
+          ? { reviewDirectory: resolve(options.cwd, parsed.reviewDirectory) }
+          : {}),
+        now,
+      });
+      options.stdout('');
+      options.stdout(`recorded             ${recorded.verdict} for scene ${recorded.sceneNumber}`);
+      options.stdout(`reviewer             ${recorded.reviewer}`);
+      options.stdout(`at                   ${recorded.recordedAt}`);
+      options.stdout(`decision id          ${recorded.decisionId}`);
+      options.stdout(`ledger               ${recorded.ledgerPath}`);
+      if (recorded.supersedesDecisionId) {
+        options.stdout(`supersedes           ${recorded.supersedesDecisionId}`);
+      }
+      options.stdout('');
+      return STORYBOARD_VIDEO_EXIT_CODES.SUCCESS;
+    } catch (error) {
+      options.stderr(error instanceof Error ? error.message : String(error));
+      return STORYBOARD_VIDEO_EXIT_CODES.MOTION_REVIEW_BLOCKED;
+    }
+  }
+
   const binaries = resolveFfmpegBinaries(options.env);
 
   const result = await runSceneAcceptance({
@@ -131,6 +169,11 @@ function printSummary(result: SceneAcceptanceResult, stdout: (line: string) => v
 }
 
 interface ParsedArguments {
+  readonly decide: boolean;
+  readonly reviewer?: string;
+  readonly verdict?: 'APPROVED' | 'REJECTED';
+  readonly feedback?: string;
+  readonly acknowledged: readonly string[];
   readonly platesDirectory: string;
   readonly briefPath?: string;
   readonly outputDirectory?: string;
@@ -143,6 +186,11 @@ interface ParsedArguments {
 }
 
 export function parseArguments(argv: readonly string[]): ParsedArguments {
+  let decide = false;
+  let reviewer: string | undefined;
+  let verdict: 'APPROVED' | 'REJECTED' | undefined;
+  let feedback: string | undefined;
+  const acknowledged: string[] = [];
   let platesDirectory: string | undefined;
   let briefPath: string | undefined;
   let outputDirectory: string | undefined;
@@ -163,6 +211,26 @@ export function parseArguments(argv: readonly string[]): ParsedArguments {
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index] as string;
     switch (argument) {
+      case 'decide':
+        decide = true;
+        break;
+      case '--reviewer':
+        reviewer = requireValue(argument, argv[++index]);
+        break;
+      case '--feedback':
+        feedback = requireValue(argument, argv[++index]);
+        break;
+      case '--acknowledge':
+        acknowledged.push(requireValue(argument, argv[++index]));
+        break;
+      case '--verdict': {
+        const value = requireValue(argument, argv[++index]);
+        if (value !== 'APPROVED' && value !== 'REJECTED') {
+          throw new Error(`--verdict must be APPROVED or REJECTED, got "${value}"`);
+        }
+        verdict = value;
+        break;
+      }
       case '--plates-dir':
         platesDirectory = requireValue(argument, argv[++index]);
         break;
@@ -205,7 +273,33 @@ export function parseArguments(argv: readonly string[]): ParsedArguments {
   }
 
   if (help) {
-    return { platesDirectory: '', maxCostCents: 0, dryRun, json, help };
+    return { decide, acknowledged, platesDirectory: '', maxCostCents: 0, dryRun, json, help };
+  }
+
+  if (decide) {
+    // A decision is attributable or it does not happen, and a reason a person
+    // cannot act on is not a reason. Both are refused here rather than defaulted.
+    if (!reviewer) {
+      throw new Error(
+        'decide requires --reviewer: a judgement without a named person is not attributable, and this record exists to be attributable.',
+      );
+    }
+    if (!verdict) throw new Error('decide requires --verdict APPROVED or REJECTED');
+    if (!feedback) throw new Error('decide requires --feedback: say why, in your own words.');
+    return {
+      decide,
+      reviewer,
+      verdict,
+      feedback,
+      acknowledged,
+      platesDirectory: '',
+      ...(outputDirectory ? { outputDirectory } : {}),
+      ...(reviewDirectory ? { reviewDirectory } : {}),
+      maxCostCents: 0,
+      dryRun: false,
+      json,
+      help,
+    };
   }
   if (!platesDirectory) throw new Error('--plates-dir is required');
   if (maxCostCents === undefined) {
@@ -220,6 +314,8 @@ export function parseArguments(argv: readonly string[]): ParsedArguments {
   }
 
   return {
+    decide,
+    acknowledged,
     platesDirectory,
     ...(briefPath ? { briefPath } : {}),
     ...(outputDirectory ? { outputDirectory } : {}),

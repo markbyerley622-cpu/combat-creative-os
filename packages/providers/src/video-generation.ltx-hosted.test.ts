@@ -22,6 +22,7 @@ import {
 } from './ltx/http-client';
 import {
   toLtxCameraMotion,
+  routeLtxCameraMotion,
   LtxCameraMotionError,
   LTX_CAMERA_MOTIONS,
   LTX_CAMERA_MOTION_MAP,
@@ -624,7 +625,7 @@ describe('LTX hosted — camera motion is serialized, never leaked or substitute
   });
 
   it('refuses every internal value with no defensible equivalent, by name', () => {
-    for (const internal of ['HANDHELD_DRIFT', 'ORBIT_LEFT', 'ORBIT_RIGHT']) {
+    for (const internal of ['ORBIT_LEFT', 'ORBIT_RIGHT']) {
       let caught: unknown = null;
       try {
         toLtxCameraMotion(internal);
@@ -656,10 +657,89 @@ describe('LTX hosted — camera motion is serialized, never leaked or substitute
   });
 
   it('never substitutes static and never silently omits the field', () => {
-    for (const internal of ['HANDHELD_DRIFT', 'ORBIT_LEFT', 'TILT_UP', 'CRANE_DOWN', '']) {
+    for (const internal of ['ORBIT_LEFT', 'ORBIT_RIGHT', 'TILT_UP', 'CRANE_DOWN', '']) {
       expect(() => toLtxCameraMotion(internal)).toThrow();
     }
-    expect(() => toLtxCameraMotion('HANDHELD_DRIFT')).toThrow(/refused rather than omitted/i);
+    expect(() => toLtxCameraMotion('ORBIT_LEFT')).toThrow(/refused rather than omitted/i);
+  });
+
+  it('routes HANDHELD_DRIFT to a locked-off frame plus deterministic post-motion', () => {
+    const routing = routeLtxCameraMotion('HANDHELD_DRIFT');
+    expect(routing.providerValue).toBe('static');
+    expect(routing.deterministicPostMotionRequired).toBe(true);
+    expect(routing.internal).toBe('HANDHELD_DRIFT');
+    // It is never turned into another camera move.
+    expect(routing.providerValue).not.toBe('dolly_in');
+    expect(routing.providerValue).not.toBe('dolly_out');
+  });
+
+  it('refuses to resolve a routed motion through the plain serializer', () => {
+    // Returning `static` here would hand a caller a locked-off shot under the
+    // name of a moving one.
+    expect(() => toLtxCameraMotion('HANDHELD_DRIFT')).toThrow(/two stages/i);
+    expect(() => toLtxCameraMotion('HANDHELD_DRIFT')).toThrow(/routeLtxCameraMotion/);
+  });
+
+  it('leaves natively-expressible motions unrouted', () => {
+    for (const [internal, wire] of LTX_CAMERA_MOTION_MAP) {
+      const routing = routeLtxCameraMotion(internal);
+      expect(routing.providerValue).toBe(wire);
+      expect(routing.deterministicPostMotionRequired).toBe(false);
+    }
+  });
+
+  it('still refuses unsupported motions through the routing contract', () => {
+    for (const internal of ['ORBIT_LEFT', 'ORBIT_RIGHT', 'TILT_UP', 'TILT_DOWN', 'CRANE_DOWN']) {
+      expect(() => routeLtxCameraMotion(internal)).toThrow(LtxCameraMotionError);
+    }
+  });
+
+  it('sends static for a routed motion only when the caller undertakes the second stage', async () => {
+    const server = new FakeLtxServer();
+    await build(server).submit(
+      submitInput({
+        params: {
+          durationSeconds: 6,
+          aspectRatio: '9:16',
+          resolution: '1080x1920',
+          frameRate: 24,
+          providerOptions: {
+            generateAudio: false,
+            cameraMotion: 'HANDHELD_DRIFT',
+            deterministicPostMotion: true,
+          },
+        },
+      }),
+    );
+    const body = server.requests.find((r) => r.path === '/v2/image-to-video')?.body as Record<
+      string,
+      unknown
+    >;
+    expect(body.camera_motion).toBe('static');
+    expect(JSON.stringify(body)).not.toContain('HANDHELD_DRIFT');
+  });
+
+  it('refuses a routed motion when the caller does not undertake the second stage', async () => {
+    const server = new FakeLtxServer();
+    const error = await build(server)
+      .submit(
+        submitInput({
+          params: {
+            durationSeconds: 6,
+            aspectRatio: '9:16',
+            resolution: '1080x1920',
+            frameRate: 24,
+            providerOptions: { generateAudio: false, cameraMotion: 'HANDHELD_DRIFT' },
+          },
+        }),
+      )
+      .catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(LtxVideoGenerationError);
+    expect((error as LtxVideoGenerationError).ltxKind).toBe('UNSUPPORTED_PROVIDER_CAMERA_MOTION');
+    expect(String(error)).toMatch(/locked-off shot labelled as a moving one/i);
+    // Refused before anything left the process.
+    expect(server.requests).toHaveLength(0);
   });
 
   it('refuses before any network access — nothing is uploaded and no job is created', async () => {

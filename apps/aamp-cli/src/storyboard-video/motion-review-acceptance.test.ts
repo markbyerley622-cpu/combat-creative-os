@@ -74,16 +74,11 @@ const CAMPAIGN_SOURCE_DIRECTORY = resolve(
 );
 
 /**
- * A fixture copy of the campaign, with the two `HANDHELD_DRIFT` scenes retimed
- * to a motion `ltx-hosted` can express.
+ * A working copy of the campaign, so a run cannot write into the committed one.
  *
- * The committed campaign asks LTX for a handheld drift on scenes 8 and 9, and
- * that provider has no handheld value at all — so those scenes are now refused
- * before upload, by design. This suite is about the *motion gate*, not the
- * camera vocabulary, and it needs ten resolvable scenes to exercise one.
- * Choosing a motion here is a fixture concern; the advertisement's own
- * manifest is left exactly as its author wrote it, and the refusal it now
- * provokes is pinned by its own test in `storyboard-video-contracts`.
+ * The scenes are used exactly as their author wrote them — including the two
+ * `HANDHELD_DRIFT` scenes, which now route to a locked-off provider frame plus
+ * a deterministic post-motion rather than being refused.
  */
 let campaignDirectory: string;
 const REVIEWER = 'Riki Taylor';
@@ -236,9 +231,6 @@ beforeAll(async () => {
   const fixtureManifest = JSON.parse(await readFile(fixtureManifestPath, 'utf8')) as {
     scenes: { cameraMotion: string }[];
   };
-  for (const scene of fixtureManifest.scenes) {
-    if (scene.cameraMotion === 'HANDHELD_DRIFT') scene.cameraMotion = 'STATIC';
-  }
   await writeFile(
     fixtureManifestPath,
     `${JSON.stringify(fixtureManifest, null, 2)}

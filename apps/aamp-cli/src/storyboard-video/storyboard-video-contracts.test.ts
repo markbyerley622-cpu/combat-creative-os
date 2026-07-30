@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import { LTX_CAMERA_MOTIONS, toLtxCameraMotion } from '@combat/providers';
+import { LTX_CAMERA_MOTIONS, routeLtxCameraMotion, toLtxCameraMotion } from '@combat/providers';
 
 import { findArtefactSafetyProblems, assertStoryboardVideoArtefactSafe } from './artefact-safety';
 import { assertWithinCostCeiling, buildCostEstimate } from './cost-estimate';
@@ -30,6 +30,7 @@ import {
   modeReachesGenerationProvider,
   parseSceneManifest,
   GENERATION_MODES,
+  POST_MOTION_MAX_MAGNITUDE_PERCENT,
 } from './scene-manifest';
 import { parseStoryboardVideoArgs } from './storyboard-video-cli';
 import {
@@ -909,83 +910,150 @@ describe('keyframe library', () => {
  * is owed.
  */
 describe('the committed campaign manifest against the LTX vocabulary', () => {
-  it('cannot express HANDHELD_DRIFT, and the two scenes asking for it are named', async () => {
-    const manifest = parseSceneManifest(
-      JSON.parse(
-        await readFile(
-          join(
-            __dirname,
-            '..',
-            '..',
-            'campaigns',
-            'combat-reviews-flagship-02',
-            'scene-manifest.json',
-          ),
-          'utf8',
-        ),
-      ),
-    );
+  const manifestPath = join(
+    __dirname,
+    '..',
+    '..',
+    'campaigns',
+    'combat-reviews-flagship-02',
+    'scene-manifest.json',
+  );
 
-    const blocked = manifest.scenes
+  async function campaign() {
+    return parseSceneManifest(JSON.parse(await readFile(manifestPath, 'utf8')));
+  }
+
+  it('routes the two HANDHELD_DRIFT scenes to a locked-off frame plus post-motion', async () => {
+    const manifest = await campaign();
+    const routed = manifest.scenes
       .filter((scene) => modeReachesGenerationProvider(scene.generationMode))
-      .filter((scene) => {
-        try {
-          toLtxCameraMotion(scene.cameraMotion);
-          return false;
-        } catch {
-          return true;
-        }
-      })
-      .map((scene) => `${scene.sceneNumber}:${scene.cameraMotion}`);
+      .filter((scene) => routeLtxCameraMotion(scene.cameraMotion).deterministicPostMotionRequired);
 
-    expect(blocked).toEqual(['8:HANDHELD_DRIFT', '9:HANDHELD_DRIFT']);
-    expect(() => toLtxCameraMotion('HANDHELD_DRIFT')).toThrow(/no handheld quality/i);
+    expect(routed.map((scene) => scene.sceneNumber)).toEqual([8, 9]);
+    for (const scene of routed) {
+      expect(scene.cameraMotion).toBe('HANDHELD_DRIFT');
+      expect(routeLtxCameraMotion(scene.cameraMotion).providerValue).toBe('static');
+      // The authored second stage exists, or the manifest would not parse.
+      expect(scene.postMotion).toBeDefined();
+    }
+  });
+
+  it('carries the authored drift the reviewer specified for each of them', async () => {
+    const manifest = await campaign();
+    const eight = manifest.scenes.find((scene) => scene.sceneNumber === 8);
+    const nine = manifest.scenes.find((scene) => scene.sceneNumber === 9);
+
+    expect(eight?.postMotion?.treatment).toBe('SMOOTH_PUSH');
+    expect(eight?.postMotion?.magnitudePercent).toBe(2);
+    expect(eight?.postMotion?.direction).toBeUndefined();
+    expect(eight?.postMotion?.preservedRegion).toMatch(/predictor-rank/i);
+    expect(eight?.postMotion?.prohibitions.join(' ')).toMatch(/no rotation/i);
+    expect(eight?.postMotion?.prohibitions.join(' ')).toMatch(/no random shake/i);
+
+    expect(nine?.postMotion?.treatment).toBe('SMOOTH_HORIZONTAL_DRIFT');
+    expect(nine?.postMotion?.magnitudePercent).toBe(1);
+    expect(nine?.postMotion?.direction).toBe('LEFT');
+    expect(nine?.postMotion?.preservedRegion).toMatch(/phone geometry/i);
+    expect(nine?.postMotion?.prohibitions.join(' ')).toMatch(/no zoom/i);
+    expect(nine?.postMotion?.prohibitions.join(' ')).toMatch(/no rotation/i);
+    expect(nine?.postMotion?.prohibitions.join(' ')).toMatch(/no random shake/i);
+  });
+
+  it('never substitutes another LTX camera move for the authored drift', async () => {
+    const manifest = await campaign();
+    for (const scene of manifest.scenes.filter(
+      (candidate) => candidate.cameraMotion === 'HANDHELD_DRIFT',
+    )) {
+      const value = routeLtxCameraMotion(scene.cameraMotion).providerValue;
+      expect(value).toBe('static');
+      for (const forbidden of [
+        'dolly_in',
+        'dolly_out',
+        'dolly_left',
+        'dolly_right',
+        'jib_up',
+        'jib_down',
+      ]) {
+        expect(value).not.toBe(forbidden);
+      }
+    }
   });
 
   it('can express every other scene that reaches the provider', async () => {
-    const manifest = parseSceneManifest(
-      JSON.parse(
-        await readFile(
-          join(
-            __dirname,
-            '..',
-            '..',
-            'campaigns',
-            'combat-reviews-flagship-02',
-            'scene-manifest.json',
-          ),
-          'utf8',
-        ),
-      ),
-    );
-    const expressible = manifest.scenes
+    const manifest = await campaign();
+    const native = manifest.scenes
       .filter((scene) => modeReachesGenerationProvider(scene.generationMode))
       .filter((scene) => scene.cameraMotion !== 'HANDHELD_DRIFT');
 
-    expect(expressible.length).toBeGreaterThan(0);
-    for (const scene of expressible) {
+    expect(native.length).toBeGreaterThan(0);
+    for (const scene of native) {
       expect(LTX_CAMERA_MOTIONS).toContain(toLtxCameraMotion(scene.cameraMotion));
+      expect(scene.postMotion).toBeUndefined();
     }
   });
 
   it('binds Scene 1 to the move that was actually generated', async () => {
-    const manifest = parseSceneManifest(
-      JSON.parse(
-        await readFile(
-          join(
-            __dirname,
-            '..',
-            '..',
-            'campaigns',
-            'combat-reviews-flagship-02',
-            'scene-manifest.json',
-          ),
-          'utf8',
-        ),
-      ),
-    );
+    const manifest = await campaign();
     const scene = manifest.scenes.find((candidate) => candidate.sceneNumber === 1);
     expect(scene?.cameraMotion).toBe('SLOW_PUSH_IN');
     expect(toLtxCameraMotion(scene?.cameraMotion as string)).toBe('dolly_in');
+  });
+});
+
+describe('the post-motion contract', () => {
+  /** Ten valid scenes with scene 8 overridden — the two-stage scene under test. */
+  const manifestWith = (overrides: Record<string, unknown>) => ({
+    manifestVersion: 1,
+    storyboardId: STORYBOARD_ID,
+    authoredBy: 'contract test',
+    scenes: Array.from({ length: 10 }, (_, index) =>
+      index === 7 ? scene(8, { cameraMotion: 'HANDHELD_DRIFT', ...overrides }) : scene(index + 1),
+    ),
+  });
+
+  const postMotion = {
+    treatment: 'SMOOTH_PUSH',
+    magnitudePercent: 2,
+    preservedRegion: 'the right-side interface space',
+    prohibitions: ['no rotation', 'no random shake'],
+    rationale: 'the provider has no handheld value',
+  };
+
+  it('refuses a routed scene that declares no second stage', () => {
+    expect(() => parseSceneManifest(manifestWith({}))).toThrow(/states no postMotion/i);
+  });
+
+  it('refuses a post-motion on a scene the provider carries itself', () => {
+    expect(() =>
+      parseSceneManifest(manifestWith({ cameraMotion: 'SLOW_PUSH_IN', postMotion })),
+    ).toThrow(/carried by the provider itself/i);
+  });
+
+  it('refuses a horizontal drift with no direction, and a push with one', () => {
+    expect(() =>
+      parseSceneManifest(
+        manifestWith({ postMotion: { ...postMotion, treatment: 'SMOOTH_HORIZONTAL_DRIFT' } }),
+      ),
+    ).toThrow(/states no direction/i);
+    expect(() =>
+      parseSceneManifest(manifestWith({ postMotion: { ...postMotion, direction: 'LEFT' } })),
+    ).toThrow(/does not have/i);
+  });
+
+  it('refuses a magnitude beyond the restrained ceiling', () => {
+    expect(() =>
+      parseSceneManifest(
+        manifestWith({
+          postMotion: {
+            ...postMotion,
+            magnitudePercent: POST_MOTION_MAX_MAGNITUDE_PERCENT + 1,
+          },
+        }),
+      ),
+    ).toThrow();
+  });
+
+  it('accepts the authored two-stage scene', () => {
+    expect(() => parseSceneManifest(manifestWith({ postMotion }))).not.toThrow();
   });
 });

@@ -107,10 +107,6 @@ export const LTX_CAMERA_MOTION_MAP: ReadonlyMap<string, LtxCameraMotion> = new M
  * are different problems with different fixes.
  */
 export const LTX_UNSUPPORTED_CAMERA_MOTIONS: ReadonlyMap<string, string> = new Map([
-  [
-    'HANDHELD_DRIFT',
-    'the LTX vocabulary has no handheld quality; every value it accepts is a clean mechanical move',
-  ],
   ['ORBIT_LEFT', 'the LTX vocabulary contains no arc or orbit around the subject'],
   ['ORBIT_RIGHT', 'the LTX vocabulary contains no arc or orbit around the subject'],
   [
@@ -122,6 +118,49 @@ export const LTX_UNSUPPORTED_CAMERA_MOTIONS: ReadonlyMap<string, string> = new M
     'a tilt rotates the camera from a fixed position; jib_down lowers the whole camera. They are different moves, and the nearest-looking value is not a substitute',
   ],
 ]);
+
+/**
+ * Internal motions carried in **two stages** rather than mapped or refused.
+ *
+ * `HANDHELD_DRIFT` is the case this exists for. The LTX vocabulary has no
+ * handheld quality, and the nearest mechanical value would be a different shot
+ * — but the authored creative intention is a *restrained drift*, and that is
+ * something a deterministic FFmpeg pass can supply exactly and repeatably.
+ *
+ * So the provider is asked for `static`, which is honest: a locked-off
+ * generation is precisely what the second stage needs underneath it, and the
+ * drift is then applied by AAMP with a magnitude and direction a person wrote
+ * down. The creative intention is preserved without asking a model for a move
+ * it cannot make, and without silently substituting `dolly_in` or any other
+ * value that would change what the shot is.
+ *
+ * **The two stages are inseparable.** A caller that asks for a routed motion
+ * without declaring it will supply the post-motion is refused, because sending
+ * `static` alone would produce a locked-off shot labelled as a drift — exactly
+ * the silent substitution the refusal path exists to prevent. Routing is
+ * therefore an explicit contract, not a fallback.
+ */
+export const LTX_POST_MOTION_ROUTED_MOTIONS: ReadonlyMap<string, string> = new Map([
+  [
+    'HANDHELD_DRIFT',
+    'the LTX vocabulary has no handheld quality, so the provider is asked for a locked-off frame and the restrained drift is applied deterministically afterwards',
+  ],
+]);
+
+/**
+ * What a scene must do to honour one internal camera motion on this provider.
+ *
+ * A discriminated result rather than a bare string, because "send dolly_in" and
+ * "send static and then move the picture yourself" are different obligations
+ * and a caller must not be able to confuse them.
+ */
+export interface LtxCameraMotionRouting {
+  readonly internal: string;
+  readonly providerValue: LtxCameraMotion;
+  /** True when the provider value alone does not deliver the authored move. */
+  readonly deterministicPostMotionRequired: boolean;
+  readonly rationale: string;
+}
 
 export class LtxCameraMotionError extends Error {
   readonly kind = 'UNSUPPORTED_PROVIDER_CAMERA_MOTION' as const;
@@ -149,8 +188,38 @@ export function isLtxCameraMotion(value: string): value is LtxCameraMotion {
  * unchanged — the boundary is idempotent, which matters because a caller that
  * translated once and is asked again should not be punished for it.
  */
+export function routeLtxCameraMotion(internal: string): LtxCameraMotionRouting {
+  const trimmed = internal.trim();
+  const routed = LTX_POST_MOTION_ROUTED_MOTIONS.get(trimmed);
+  if (routed) {
+    return {
+      internal: trimmed,
+      providerValue: 'static',
+      deterministicPostMotionRequired: true,
+      rationale: routed,
+    };
+  }
+  return {
+    internal: trimmed,
+    providerValue: toLtxCameraMotion(trimmed),
+    deterministicPostMotionRequired: false,
+    rationale: 'the provider expresses this move natively',
+  };
+}
+
 export function toLtxCameraMotion(internal: string): LtxCameraMotion {
   const trimmed = internal.trim();
+
+  // Routed motions are deliberately *not* resolvable here. This function
+  // returns a value to put on the wire, and returning `static` for a drift
+  // would hand a caller a locked-off shot under the name of a moving one.
+  const routed = LTX_POST_MOTION_ROUTED_MOTIONS.get(trimmed);
+  if (routed) {
+    throw new LtxCameraMotionError(
+      trimmed,
+      `"${trimmed}" is carried in two stages on ltx-hosted: ${routed}. Resolve it with routeLtxCameraMotion and supply the deterministic post-motion — asking for the provider value alone would produce a locked-off shot labelled as a moving one. (camera-motion profile v${LTX_CAMERA_MOTION_PROFILE_VERSION})`,
+    );
+  }
   if (trimmed.length === 0) {
     throw new LtxCameraMotionError(
       internal,

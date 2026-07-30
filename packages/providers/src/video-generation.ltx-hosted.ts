@@ -3,7 +3,11 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { basename, extname, join, resolve } from 'node:path';
 
 import { describeReferenceProvenance, gateReferenceImages } from './comfyui/reference-rights';
-import { LtxCameraMotionError, toLtxCameraMotion, type LtxCameraMotion } from './ltx/camera-motion';
+import {
+  LtxCameraMotionError,
+  routeLtxCameraMotion,
+  type LtxCameraMotion,
+} from './ltx/camera-motion';
 import {
   LtxHttpClient,
   LtxRequestError,
@@ -254,9 +258,21 @@ export class LtxHostedVideoGenerationProvider implements VideoGenerationProvider
       // express costs nothing and transfers nothing. Doing it at the point the
       // body is assembled would mean an image had already been sent.
       const options = readProviderOptions(input.params.providerOptions);
-      const cameraMotion: LtxCameraMotion | undefined = options.cameraMotion
-        ? toLtxCameraMotion(options.cameraMotion)
-        : undefined;
+      let cameraMotion: LtxCameraMotion | undefined;
+      if (options.cameraMotion) {
+        const routing = routeLtxCameraMotion(options.cameraMotion);
+        // A two-stage motion is only legal when the caller says it will supply
+        // the second stage. Without that, `static` would go out under the name
+        // of a moving shot, which is the substitution this whole boundary
+        // exists to prevent.
+        if (routing.deterministicPostMotionRequired && !options.deterministicPostMotion) {
+          throw new LtxCameraMotionError(
+            routing.internal,
+            `"${routing.internal}" is carried in two stages on ltx-hosted — ${routing.rationale} — but the caller did not declare it will apply the deterministic post-motion. Refused rather than sent as a bare "${routing.providerValue}": that would be a locked-off shot labelled as a moving one.`,
+          );
+        }
+        cameraMotion = routing.providerValue;
+      }
 
       // Same rights gate the ComfyUI adapter uses. Rights policy lives in one
       // place so two adapters cannot become two policies.
@@ -507,6 +523,8 @@ export class LtxHostedVideoGenerationProvider implements VideoGenerationProvider
 interface ResolvedProviderOptions {
   readonly generateAudio: boolean;
   readonly cameraMotion?: string;
+  /** The caller's undertaking to apply the second stage of a routed motion. */
+  readonly deterministicPostMotion: boolean;
 }
 
 /**
@@ -516,6 +534,14 @@ interface ResolvedProviderOptions {
 function readProviderOptions(raw: Record<string, unknown> | undefined): ResolvedProviderOptions {
   const generateAudio = raw?.generateAudio;
   const cameraMotion = raw?.cameraMotion;
+  const deterministicPostMotion = raw?.deterministicPostMotion;
+  if (deterministicPostMotion !== undefined && typeof deterministicPostMotion !== 'boolean') {
+    throw new VideoGenerationError({
+      reason: 'UNSUPPORTED_CAPABILITY',
+      retryable: false,
+      message: 'providerOptions.deterministicPostMotion must be a boolean',
+    });
+  }
   if (generateAudio !== undefined && typeof generateAudio !== 'boolean') {
     throw new VideoGenerationError({
       reason: 'UNSUPPORTED_CAPABILITY',
@@ -532,6 +558,7 @@ function readProviderOptions(raw: Record<string, unknown> | undefined): Resolved
   }
   return {
     generateAudio: generateAudio ?? false,
+    deterministicPostMotion: deterministicPostMotion ?? false,
     ...(cameraMotion && cameraMotion.trim().length > 0
       ? { cameraMotion: cameraMotion.trim() }
       : {}),
