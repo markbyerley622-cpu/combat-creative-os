@@ -12,7 +12,11 @@ import {
   type StoryboardVideoExitCode,
 } from '../storyboard-video/failures';
 import { probeClip } from '../storyboard-video/scene-media';
-import { loadAcceptanceBrief, type AcceptanceBrief } from './acceptance-brief';
+import {
+  loadAcceptanceBrief,
+  type AcceptanceBrief,
+  type NotificationBrief,
+} from './acceptance-brief';
 import {
   buildNotificationDefectReport,
   measureNotification,
@@ -24,6 +28,7 @@ import {
   NOTIFICATION_COMPARISON_GALLERY_FILENAME,
 } from './notification-comparison-gallery';
 import { measureNotificationPlacement, type PlacementReport } from './notification-placement';
+import { PULSE_PEAK_FRACTION } from './notification-timeline';
 import { assertNotPermanentlyRejected, PERMANENTLY_REJECTED_CLIP_NOTE } from './plate-library';
 
 /**
@@ -58,8 +63,29 @@ const SURFACE_SUBDIRECTORY = 'proof';
 const FRAMES_DIRECTORY = 'frames';
 const MEASUREMENT_DIRECTORY = 'measurement';
 
-/** The moments the specification asks to see, in seconds. */
-export const PROOF_FRAME_TIMES: readonly number[] = [0.0, 0.16, 0.34, 0.6, 1.05];
+/**
+ * The moments the review asks to see, derived from the brief rather than fixed.
+ *
+ * Entrance, the accent's peak, the settle and the final hold are properties of
+ * the timing a person authored; hardcoding them would mean a retimed card
+ * quietly produced frames of the wrong moments while still being labelled
+ * "settle" and "peak accent".
+ */
+export function proofFrameTimes(brief: NotificationBrief): readonly {
+  readonly label: string;
+  readonly atSeconds: number;
+}[] {
+  const pulsePeak =
+    brief.pulseStartSeconds +
+    PULSE_PEAK_FRACTION * (brief.pulseEndSeconds - brief.pulseStartSeconds);
+  return [
+    { label: 'before', atSeconds: 0 },
+    { label: 'entrance', atSeconds: brief.entranceStartSeconds },
+    { label: 'peak-accent', atSeconds: Number(pulsePeak.toFixed(3)) },
+    { label: 'settle', atSeconds: brief.entranceSettleSeconds },
+    { label: 'final-hold', atSeconds: Number((brief.readableUntilSeconds - 0.05).toFixed(3)) },
+  ];
+}
 
 export interface NotificationProofOptions {
   readonly briefPath: string;
@@ -219,13 +245,15 @@ export async function runNotificationProof(
       requestedDurationSeconds: proofDurationSeconds,
       rerenderChecksumSha256,
       renderChecksumSha256: composite.checksumSha256,
+      fontsResolved: composite.surfaces.fontsResolved,
     });
 
     // --- the frames the specification asks to see -----------------------------
     const framesDirectory = join(runDirectory, FRAMES_DIRECTORY);
     await mkdir(framesDirectory, { recursive: true });
-    for (const atSeconds of PROOF_FRAME_TIMES) {
-      const fileName = `proof-${atSeconds.toFixed(2).replace('.', 'p')}s.png`;
+    const frameTimes = proofFrameTimes(brief.notification);
+    for (const { label, atSeconds } of frameTimes) {
+      const fileName = `proof-${label}-${atSeconds.toFixed(2).replace('.', 'p')}s.png`;
       const target = join(framesDirectory, fileName);
       // eslint-disable-next-line no-await-in-loop -- ordered so a failure names its frame
       const extracted = await runner.run(
@@ -311,7 +339,9 @@ export async function runNotificationProof(
         matchTransitionSeed: composite.timeline.matchTransitionSeed,
         surfaces: {
           renderer: composite.surfaces.renderer,
-          fontFamily: composite.surfaces.fontFamily,
+          displayFontFamily: composite.surfaces.displayFontFamily,
+          uiFontFamily: composite.surfaces.uiFontFamily,
+          fontsResolved: composite.surfaces.fontsResolved,
           markChecksumSha256: composite.surfaces.markChecksumSha256,
           assetChecksumSha256: composite.surfaces.assetChecksumSha256,
           states: composite.surfaces.states.map((state) => ({
@@ -352,7 +382,8 @@ export async function runNotificationProof(
       surfaceAssetRelativePath: toRelative(runDirectory, composite.surfaces.assetPath),
       previousRelativePath,
       frames: framePaths.map((path, index) => ({
-        atSeconds: PROOF_FRAME_TIMES[index] ?? 0,
+        label: frameTimes[index]?.label ?? 'frame',
+        atSeconds: frameTimes[index]?.atSeconds ?? 0,
         relativePath: toRelative(runDirectory, path),
       })),
       brief: brief.notification,

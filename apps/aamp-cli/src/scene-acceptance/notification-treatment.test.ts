@@ -16,10 +16,14 @@ import { parseProofArguments } from './notification-proof-cli';
 import { PLACEMENT_NOTICE, type PlacementReport } from './notification-placement';
 import { buildNotificationSurfaceHtml, cssFontStack, rgba } from './notification-surface';
 import {
+  accentOpacityAt,
   buildNotificationTimeline,
   ease,
   pulseIntensity,
+  resolveSupportingCopyBand,
+  settleScale,
   NOTIFICATION_TREATMENT_VERSION,
+  PULSE_PEAK_FRACTION,
 } from './notification-timeline';
 
 /**
@@ -32,6 +36,12 @@ import {
  */
 
 const FRAME = { widthPx: 1080, heightPx: 1920 };
+
+/** Both named families resolved, which is what a real render asserts before it proceeds. */
+const RESOLVED_FONTS = [
+  { family: 'Bahnschrift Condensed', resolved: true },
+  { family: 'Segoe UI', resolved: true },
+];
 
 async function loadCommittedBrief(): Promise<ReturnType<typeof parseAcceptanceBrief>> {
   return parseAcceptanceBrief(
@@ -76,19 +86,61 @@ describe('the entrance', () => {
     expect(settled?.riseRemainingPx).toBe(0);
   });
 
-  it('rises monotonically and never overshoots', async () => {
+  it('rises monotonically — the travel never bounces, only the scale settles', async () => {
     const brief = await committedNotification();
     const timeline = buildNotificationTimeline(brief, FRAME);
-    let previousScale = 0;
     let previousRise = Number.POSITIVE_INFINITY;
     for (const state of timeline.states) {
-      expect(state.scale).toBeGreaterThanOrEqual(previousScale);
-      expect(state.scale).toBeLessThanOrEqual(1);
       expect(state.riseRemainingPx).toBeLessThanOrEqual(previousRise + 1e-9);
       expect(state.riseRemainingPx).toBeGreaterThanOrEqual(0);
-      previousScale = state.scale;
       previousRise = state.riseRemainingPx;
     }
+  });
+
+  it('passes once through its resting size and settles onto it', async () => {
+    const brief = await committedNotification();
+    const timeline = buildNotificationTimeline(brief, FRAME);
+    const scales = timeline.states.map((state) => state.scale);
+
+    // Exactly one contiguous excursion above 1. A second would be a bounce,
+    // which is the template effect this treatment refuses.
+    let excursions = 0;
+    let inside = false;
+    for (const value of scales) {
+      if (value > 1 + 1e-9) {
+        if (!inside) excursions += 1;
+        inside = true;
+      } else {
+        inside = false;
+      }
+    }
+    expect(excursions).toBe(1);
+    expect(Math.max(...scales)).toBeLessThanOrEqual(brief.entrancePeakScale + 1e-9);
+    expect(Math.max(...scales)).toBeGreaterThan(1);
+    expect(scales[scales.length - 1]).toBe(1);
+    expect(scales[0]).toBeCloseTo(brief.entranceStartScale, 6);
+  });
+
+  it('reaches its peak and its rest exactly where the brief puts them', async () => {
+    const brief = await committedNotification();
+    expect(settleScale(brief, 0)).toBeCloseTo(brief.entranceStartScale, 9);
+    expect(settleScale(brief, brief.entrancePeakFraction)).toBeCloseTo(brief.entrancePeakScale, 9);
+    expect(settleScale(brief, 1)).toBeCloseTo(1, 9);
+    // Monotonic up to the peak, monotonic down after it: a single gesture.
+    for (let p = 0; p < brief.entrancePeakFraction; p += 0.02) {
+      expect(settleScale(brief, p + 0.02)).toBeGreaterThanOrEqual(settleScale(brief, p) - 1e-9);
+    }
+    for (let p = brief.entrancePeakFraction; p < 1; p += 0.02) {
+      expect(settleScale(brief, Math.min(1, p + 0.02))).toBeLessThanOrEqual(
+        settleScale(brief, p) + 1e-9,
+      );
+    }
+  });
+
+  it('finishes the settle at about 0.40 seconds', async () => {
+    const brief = await committedNotification();
+    expect(brief.entranceSettleSeconds).toBeGreaterThanOrEqual(0.37);
+    expect(brief.entranceSettleSeconds).toBeLessThanOrEqual(0.43);
   });
 
   it('covers the whole window with no gap and no overlap', async () => {
@@ -146,22 +198,62 @@ describe('the entrance', () => {
 });
 
 describe('the accent pulse', () => {
-  it('fires once, peaks inside its window and returns to rest', async () => {
+  it('is synchronised to the settle: it peaks while the card is still arriving', async () => {
     const brief = await committedNotification();
     const timeline = buildNotificationTimeline(brief, FRAME);
-    const pulse = timeline.states.filter((state) => state.kind === 'PULSE');
 
-    expect(pulse).toHaveLength(brief.pulseSteps);
-    expect(pulse[0]?.fromSeconds).toBeCloseTo(brief.pulseStartSeconds, 6);
-    expect(pulse[pulse.length - 1]?.toSeconds).toBeCloseTo(brief.pulseEndSeconds, 6);
+    // The envelope's peak lands before the card comes to rest — that is what
+    // "synchronised to the settle" means, and it is why the accent is carried
+    // by entrance states rather than only by pulse states.
+    const envelopePeak =
+      brief.pulseStartSeconds +
+      PULSE_PEAK_FRACTION * (brief.pulseEndSeconds - brief.pulseStartSeconds);
+    expect(envelopePeak).toBeLessThan(brief.entranceSettleSeconds);
+    expect(envelopePeak).toBeGreaterThan(brief.entranceStartSeconds);
 
-    const peak = Math.max(...pulse.map((state) => state.accentOpacity));
-    expect(peak).toBeGreaterThan(brief.accentRestOpacity);
-    expect(peak).toBeLessThanOrEqual(brief.accentPulsePeakOpacity);
+    const brightestEntrance = Math.max(
+      ...timeline.states
+        .filter((state) => state.kind === 'ENTRANCE')
+        .map((state) => state.accentOpacity),
+    );
+    expect(brightestEntrance).toBeGreaterThan(brief.accentRestOpacity);
 
     const last = timeline.states[timeline.states.length - 1];
     expect(last?.kind).toBe('REST');
     expect(last?.accentOpacity).toBe(brief.accentRestOpacity);
+  });
+
+  it('rises and falls exactly once across the whole timeline', async () => {
+    const brief = await committedNotification();
+    const timeline = buildNotificationTimeline(brief, FRAME);
+    const opacities = timeline.states.map((state) => state.accentOpacity);
+    const threshold =
+      brief.accentRestOpacity + (Math.max(...opacities) - brief.accentRestOpacity) / 2;
+    let excursions = 0;
+    let inside = false;
+    for (const value of opacities) {
+      if (value > threshold) {
+        if (!inside) excursions += 1;
+        inside = true;
+      } else {
+        inside = false;
+      }
+    }
+    expect(excursions).toBe(1);
+    expect(opacities[0]).toBe(brief.accentRestOpacity);
+    expect(opacities[opacities.length - 1]).toBe(brief.accentRestOpacity);
+  });
+
+  it('holds at rest outside its window and never exceeds the authored peak', async () => {
+    const brief = await committedNotification();
+    expect(accentOpacityAt(brief, brief.pulseStartSeconds - 0.01)).toBe(brief.accentRestOpacity);
+    expect(accentOpacityAt(brief, brief.pulseEndSeconds)).toBe(brief.accentRestOpacity);
+    expect(accentOpacityAt(brief, brief.readableUntilSeconds)).toBe(brief.accentRestOpacity);
+    for (let t = brief.pulseStartSeconds; t < brief.pulseEndSeconds; t += 0.005) {
+      const value = accentOpacityAt(brief, t);
+      expect(value).toBeGreaterThanOrEqual(brief.accentRestOpacity - 1e-9);
+      expect(value).toBeLessThanOrEqual(brief.accentPulsePeakOpacity + 1e-9);
+    }
   });
 
   it('rises faster than it falls, so it is struck rather than throbbed', () => {
@@ -192,6 +284,33 @@ describe('the accent pulse', () => {
       redness,
     }));
     expect(summarisePulse(readings).excursions).toBe(2);
+  });
+});
+
+describe('the supporting-copy band', () => {
+  it('sits above the glow’s declared reach, inside the card, clear of the accent', async () => {
+    const brief = await committedNotification();
+    const timeline = buildNotificationTimeline(brief, FRAME);
+    const band = resolveSupportingCopyBand(brief, timeline.restRect);
+    const accentTop = timeline.restRect.yPx + timeline.restRect.heightPx - brief.accentThicknessPx;
+
+    // It begins exactly where the glow is no longer permitted to reach.
+    expect(band.yPx + band.heightPx).toBe(accentTop - brief.accentGlowBlurPx);
+    // And it is inside the card, inset by the same padding the type is.
+    expect(band.xPx).toBe(timeline.restRect.xPx + brief.horizontalPaddingPx);
+    expect(band.yPx).toBeGreaterThan(timeline.restRect.yPx);
+    expect(band.heightPx).toBeGreaterThan(0);
+  });
+
+  it('moves with the glow: a wider glow pushes the band further from the accent', async () => {
+    const brief = await committedNotification();
+    const timeline = buildNotificationTimeline(brief, FRAME);
+    const tight = resolveSupportingCopyBand(brief, timeline.restRect);
+    const wide = resolveSupportingCopyBand(
+      { ...brief, accentGlowBlurPx: brief.accentGlowBlurPx + 20 },
+      timeline.restRect,
+    );
+    expect(wide.yPx + wide.heightPx).toBe(tight.yPx + tight.heightPx - 20);
   });
 });
 
@@ -258,7 +377,8 @@ describe('the filter graph', () => {
       brief.headerLabel,
       brief.supportingLine,
       brief.timestampLabel,
-      brief.fontFamily,
+      brief.displayFontFamily,
+      brief.uiFontFamily,
       brief.accentColorHex,
       brief.surfaceColorHex,
     ]) {
@@ -360,6 +480,12 @@ describe('the visible-defects report', () => {
     }),
     presenceNotMeasuredReason: null,
     accentNotMeasuredReason: null,
+    supportingCopy: Array.from({ length: 27 }, (_, index) => ({
+      frameIndex: index,
+      atSeconds: index / 24,
+      redness: 1.4,
+    })),
+    supportingCopyNotMeasuredReason: null,
     assetMinAlpha: 0,
     assetMaxAlpha: 255,
     assetTransparentFraction: 0.42,
@@ -380,6 +506,7 @@ describe('the visible-defects report', () => {
       requestedDurationSeconds: 1.1,
       rerenderChecksumSha256: 'a'.repeat(64),
       renderChecksumSha256: 'a'.repeat(64),
+      fontsResolved: RESOLVED_FONTS,
     });
 
     expect(report.measuredDefectCount).toBe(0);
@@ -405,6 +532,7 @@ describe('the visible-defects report', () => {
       requestedDurationSeconds: 1.1,
       rerenderChecksumSha256: 'a'.repeat(64),
       renderChecksumSha256: 'a'.repeat(64),
+      fontsResolved: RESOLVED_FONTS,
     });
     const row = report.observations.find((entry) => entry.id === 'NEVER_A_BLANK_RECTANGLE');
     expect(row?.status).toBe('DEFECT');
@@ -430,6 +558,7 @@ describe('the visible-defects report', () => {
       requestedDurationSeconds: 1.1,
       rerenderChecksumSha256: 'a'.repeat(64),
       renderChecksumSha256: 'a'.repeat(64),
+      fontsResolved: RESOLVED_FONTS,
     });
     expect(
       report.observations.find((entry) => entry.id === 'NO_FADE_OUT_BEFORE_THE_CUT')?.status,
@@ -454,6 +583,7 @@ describe('the visible-defects report', () => {
       requestedDurationSeconds: 1.1,
       rerenderChecksumSha256: 'a'.repeat(64),
       renderChecksumSha256: 'a'.repeat(64),
+      fontsResolved: RESOLVED_FONTS,
     });
     expect(
       report.observations.find((entry) => entry.id === 'ACCENT_PULSES_EXACTLY_ONCE')?.status,
@@ -478,6 +608,7 @@ describe('the visible-defects report', () => {
       requestedDurationSeconds: 1.1,
       rerenderChecksumSha256: 'a'.repeat(64),
       renderChecksumSha256: 'a'.repeat(64),
+      fontsResolved: RESOLVED_FONTS,
     });
     // Exactly the two accent rows are unknown; presence and alpha still stand.
     expect(report.notMeasuredCount).toBe(2);
@@ -515,6 +646,7 @@ describe('the visible-defects report', () => {
       requestedDurationSeconds: 1.1,
       rerenderChecksumSha256: null,
       renderChecksumSha256: 'a'.repeat(64),
+      fontsResolved: RESOLVED_FONTS,
     });
     const notMeasured = report.observations.filter((entry) => entry.status === 'NOT_MEASURED');
     expect(notMeasured.length).toBeGreaterThan(5);
@@ -538,6 +670,7 @@ describe('the visible-defects report', () => {
       requestedDurationSeconds: 1.1,
       rerenderChecksumSha256: 'a'.repeat(64),
       renderChecksumSha256: 'a'.repeat(64),
+      fontsResolved: RESOLVED_FONTS,
     });
     for (const id of ['READS_AS_PREMIUM', 'NO_TEMPLATE_FEEL', 'ACCENT_IS_SUBTLE']) {
       expect(report.observations.find((entry) => entry.id === id)?.status).toBe(

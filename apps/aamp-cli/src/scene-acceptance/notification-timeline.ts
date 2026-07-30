@@ -32,7 +32,7 @@ import type { NotificationBrief } from './acceptance-brief';
  * any of them is a bump, not an edit in place: two runs citing v2 that cannot
  * be told apart in their artefacts are one change away from disagreeing.
  */
-export const NOTIFICATION_TREATMENT_VERSION = 2 as const;
+export const NOTIFICATION_TREATMENT_VERSION = 3 as const;
 
 /**
  * Where the accent pulse peaks, as a fraction of its own window.
@@ -43,6 +43,55 @@ export const NOTIFICATION_TREATMENT_VERSION = 2 as const;
  * with the treatment version and not in the brief.
  */
 export const PULSE_PEAK_FRACTION = 0.35;
+
+/**
+ * The scale at a point in the entrance: rise, one controlled overshoot, settle.
+ *
+ * Two eased segments rather than a spring, because a spring is a family of
+ * curves with a damping constant and this is a single authored gesture with a
+ * stated peak. `entrancePeakScale` is bounded to a few thousandths above rest:
+ * that reads as weight arriving. A few hundredths reads as a bounce, and a
+ * bounce is the template effect the art direction refuses.
+ *
+ * It is monotonic on each side of the peak, so there is exactly one excursion
+ * and a second one is not expressible — which is what makes "no repeated
+ * bounce" a property of the model rather than a promise.
+ */
+export function settleScale(brief: NotificationBrief, progress: number): number {
+  const p = Math.min(1, Math.max(0, progress));
+  const peak = brief.entrancePeakFraction;
+  if (p <= peak) {
+    const t = peak === 0 ? 1 : p / peak;
+    return (
+      brief.entranceStartScale +
+      (brief.entrancePeakScale - brief.entranceStartScale) * ease(brief.entranceEasing, t)
+    );
+  }
+  const t = (p - peak) / (1 - peak);
+  return brief.entrancePeakScale + (1 - brief.entrancePeakScale) * ease(brief.entranceEasing, t);
+}
+
+/**
+ * The accent's opacity at an instant — one envelope over the whole timeline.
+ *
+ * It is a function of time rather than a property of the pulse *states* so the
+ * accent can be synchronised to the settle: the pulse peaks as the card lands,
+ * which means its rise happens while the card is still arriving. With a
+ * per-state pulse the accent could only ever begin after the entrance was over,
+ * and an accent that fires once the card is already at rest reads as a second
+ * event rather than as part of the arrival.
+ */
+export function accentOpacityAt(brief: NotificationBrief, atSeconds: number): number {
+  if (atSeconds < brief.pulseStartSeconds || atSeconds >= brief.pulseEndSeconds) {
+    return brief.accentRestOpacity;
+  }
+  const span = brief.pulseEndSeconds - brief.pulseStartSeconds;
+  const fraction = span <= 0 ? 1 : (atSeconds - brief.pulseStartSeconds) / span;
+  return (
+    brief.accentRestOpacity +
+    (brief.accentPulsePeakOpacity - brief.accentRestOpacity) * pulseIntensity(fraction)
+  );
+}
 
 export interface DeliveryFrame {
   readonly widthPx: number;
@@ -160,6 +209,28 @@ export function resolveAccentRect(brief: NotificationBrief, card: CardRect): Car
   };
 }
 
+/**
+ * The band the supporting line sits in, above where the accent's glow is
+ * allowed to reach.
+ *
+ * Defined against the accent rather than by re-deriving the CSS layout, which
+ * would be a second implementation of the type stack that agreed with the first
+ * only until somebody changed a margin. The claim it supports is exactly the
+ * one the art direction makes: the glow may spread `accentGlowBlurPx` into the
+ * card and no further, so above that line there must be no red at all.
+ */
+export function resolveSupportingCopyBand(brief: NotificationBrief, card: CardRect): CardRect {
+  const accentTop = card.yPx + card.heightPx - brief.accentThicknessPx;
+  const bandBottom = accentTop - brief.accentGlowBlurPx;
+  const heightPx = Math.max(2, Math.round(card.heightPx * 0.2));
+  return {
+    xPx: card.xPx + brief.horizontalPaddingPx,
+    yPx: bandBottom - heightPx,
+    widthPx: card.widthPx - 2 * brief.horizontalPaddingPx,
+    heightPx,
+  };
+}
+
 function buildStates(
   brief: NotificationBrief,
   restRect: CardRect,
@@ -179,6 +250,11 @@ function buildStates(
     };
   };
 
+  // Every state samples the accent envelope at its own midpoint, whatever kind
+  // it is. That is what lets the accent peak on the settle rather than after it.
+  const accentAt = (fromSeconds: number, toSeconds: number): number =>
+    round6(accentOpacityAt(brief, (fromSeconds + toSeconds) / 2));
+
   // --- the entrance ----------------------------------------------------------
   const entranceSpan = brief.entranceSettleSeconds - brief.entranceStartSeconds;
   const stepSeconds = entranceSpan / brief.entranceSteps;
@@ -186,64 +262,70 @@ function buildStates(
     // Progress is taken at the *start* of each window. Taking it at the end
     // would mean the first frame a viewer sees is already most of the way
     // settled, and the arrival would not read at all.
-    const progress = ease(brief.entranceEasing, index / brief.entranceSteps);
-    const scale = brief.entranceStartScale + (1 - brief.entranceStartScale) * progress;
-    const riseRemainingPx = brief.entranceRisePx * (1 - progress);
+    const progress = index / brief.entranceSteps;
+    const scale = settleScale(brief, progress);
+    // The rise does not overshoot even though the scale does. A card that
+    // travelled past its resting position and came back would read as a bounce;
+    // what is wanted is weight arriving, which is a scale gesture.
+    const riseRemainingPx = brief.entranceRisePx * (1 - ease(brief.entranceEasing, progress));
+    const fromSeconds = round6(brief.entranceStartSeconds + index * stepSeconds);
+    const toSeconds = round6(brief.entranceStartSeconds + (index + 1) * stepSeconds);
     states.push({
       id: `entrance-${String(index + 1).padStart(2, '0')}`,
       kind: 'ENTRANCE',
-      fromSeconds: round6(brief.entranceStartSeconds + index * stepSeconds),
-      toSeconds: round6(brief.entranceStartSeconds + (index + 1) * stepSeconds),
+      fromSeconds,
+      toSeconds,
       entranceProgress: round6(progress),
       scale: round6(scale),
       riseRemainingPx: round6(riseRemainingPx),
-      accentOpacity: brief.accentRestOpacity,
+      accentOpacity: accentAt(fromSeconds, toSeconds),
       rect: rectFor(scale, riseRemainingPx),
       fileName: `surface-entrance-${String(index + 1).padStart(2, '0')}.png`,
     });
   }
 
-  // --- a settled hold, if the pulse does not begin at the settle -------------
-  if (brief.pulseStartSeconds - brief.entranceSettleSeconds > 1e-9) {
+  // --- whatever of the accent pulse outlives the settle ----------------------
+  // The pulse is synchronised to the settle, so most of it happens during the
+  // entrance and is already carried by those states. Only its tail needs states
+  // of its own.
+  const pulseTailFrom = Math.max(brief.entranceSettleSeconds, brief.pulseStartSeconds);
+  if (pulseTailFrom - brief.entranceSettleSeconds > 1e-9) {
     states.push(
       restState({
         id: 'settled',
         fromSeconds: brief.entranceSettleSeconds,
-        toSeconds: brief.pulseStartSeconds,
-        accentOpacity: brief.accentRestOpacity,
+        toSeconds: pulseTailFrom,
+        accentOpacity: accentAt(brief.entranceSettleSeconds, pulseTailFrom),
         restRect,
         fileName: 'surface-settled.png',
       }),
     );
   }
-
-  // --- the single accent pulse ----------------------------------------------
-  const pulseSpan = brief.pulseEndSeconds - brief.pulseStartSeconds;
-  const pulseStepSeconds = pulseSpan / brief.pulseSteps;
-  for (let index = 0; index < brief.pulseSteps; index += 1) {
-    const fraction = (index + 0.5) / brief.pulseSteps;
-    const intensity = pulseIntensity(fraction);
-    states.push(
-      restState({
-        id: `pulse-${String(index + 1).padStart(2, '0')}`,
-        kind: 'PULSE',
-        fromSeconds: round6(brief.pulseStartSeconds + index * pulseStepSeconds),
-        toSeconds: round6(brief.pulseStartSeconds + (index + 1) * pulseStepSeconds),
-        accentOpacity: round6(
-          brief.accentRestOpacity +
-            (brief.accentPulsePeakOpacity - brief.accentRestOpacity) * intensity,
-        ),
-        restRect,
-        fileName: `surface-pulse-${String(index + 1).padStart(2, '0')}.png`,
-      }),
-    );
+  if (brief.pulseEndSeconds - pulseTailFrom > 1e-9) {
+    const pulseStepSeconds = (brief.pulseEndSeconds - pulseTailFrom) / brief.pulseSteps;
+    for (let index = 0; index < brief.pulseSteps; index += 1) {
+      const fromSeconds = round6(pulseTailFrom + index * pulseStepSeconds);
+      const toSeconds = round6(pulseTailFrom + (index + 1) * pulseStepSeconds);
+      states.push(
+        restState({
+          id: `pulse-${String(index + 1).padStart(2, '0')}`,
+          kind: 'PULSE',
+          fromSeconds,
+          toSeconds,
+          accentOpacity: accentAt(fromSeconds, toSeconds),
+          restRect,
+          fileName: `surface-pulse-${String(index + 1).padStart(2, '0')}.png`,
+        }),
+      );
+    }
   }
 
   // --- and it holds to the cut, at rest. There is no fade-out. ---------------
+  const restFrom = Math.max(brief.entranceSettleSeconds, brief.pulseEndSeconds);
   states.push(
     restState({
       id: 'rest',
-      fromSeconds: brief.pulseEndSeconds,
+      fromSeconds: round6(restFrom),
       toSeconds: brief.readableUntilSeconds,
       accentOpacity: brief.accentRestOpacity,
       restRect,

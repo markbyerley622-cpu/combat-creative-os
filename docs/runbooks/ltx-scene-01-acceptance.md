@@ -398,6 +398,55 @@ phone's rising top edge on the last frame. The authored centre moved up 18px,
 which balanced the whole occupied rectangle in the gap at 34px above and 35px
 below.
 
+### 10.1 Treatment v3 — the art-direction revision
+
+v2 was correct and plain. v3 changes only how it looks; placement, dimensions,
+radius, the complete-card entrance, the clearance and the headline are carried
+through unchanged and re-proved every run.
+
+**Typography.** The preferred face — Barlow Condensed ExtraBold — is not
+installed on this machine and cannot be fetched. The face was chosen by
+measurement instead: for the headline string, Bahnschrift Condensed at 700
+measures **435.8px** against Arial's **650.8px**, which is what "condensed"
+means in numbers, and it is a DIN-1451-derived industrial grotesque rather than
+a UI grotesque. Impact is condensed too and was rejected on letterform — it
+reads tabloid, not premium. The brief now names two families: `displayFontFamily`
+for the headline and the brand label, `uiFontFamily` for the timestamp and the
+supporting line.
+
+**A fallback is a refusal, not a substitution.** `measureFontsResolved` compares
+the string's width in the named family against a `monospace` sentinel; a family
+that did not resolve produces an identical width, and the run refuses by name.
+This is the one defect in this area that is otherwise invisible: a display face
+that silently falls back renders perfectly and passes every other check in the
+repository.
+
+**Colour.** The warm beige surface became neutral white at 0.94 opacity. The
+accent is a crisp 4px red edge with an 11px glow, centred on the bar rather than
+thrown upward — v2's offset glow reached roughly offset plus blur into the card,
+which is how it washed pink across the supporting copy.
+
+**Motion.** One controlled settle: 0.96 → 1.015 → 1.0, complete at 0.40s.
+`settleScale` is two monotonic eased segments meeting at an authored peak, so a
+second excursion is not expressible. The _travel_ stays monotonic — a card that
+flew past its resting position and came back is a bounce however small. The
+accent became an envelope over time rather than a property of the pulse states,
+which is what lets it peak while the card is still arriving rather than after it
+has landed.
+
+**Three rows added to the report**, all measured off the delivered file:
+
+| Row                                  | How it is established                                                                                                 |
+| ------------------------------------ | --------------------------------------------------------------------------------------------------------------------- |
+| `NO_RED_WASH_BEHIND_SUPPORTING_COPY` | Red-minus-green over the band above the glow's declared reach, on every frame, against a ceiling of 6. Measures 0.17. |
+| `ONE_CONTROLLED_SETTLE`              | Contiguous excursions of the scale above 1. Exactly one, peaking at 1.0150, ending at 1.0000.                         |
+| `DISPLAY_FACE_ACTUALLY_RESOLVED`     | Both named families resolved rather than falling back.                                                                |
+
+**Measured result:** 18 rows, all `OBSERVED`; 0 defects; 0 unmeasurable; eleven
+questions left open for a person. Measured off the rendered surface, the
+headline occupies 596px of a 742px inner width — dominant, with 143px of slack,
+no clipping and no wrap.
+
 ---
 
 ## 11. Deferred production defects

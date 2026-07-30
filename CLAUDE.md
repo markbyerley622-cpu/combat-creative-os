@@ -321,7 +321,23 @@ ledger; the take is not reused. Identity, hands, rear-facing phone rigidity and
 the absence of invented graphics were all correct. See the "Scene-1 acceptance"
 rules below and `docs/runbooks/ltx-scene-01-acceptance.md`.
 
-**The Scene-1 notification has been redesigned, at zero cost.** The prototype —
+**The Scene-1 notification art direction is sharpened (treatment v3), at zero
+cost.** Typography moved to **Bahnschrift Condensed** — chosen on measurement,
+not preference: 435.8px against Arial's 650.8px for the headline string, with
+Barlow Condensed absent and Impact rejected on letterform — with the brand label
+detracked from 0.17em to 0.06em and the CR mark up 20% in a snug tile. The warm
+beige surface became neutral white; the broad pink glow became a crisp 4px red
+edge with an 11px centred glow. The supporting line is "Every fight. One place."
+Motion gained one controlled settle, 0.96 → 1.015 → 1.0 finishing at 0.40s, with
+the accent peaking _while the card is still arriving_. **Proven live, 0¢:** 18
+measured rows all `OBSERVED`, including 0 of 27 frames overlapping subject
+content at 34/35px clearance, red-behind-supporting-copy of **0.17** against a
+ceiling of 6, one scale excursion peaking at exactly 1.0150 and ending at
+1.0000, one accent excursion, and a byte-identical re-render. Placement,
+dimensions, radius, complete-card entrance and the headline are unchanged. See
+the "Scene-1 notification art direction" rules below.
+
+**The Scene-1 notification was redesigned before that, at zero cost.** The prototype —
 a `drawbox` rectangle with one line of subtitle type over it — is replaced by a
 `LAYERED_SURFACE_COMPOSITE`: mark, header, timestamp, headline, supporting line,
 surface, radius, shadow and accent edge laid out as one document, rasterised to
@@ -346,6 +362,67 @@ predictor-rank interface space, scene 9 a smooth 1% leftward drift preserving
 the phone geometry and discussion-interface region. Neither is substituted with
 `dolly_in`, `dolly_out` or any other LTX move. **The FFmpeg execution of the
 second stage is not implemented yet and neither scene has been generated.**
+
+## Scene-1 notification art direction — permanent rules (treatment v3)
+
+- **A display face that silently falls back is the defect this guard exists to
+  catch.** It renders perfectly, passes every other check, and is the generic
+  typography the art direction rejected. `measureFontsResolved` compares the
+  string's width in the named family against a `monospace` sentinel and the run
+  **refuses** when either family did not resolve. Never soften that to a
+  warning, and never add a fallback family to the CSS stack that could satisfy
+  it — the stack's only fallback exists so the probe has something to differ
+  from.
+- **The face is chosen on evidence, not on preference.** Barlow Condensed
+  ExtraBold was the preferred fallback and is not installed; Bahnschrift
+  Condensed at 700 measures 435.8px against Arial's 650.8px for the headline
+  string, which is what "condensed" means in numbers. Impact is condensed too
+  and was rejected on letterform: it reads tabloid, not premium. Record the
+  measurement when changing it.
+- **Two families, two jobs.** `displayFontFamily` sets the headline and the
+  brand label; `uiFontFamily` sets the timestamp and the supporting line. The
+  hierarchy is deliberate — the display face is the voice, the UI face is the
+  system speaking.
+- **One overshoot, and a second is not expressible.** `settleScale` is two
+  monotonic eased segments meeting at `entrancePeakFraction`, so the scale rises
+  once, passes through 1 and settles onto it. `entrancePeakScale` is bounded to
+  1.03: a few thousandths reads as weight arriving, a few hundredths reads as a
+  bounce, and a bounce is the template effect this treatment refuses.
+- **The travel never overshoots, only the scale does.** A card that flew past
+  its resting position and came back is a bounce however small. The rise is
+  monotonic to zero; the settle is a scale gesture.
+- **The accent is an envelope over time, not a property of the pulse states.**
+  That is what lets it peak _while the card is still arriving_ — synchronised to
+  the settle rather than following it. A per-state pulse can only ever begin
+  after the entrance is over, and an accent that fires once the card is already
+  at rest reads as a second event. Every state samples the envelope at its own
+  midpoint, whatever kind it is.
+- **The glow is centred on the bar, never offset.** An offset glow reaches
+  roughly offset plus blur into the card, which is exactly how v2 put a pink
+  wash across the supporting copy. Centred, it reaches only
+  `accentGlowBlurPx` — the distance the brief bounds.
+- **Red contamination above the glow's declared reach is measured, not
+  eyeballed.** `NO_RED_WASH_BEHIND_SUPPORTING_COPY` reads red-minus-green over
+  the band above the glow on every frame against a ceiling of 6. The v2 wash
+  passed every other check — the card was present, the type was there, the
+  accent pulsed exactly once — because nothing measured where the glow had gone.
+- **The supporting-copy band is defined against the accent, never by
+  re-deriving the CSS layout.** A second implementation of the type stack would
+  agree with the first only until somebody changed a margin.
+- **The mark's tile is snug and sized from the mark's own height and aspect.**
+  Some tile is unavoidable because the mark's background is opaque white and the
+  surface is translucent — without one the mark sits in a brighter rectangle
+  that reads as a compositing seam. A square chip with the mark floating in it
+  reads timid, which is a stated refusal criterion.
+- **The review frames are derived from the brief, never hardcoded.** Entrance,
+  accent peak, settle and final hold are properties of authored timing;
+  constants would quietly produce frames of the wrong moments while still being
+  labelled "settle" and "peak accent".
+- **Placement, dimensions, radius, clearance, the complete-card entrance and the
+  factual headline are fixed.** An art-direction revision changes how it looks,
+  not where it sits or what it claims. `cardCentreYPx`, `widthFraction`,
+  `cardHeightPx`, `cornerRadiusPx` and `headline` were carried through v3
+  unchanged, and the placement measurement re-proves the clearance every run.
 
 ## Scene-1 notification treatment — permanent rules
 

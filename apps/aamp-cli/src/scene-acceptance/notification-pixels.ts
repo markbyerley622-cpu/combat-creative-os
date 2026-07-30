@@ -111,9 +111,10 @@ export async function readRgbFrames(options: {
   readonly workingDirectory: string;
   readonly runner: CommandRunner;
   readonly binaries: FfmpegBinaries;
+  readonly label: string;
 }): Promise<RgbFrames> {
   await mkdir(options.workingDirectory, { recursive: true });
-  const target = join(options.workingDirectory, 'accent-strip.rgb');
+  const target = join(options.workingDirectory, `${options.label}.rgb`);
   const crop = options.cropRect;
   const result = await options.runner.run(
     options.binaries.ffmpeg,
@@ -144,7 +145,7 @@ export async function readRgbFrames(options: {
   if (result.exitCode !== 0) {
     throw new StoryboardVideoError(
       'INVALID_GENERATED_MEDIA',
-      `the accent strip could not be decoded for measurement: ${result.stderr.trim().slice(-300)}`,
+      `${options.label} could not be decoded for measurement: ${result.stderr.trim().slice(-300)}`,
     );
   }
   const bytes = await readFile(target);
@@ -153,7 +154,7 @@ export async function readRgbFrames(options: {
   if (bytes.byteLength === 0 || bytes.byteLength % frameBytes !== 0) {
     throw new StoryboardVideoError(
       'INVALID_GENERATED_MEDIA',
-      `the accent strip is ${bytes.byteLength} bytes, which is not a whole number of ${crop.widthPx}x${crop.heightPx} frames`,
+      `${options.label} is ${bytes.byteLength} bytes, which is not a whole number of ${crop.widthPx}x${crop.heightPx} frames`,
     );
   }
   return {

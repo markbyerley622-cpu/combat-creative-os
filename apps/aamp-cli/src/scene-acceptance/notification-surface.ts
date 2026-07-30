@@ -42,6 +42,16 @@ import type { CardRect, DeliveryFrame, NotificationState } from './notification-
 
 export const NOTIFICATION_SURFACE_ASSET_FILENAME = 'notification-surface.png';
 
+/**
+ * How bright the accent's glow is relative to the bar itself.
+ *
+ * Treatment grammar rather than creative copy, so it lives with the treatment
+ * version. Held low deliberately: the bar carries the accent and the glow only
+ * seats it against the surface. At the first version's 0.75 the glow was doing
+ * the work and read as a wash.
+ */
+export const ACCENT_GLOW_OPACITY_FACTOR = 0.5;
+
 export interface RenderedSurfaceState {
   readonly stateId: string;
   readonly fileName: string;
@@ -60,7 +70,10 @@ export interface RenderedNotificationSurfaces {
   readonly assetRect: CardRect;
   readonly markChecksumSha256: string;
   readonly renderer: string;
-  readonly fontFamily: string;
+  readonly displayFontFamily: string;
+  readonly uiFontFamily: string;
+  /** Measured, not assumed: the renderer actually resolved these families. */
+  readonly fontsResolved: readonly { readonly family: string; readonly resolved: boolean }[];
 }
 
 export interface RenderNotificationSurfacesOptions {
@@ -91,6 +104,7 @@ export async function renderNotificationSurfaces(
 
   let browser: Browser | undefined;
   const rendered: RenderedSurfaceState[] = [];
+  let fontsResolved: readonly { family: string; resolved: boolean }[] = [];
   let assetChecksumSha256 = '';
   const assetPath = join(options.outputDirectory, NOTIFICATION_SURFACE_ASSET_FILENAME);
 
@@ -104,7 +118,10 @@ export async function renderNotificationSurfaces(
     const context = await browser.newContext({
       viewport: { width: options.frame.widthPx, height: options.frame.heightPx },
       deviceScaleFactor: 1,
-      javaScriptEnabled: false,
+      // Scripting is on solely so the font probe below can measure. The surface
+      // documents themselves contain no script: they are a stylesheet, one
+      // inlined image and text, set from a string with every request denied.
+      javaScriptEnabled: true,
       offline: true,
     });
     await context.route('**/*', (route) => {
@@ -117,6 +134,22 @@ export async function renderNotificationSurfaces(
     });
 
     const page = await context.newPage();
+
+    // --- the type is the type that was asked for, or the run refuses ---------
+    await page.setContent(
+      '<!doctype html><html><head><meta charset="utf-8"></head><body></body></html>',
+    );
+    fontsResolved = await measureFontsResolved(page, [
+      options.brief.displayFontFamily,
+      options.brief.uiFontFamily,
+    ]);
+    const unresolved = fontsResolved.filter((entry) => !entry.resolved).map((e) => e.family);
+    if (unresolved.length > 0) {
+      throw new StoryboardVideoError(
+        'FINAL_RENDER_FAILURE',
+        `this renderer cannot resolve ${unresolved.map((f) => `"${f}"`).join(' or ')}, so the card would be set in a substitute face. A display face that silently falls back renders perfectly and is the generic typography this art direction exists to avoid, so the run refuses instead. Install the face, or name one this machine has in the brief.`,
+      );
+    }
 
     for (const state of options.states) {
       const html = buildNotificationSurfaceHtml({
@@ -187,8 +220,47 @@ export async function renderNotificationSurfaces(
     assetRect: options.assetRect,
     markChecksumSha256,
     renderer: 'chromium (playwright), offline, transparent background, deviceScaleFactor 1',
-    fontFamily: options.brief.fontFamily,
+    displayFontFamily: options.brief.displayFontFamily,
+    uiFontFamily: options.brief.uiFontFamily,
+    fontsResolved,
   };
+}
+
+/**
+ * Whether the renderer actually resolved a family, measured by width.
+ *
+ * `document.fonts.check` answers about loadable web fonts and is unreliable
+ * about installed system ones, so this compares the string's width in
+ * `"<family>", monospace` against its width in `monospace` alone. If the family
+ * did not resolve the two are identical to the pixel, and a difference is proof
+ * that something other than the fallback drew the glyphs.
+ *
+ * It exists because the failure it catches is invisible: a display face that
+ * silently falls back renders perfectly, passes every other check in this
+ * repository, and is exactly the generic typography the art direction rejected.
+ */
+async function measureFontsResolved(
+  page: import('playwright').Page,
+  families: readonly string[],
+): Promise<readonly { family: string; resolved: boolean }[]> {
+  return page.evaluate((names) => {
+    const probe = document.createElement('span');
+    probe.style.cssText =
+      'position:absolute;left:-9999px;top:0;visibility:hidden;font-size:120px;white-space:nowrap;font-weight:700';
+    probe.textContent = 'FIGHTS THIS WEEKEND 0123';
+    document.body.appendChild(probe);
+    const widthOf = (stack: string): number => {
+      probe.style.fontFamily = stack;
+      return probe.getBoundingClientRect().width;
+    };
+    const sentinel = widthOf('monospace');
+    const out = names.map((family) => ({
+      family,
+      resolved: Math.abs(widthOf(`"${family}", monospace`) - sentinel) > 0.5,
+    }));
+    probe.remove();
+    return out;
+  }, families as string[]);
 }
 
 export interface NotificationSurfaceHtmlInput {
@@ -221,7 +293,7 @@ export function buildNotificationSurfaceHtml(input: NotificationSurfaceHtmlInput
 
   const accentIsBottom = brief.accentEdge === 'BOTTOM';
   const accent = rgba(brief.accentColorHex, state.accentOpacity);
-  const accentGlow = rgba(brief.accentColorHex, state.accentOpacity * 0.75);
+  const accentGlow = rgba(brief.accentColorHex, state.accentOpacity * ACCENT_GLOW_OPACITY_FACTOR);
   const surface = rgba(brief.surfaceColorHex, brief.surfaceOpacity);
   // The same surface, a shade lighter at the top: a flat fill reads as a
   // sticker, and a very small vertical lift is what makes it read as glass.
@@ -246,40 +318,51 @@ body { width: ${frame.widthPx}px; height: ${frame.heightPx}px; overflow: hidden;
   box-sizing: border-box;
   padding: 0 ${brief.horizontalPaddingPx}px;
   display: flex; flex-direction: column; justify-content: center;
-  font-family: ${cssFontStack(brief.fontFamily)};
+  font-family: ${cssFontStack(brief.uiFontFamily)};
   -webkit-font-smoothing: antialiased;
 }
-.header { display: flex; align-items: center; gap: ${Math.round(brief.markHeightPx * 0.35)}px; }
+.header { display: flex; align-items: center; gap: ${Math.round(brief.markHeightPx * 0.32)}px; }
+/* The tile is a snug rounded rectangle around the mark, not a square chip with
+   the mark floating in it. The mark's own background is opaque white and the
+   surface is translucent, so some tile is unavoidable — without it the mark
+   sits in a brighter rectangle that reads as a compositing seam. Sizing it from
+   the mark's height and its real aspect keeps the padding even and stops the
+   mark reading as timid inside its own container. */
 .mark {
-  width: ${Math.round(brief.markHeightPx * 1.35)}px; height: ${Math.round(brief.markHeightPx * 1.35)}px;
-  border-radius: ${Math.round(brief.markHeightPx * 0.34)}px;
+  height: ${Math.round(brief.markHeightPx * 1.3)}px;
+  border-radius: ${Math.round(brief.markHeightPx * 0.28)}px;
+  padding: 0 ${Math.round(brief.markHeightPx * 0.17)}px;
   background: #ffffff;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.14);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
   display: flex; align-items: center; justify-content: center;
   flex: none;
 }
-.mark img { width: ${brief.markHeightPx}px; height: auto; display: block; }
+.mark img { height: ${brief.markHeightPx}px; width: auto; display: block; }
 .brand {
+  font-family: ${cssFontStack(brief.displayFontFamily)};
   font-size: ${brief.headerFontSizePx}px; font-weight: 700;
-  letter-spacing: 0.17em; color: ${brief.headerColorHex};
+  letter-spacing: ${round3(brief.headerLetterSpacingEm)}em; color: ${brief.headerColorHex};
   white-space: nowrap;
 }
 .spacer { flex: 1 1 auto; }
 .stamp {
-  font-size: ${brief.headerFontSizePx}px; font-weight: 600;
-  letter-spacing: 0.12em; color: ${brief.supportingColorHex};
+  font-size: ${Math.round(brief.headerFontSizePx * 0.86)}px; font-weight: 600;
+  letter-spacing: ${round3(brief.headerLetterSpacingEm)}em; color: ${brief.supportingColorHex};
   white-space: nowrap;
 }
 .headline {
-  margin-top: ${Math.round(brief.cardHeightPx * 0.066)}px;
-  font-size: ${brief.headlineFontSizePx}px; font-weight: 800;
-  letter-spacing: -0.012em; line-height: 1.02;
+  font-family: ${cssFontStack(brief.displayFontFamily)};
+  margin-top: ${Math.round(brief.cardHeightPx * 0.05)}px;
+  font-size: ${brief.headlineFontSizePx}px; font-weight: 700;
+  letter-spacing: ${round3(brief.headlineLetterSpacingEm)}em;
+  line-height: ${round3(brief.headlineLineHeight)};
   color: ${brief.headlineColorHex}; white-space: nowrap;
 }
 .support {
-  margin-top: ${Math.round(brief.cardHeightPx * 0.034)}px;
+  margin-top: ${Math.round(brief.cardHeightPx * 0.03)}px;
   font-size: ${brief.supportingFontSizePx}px; font-weight: 400;
-  letter-spacing: 0.005em; color: ${brief.supportingColorHex}; white-space: nowrap;
+  letter-spacing: ${round3(brief.supportingLetterSpacingEm)}em;
+  color: ${brief.supportingColorHex}; white-space: nowrap;
 }
 .accent {
   position: absolute;
@@ -291,8 +374,13 @@ body { width: ${frame.widthPx}px; height: ${frame.heightPx}px; overflow: hidden;
   background: ${accent};
   /* The glow spills inward, where the card's own overflow keeps it: an accent
      that bled outside the rounded corner would be a halo around the card
-     rather than light coming off its edge. */
-  box-shadow: ${accentIsBottom ? `0 -${brief.accentGlowBlurPx}px` : `${brief.accentGlowBlurPx}px 0`} ${brief.accentGlowBlurPx}px ${accentGlow};
+     rather than light coming off its edge.
+
+     No offset — the glow is centred on the bar rather than thrown away from it.
+     An offset glow reaches roughly offset plus blur into the card, which is how
+     the first version put a pink wash behind the supporting line; centred, it
+     reaches only the declared glow blur, which is the distance the brief bounds. */
+  box-shadow: 0 0 ${brief.accentGlowBlurPx}px ${accentGlow};
 }
 `.trim();
 

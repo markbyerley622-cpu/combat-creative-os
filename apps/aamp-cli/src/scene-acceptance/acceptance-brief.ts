@@ -65,7 +65,7 @@ const SceneSchema = z
  * radius outside 28–36px is not a smaller mistake than a missing headline, so
  * both are refused here rather than rendered.
  */
-export const NOTIFICATION_SURFACE_DESIGN_VERSION = 2 as const;
+export const NOTIFICATION_SURFACE_DESIGN_VERSION = 3 as const;
 
 /** The easings this treatment can actually execute. Named, never numeric. */
 export const NOTIFICATION_EASINGS = ['EASE_OUT_CUBIC', 'EASE_OUT_QUINT'] as const;
@@ -109,13 +109,28 @@ const NotificationSchema = z
     accentPulsePeakOpacity: z.number().min(0).max(1),
 
     // --- typography ----------------------------------------------------------
-    fontFamily: z.string().min(1).max(60),
+    /**
+     * The condensed display face the headline and the brand label are set in.
+     *
+     * Named, and refused if the renderer cannot resolve it. A display face that
+     * silently falls back to the UI face is the failure this field exists to
+     * prevent: the fallback renders perfectly, passes every other check, and is
+     * the generic typography the art direction rejected.
+     */
+    displayFontFamily: z.string().min(1).max(60),
+    /** The neutral face the timestamp and the supporting line are set in. */
+    uiFontFamily: z.string().min(1).max(60),
     headerColorHex: HexColor,
     headerFontSizePx: z.number().int().min(14).max(40),
+    /** Tracking, in em. Authored, because how open a label sits is a decision. */
+    headerLetterSpacingEm: z.number().min(-0.05).max(0.3),
     headlineColorHex: HexColor,
-    headlineFontSizePx: z.number().int().min(28).max(80),
+    headlineFontSizePx: z.number().int().min(28).max(96),
+    headlineLetterSpacingEm: z.number().min(-0.05).max(0.2),
+    headlineLineHeight: z.number().min(0.8).max(1.4),
     supportingColorHex: HexColor,
     supportingFontSizePx: z.number().int().min(14).max(48),
+    supportingLetterSpacingEm: z.number().min(-0.05).max(0.2),
     markHeightPx: z.number().int().min(24).max(96),
 
     // --- the entrance --------------------------------------------------------
@@ -126,6 +141,17 @@ const NotificationSchema = z
     /** How far the card travels upward as it arrives. */
     entranceRisePx: z.number().int().min(8).max(40),
     entranceStartScale: z.number().min(0.9).max(0.995),
+    /**
+     * The single controlled overshoot: the card passes fractionally through its
+     * resting size and settles back onto it.
+     *
+     * Bounded tightly on purpose. A few thousandths reads as weight arriving; a
+     * few hundredths reads as a bounce, and a bounce is the template effect this
+     * treatment refuses. There is exactly one, and `entrancePeakFraction` says
+     * where in the entrance it happens — a second excursion is not expressible.
+     */
+    entrancePeakScale: z.number().min(1).max(1.03),
+    entrancePeakFraction: z.number().min(0.2).max(0.8),
 
     // --- the single accent pulse ---------------------------------------------
     pulseStartSeconds: z.number().min(0),
@@ -233,10 +259,16 @@ function assertBriefIsCoherent(brief: AcceptanceBrief, path?: string): void {
   if (notification.pulseEndSeconds <= notification.pulseStartSeconds) {
     problems.push('the accent pulse ends at or before it starts');
   }
-  if (notification.pulseStartSeconds + 1e-9 < notification.entranceSettleSeconds) {
-    // The pulse is a note struck on a card that has arrived. Firing it mid-entrance
-    // would read as an error light rather than an accent.
-    problems.push('the accent pulse fires before the card it belongs to has settled');
+  if (notification.pulseStartSeconds + 1e-9 < notification.entranceStartSeconds) {
+    // The pulse may be synchronised to the settle — that is the point of it —
+    // but it cannot fire on a card that has not begun arriving, which would read
+    // as an accent floating in an empty frame.
+    problems.push('the accent pulse fires before the card it belongs to has begun arriving');
+  }
+  if (notification.pulseEndSeconds + 1e-9 < notification.entranceSettleSeconds) {
+    // An accent that is already over before the card lands is not synchronised
+    // to anything a viewer sees.
+    problems.push('the accent pulse is over before the card has settled');
   }
   if (notification.pulseEndSeconds > notification.readableUntilSeconds + 1e-9) {
     problems.push('the accent pulse runs past the cut it is meant to lead into');

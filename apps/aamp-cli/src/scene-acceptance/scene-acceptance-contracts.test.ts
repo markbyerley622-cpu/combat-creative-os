@@ -242,15 +242,23 @@ describe('the committed Scene-1 brief', () => {
     expect(() => parseAcceptanceBrief({ ...raw, scene })).toThrow(/can never be regenerated/i);
   });
 
-  it('refuses a pulse that fires before its card has settled or runs past the cut', async () => {
+  it('refuses a pulse that fires before its card exists or runs past the cut', async () => {
     const raw = JSON.parse(await readBrief()) as Record<string, unknown>;
     const notification = raw.notification as Record<string, unknown>;
+    // The pulse may overlap the entrance — that is what synchronising it to the
+    // settle means — but it cannot fire on a card that has not begun arriving.
     expect(() =>
       parseAcceptanceBrief({
         ...raw,
         notification: { ...notification, pulseStartSeconds: 0.1 },
       }),
-    ).toThrow(/before the card it belongs to has settled/i);
+    ).toThrow(/before the card it belongs to has begun arriving/i);
+    expect(() =>
+      parseAcceptanceBrief({
+        ...raw,
+        notification: { ...notification, pulseStartSeconds: 0.17, pulseEndSeconds: 0.2 },
+      }),
+    ).toThrow(/over before the card has settled/i);
     expect(() =>
       parseAcceptanceBrief({
         ...raw,

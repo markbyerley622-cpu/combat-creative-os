@@ -3,7 +3,11 @@ import type { CommandRunner, FfmpegBinaries } from '@combat/media';
 import type { NotificationBrief } from './acceptance-brief';
 import { grayLumaAt, readGrayFrames, readRgbaImage, readRgbFrames } from './notification-pixels';
 import type { PlacementReport } from './notification-placement';
-import { resolveAccentRect, type NotificationTimeline } from './notification-timeline';
+import {
+  resolveAccentRect,
+  resolveSupportingCopyBand,
+  type NotificationTimeline,
+} from './notification-timeline';
 import type { VisualObservation, VisualObservationStatus } from './visual-defects';
 
 /**
@@ -60,6 +64,27 @@ export interface AccentReading {
 }
 
 /**
+ * How much red has reached the band the supporting line sits in.
+ *
+ * The first version threw the accent's glow upward with an offset, and it
+ * washed pink across the supporting copy — a defect that every other check
+ * passed straight through, because the card was present, the type was there and
+ * the accent did pulse exactly once. Nothing measured whether the glow had gone
+ * where it was not wanted, so nothing caught it.
+ *
+ * Measured as red-minus-green over the supporting line's own rows, at the
+ * accent's brightest moment. Neutral type on a neutral surface reads within a
+ * couple of levels; a wash reads in the tens.
+ */
+export const SUPPORTING_COPY_REDNESS_CEILING = 6;
+
+export interface SupportingCopyReading {
+  readonly frameIndex: number;
+  readonly atSeconds: number;
+  readonly redness: number;
+}
+
+/**
  * Three independent readings, each with its own not-measured reason.
  *
  * They are separate because one failure must not discard the others. The first
@@ -76,6 +101,8 @@ export interface NotificationMeasurements {
   readonly presenceNotMeasuredReason: string | null;
   readonly accent: readonly AccentReading[];
   readonly accentNotMeasuredReason: string | null;
+  readonly supportingCopy: readonly SupportingCopyReading[];
+  readonly supportingCopyNotMeasuredReason: string | null;
   readonly assetMinAlpha: number;
   readonly assetMaxAlpha: number;
   readonly assetTransparentFraction: number;
@@ -150,6 +177,20 @@ export async function measureNotification(
   }
 
   // --- the accent edge, in colour, cropped to the band it occupies -----------
+  const meanRedness = (
+    strip: { widthPx: number; heightPx: number; bytes: Buffer },
+    index: number,
+  ) => {
+    const pixels = strip.widthPx * strip.heightPx;
+    let sum = 0;
+    const base = index * pixels * 3;
+    for (let pixel = 0; pixel < pixels; pixel += 1) {
+      const offset = base + pixel * 3;
+      sum += (strip.bytes[offset] ?? 0) - (strip.bytes[offset + 1] ?? 0);
+    }
+    return Number((sum / pixels).toFixed(3));
+  };
+
   let accent: AccentReading[] = [];
   let accentNotMeasuredReason: string | null = null;
   try {
@@ -160,24 +201,43 @@ export async function measureNotification(
       workingDirectory: options.workingDirectory,
       runner: options.runner,
       binaries: options.binaries,
+      label: 'accent-strip',
     });
-    const stripPixels = strip.widthPx * strip.heightPx;
     for (let index = 0; index < strip.frameCount; index += 1) {
-      let sum = 0;
-      const base = index * stripPixels * 3;
-      for (let pixel = 0; pixel < stripPixels; pixel += 1) {
-        const offset = base + pixel * 3;
-        sum += (strip.bytes[offset] ?? 0) - (strip.bytes[offset + 1] ?? 0);
-      }
       accent.push({
         frameIndex: index,
         atSeconds: Number((index / options.frameRate).toFixed(6)),
-        redness: Number((sum / stripPixels).toFixed(3)),
+        redness: meanRedness(strip, index),
       });
     }
   } catch (error) {
     accent = [];
     accentNotMeasuredReason = reason(error);
+  }
+
+  // --- and whether any of it reached the supporting copy --------------------
+  let supportingCopy: SupportingCopyReading[] = [];
+  let supportingCopyNotMeasuredReason: string | null = null;
+  try {
+    const band = await readRgbFrames({
+      clipPath: options.compositedClipPath,
+      cropRect: resolveSupportingCopyBand(options.brief, card),
+      durationSeconds: options.durationSeconds,
+      workingDirectory: options.workingDirectory,
+      runner: options.runner,
+      binaries: options.binaries,
+      label: 'supporting-copy-band',
+    });
+    for (let index = 0; index < band.frameCount; index += 1) {
+      supportingCopy.push({
+        frameIndex: index,
+        atSeconds: Number((index / options.frameRate).toFixed(6)),
+        redness: meanRedness(band, index),
+      });
+    }
+  } catch (error) {
+    supportingCopy = [];
+    supportingCopyNotMeasuredReason = reason(error);
   }
 
   // --- the standalone asset really is transparent ----------------------------
@@ -219,6 +279,8 @@ export async function measureNotification(
     presenceNotMeasuredReason,
     accent,
     accentNotMeasuredReason,
+    supportingCopy,
+    supportingCopyNotMeasuredReason,
     assetMinAlpha,
     assetMaxAlpha,
     assetTransparentFraction,
@@ -256,6 +318,8 @@ export interface BuildNotificationDefectReportInput {
   /** Two independent renders of the same plan, compared byte for byte. */
   readonly rerenderChecksumSha256: string | null;
   readonly renderChecksumSha256: string;
+  /** Whether the renderer actually resolved each named family. */
+  readonly fontsResolved: readonly { readonly family: string; readonly resolved: boolean }[];
 }
 
 export function buildNotificationDefectReport(
@@ -411,6 +475,55 @@ export function buildNotificationDefectReport(
       `redness ${pulse.finalRedness.toFixed(1)} on the final frame against a ${pulse.baseline.toFixed(1)} unlit baseline`,
   );
 
+  const worstSupportingRedness =
+    measurements.supportingCopy.length === 0
+      ? null
+      : Math.max(...measurements.supportingCopy.map((entry) => entry.redness));
+  row(
+    'NO_RED_WASH_BEHIND_SUPPORTING_COPY',
+    measurements.supportingCopyNotMeasuredReason !== null || worstSupportingRedness === null
+      ? 'NOT_MEASURED'
+      : worstSupportingRedness <= SUPPORTING_COPY_REDNESS_CEILING
+        ? 'OBSERVED'
+        : 'DEFECT',
+    `the accent's glow stays within its declared ${brief.accentGlowBlurPx}px reach — above that the supporting line sits on neutral surface, with redness at or below ${SUPPORTING_COPY_REDNESS_CEILING}`,
+    measurements.supportingCopyNotMeasuredReason ??
+      (worstSupportingRedness === null
+        ? 'the band could not be read'
+        : `worst redness ${worstSupportingRedness.toFixed(2)} over the band above the glow, across every frame`),
+  );
+
+  // --- one controlled overshoot, and only one --------------------------------
+  const scales = timeline.states.map((state) => state.scale);
+  const peakScale = Math.max(...scales);
+  let scaleExcursions = 0;
+  let inside = false;
+  for (const value of scales) {
+    if (value > 1 + 1e-9) {
+      if (!inside) scaleExcursions += 1;
+      inside = true;
+    } else {
+      inside = false;
+    }
+  }
+  row(
+    'ONE_CONTROLLED_SETTLE',
+    scaleExcursions === 1 &&
+      peakScale <= brief.entrancePeakScale + 1e-9 &&
+      scales[scales.length - 1] === 1
+      ? 'OBSERVED'
+      : 'DEFECT',
+    `the card passes once through its resting size and settles onto it — one excursion, peaking no higher than ${brief.entrancePeakScale}, ending at exactly 1`,
+    `${scaleExcursions} excursion(s) above 1, peak ${peakScale.toFixed(4)}, final ${(scales[scales.length - 1] ?? 0).toFixed(4)}`,
+  );
+
+  row(
+    'SETTLE_COMPLETE_ON_TIME',
+    Math.abs(brief.entranceSettleSeconds - 0.4) <= 0.03 ? 'OBSERVED' : 'DEFECT',
+    'the settle finishes at about 0.40s',
+    `settles at ${brief.entranceSettleSeconds}s`,
+  );
+
   // --- the deliverable asset -------------------------------------------------
   row(
     'SURFACE_ASSET_IS_TRANSPARENT',
@@ -447,6 +560,21 @@ export function buildNotificationDefectReport(
         : `the second render hashes to ${input.rerenderChecksumSha256.slice(0, 16)}… against ${input.renderChecksumSha256.slice(0, 16)}…`,
   );
 
+  row(
+    'DISPLAY_FACE_ACTUALLY_RESOLVED',
+    input.fontsResolved.length === 0
+      ? 'NOT_MEASURED'
+      : input.fontsResolved.every((entry) => entry.resolved)
+        ? 'OBSERVED'
+        : 'DEFECT',
+    `the headline and brand label are set in "${brief.displayFontFamily}" and the supporting copy in "${brief.uiFontFamily}" — neither silently fell back to a substitute face`,
+    input.fontsResolved.length === 0
+      ? 'the renderer reported no font resolution'
+      : input.fontsResolved
+          .map((entry) => `${entry.family}: ${entry.resolved ? 'resolved' : 'FELL BACK'}`)
+          .join('; '),
+  );
+
   // --- structurally impossible here -----------------------------------------
   row(
     'NO_GENERATED_TYPOGRAPHY_OR_MARK',
@@ -477,7 +605,18 @@ export function buildNotificationDefectReport(
       'NO_TEMPLATE_FEEL',
       'nothing here reads as a stock motion-graphics template: no particles, no sweep, no gratuitous glow',
     ],
-    ['EASE_OUT_IS_RESTRAINED', 'the arrival is calm — it settles rather than snapping or bouncing'],
+    [
+      'SETTLE_READS_AS_WEIGHT_NOT_BOUNCE',
+      'the single overshoot reads as the card having weight as it lands, not as a bounce or a template spring',
+    ],
+    [
+      'TYPOGRAPHY_IS_A_SPORTS_DISPLAY_FACE',
+      'the condensed face reads as a premium sports commercial rather than as a system UI font, and the headline dominates',
+    ],
+    [
+      'MARK_HAS_PRESENCE',
+      'the CR mark reads as confident at this size rather than as a timid chip',
+    ],
     [
       'SITS_BETWEEN_FACE_AND_PHONE',
       'the card occupies the space between the face and the phone as the brief intends, and reads as belonging there',

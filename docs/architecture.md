@@ -3928,6 +3928,61 @@ satisfied one.
 
 ---
 
+### Scene-1 notification art direction, treatment v3 (2026-07-31)
+
+A craft revision, not a structural one. The v2 treatment was correct and plain:
+system typography, a warm beige surface and a glow that spread further than it
+should. v3 changes only how it looks. Runbook:
+`docs/runbooks/ltx-scene-01-acceptance.md` §10.
+
+**Typography chosen on measurement.** The preferred face, Barlow Condensed
+ExtraBold, is not installed and cannot be fetched. Of what is present,
+Bahnschrift Condensed at 700 measures 435.8px for the headline string against
+Arial's 650.8px — genuinely condensed, and a DIN-1451-derived industrial
+grotesque rather than a UI grotesque. Impact is condensed too and was rejected
+on letterform. The brief now names two families: a display face for the headline
+and brand label, a UI face for the timestamp and supporting line.
+
+**The fallback is refused, not accepted.** `measureFontsResolved` compares the
+string's width in the named family against a `monospace` sentinel; a family that
+did not resolve produces an identical width, and the run refuses. This is the
+one defect in this area that is otherwise invisible — a display face that
+silently falls back renders perfectly and passes every other check.
+
+**One controlled settle.** `settleScale` is two monotonic eased segments meeting
+at an authored peak, so the scale rises once, passes through 1 and settles onto
+it — 0.96 → 1.015 → 1.0, complete at 0.40s. The travel stays monotonic: a card
+that flew past its resting position and came back is a bounce however small.
+A second excursion is not expressible by the model.
+
+**The accent became an envelope over time** rather than a property of the pulse
+states, which is what lets it peak while the card is still arriving. Every
+state samples it at its own midpoint, so entrance states carry the rise.
+
+**The pink wash is fixed and now measured.** v2's glow was thrown upward with an
+offset and reached roughly offset plus blur into the card; centred, it reaches
+only its declared blur. `NO_RED_WASH_BEHIND_SUPPORTING_COPY` reads
+red-minus-green over the band above the glow on every frame. It measures **0.17**
+against a ceiling of 6. The v2 wash passed every other check because nothing
+measured where the glow had gone.
+
+**Proven live, 0¢:** 18 measured rows, all `OBSERVED` — 0 of 27 frames
+overlapping subject content at 34px above and 35px below; least ink 0.1136 on
+the 23 card-carrying frames; one scale excursion peaking at exactly 1.0150 and
+ending at 1.0000; one accent excursion peaking at 0.375s; both named families
+resolved; and two renders hashing to the same bytes. Measured off the rendered
+surface, the headline occupies 596px of a 742px inner width — dominant, with no
+clipping and no wrap. **Not proven:** creative quality — eleven rows carry
+`HUMAN_JUDGEMENT_REQUIRED` and no number.
+
+**Preserved exactly:** placement (`cardCentreYPx` 1172), dimensions (810×204),
+radius (32), the complete-card entrance, face and phone clearance, transparent
+post-LTX compositing, and the factual headline.
+
+**Next milestone is unchanged: AAMP-1 step 4.**
+
+---
+
 ## 9. What this document deliberately does not do
 
 Per instructions, no application code, no package.json, no Prisma schema file, and

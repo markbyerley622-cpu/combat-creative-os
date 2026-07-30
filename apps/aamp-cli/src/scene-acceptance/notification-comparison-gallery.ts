@@ -27,6 +27,7 @@ import type { NotificationTimeline } from './notification-timeline';
 export const NOTIFICATION_COMPARISON_GALLERY_FILENAME = 'notification-comparison.html';
 
 export interface NotificationGalleryFrame {
+  readonly label: string;
   readonly atSeconds: number;
   readonly relativePath: string;
 }
@@ -50,7 +51,7 @@ export async function writeNotificationComparisonGallery(
   const frames = input.frames
     .map(
       (frame) =>
-        `<figure><img src="${escapeHtml(frame.relativePath)}" alt="proof frame at ${frame.atSeconds.toFixed(2)} seconds"><figcaption>${frame.atSeconds.toFixed(2)}s</figcaption></figure>`,
+        `<figure><img src="${escapeHtml(frame.relativePath)}" alt="revised proof at ${escapeHtml(frame.label)}, ${frame.atSeconds.toFixed(2)} seconds"><figcaption><strong>${escapeHtml(frame.label)}</strong><br>${frame.atSeconds.toFixed(2)}s</figcaption></figure>`,
     )
     .join('\n');
 
@@ -80,8 +81,8 @@ export async function writeNotificationComparisonGallery(
 
   const previous = input.previousRelativePath
     ? `<video controls preload="metadata" src="${escapeHtml(input.previousRelativePath)}"></video>
-       <p class="cap">The prototype: a filled rectangle drawn by <code>drawbox</code> with one line of subtitle type over it. No corner radius, no translucency, no shadow, no mark beside the type, no supporting line.</p>`
-    : `<p class="cap warn">The previous treatment's cut could not be read, so it is not shown. It existed; this column is missing evidence, not evidence of absence.</p>`;
+       <p class="cap">The treatment this revision replaces, for comparison. Same placement, same dimensions, same clearance — the differences are the display face, the neutral surface, the crisper accent and the settle.</p>`
+    : `<p class="cap warn">The current treatment's cut could not be read, so it is not shown. It existed; this column is missing evidence, not evidence of absence.</p>`;
 
   const placementSummary =
     input.placement.notMeasuredReason !== null
@@ -148,12 +149,12 @@ export async function writeNotificationComparisonGallery(
 
 <div class="cols">
   <div class="col">
-    <h3>1 · New treatment</h3>
+    <h3>1 · Revised treatment</h3>
     <video controls preload="metadata" src="${escapeHtml(input.proofRelativePath)}"></video>
     <p class="cap">A laid-out surface — mark, header, timestamp, headline, supporting line, accent edge — rasterised to transparent pixels and composited as one assembled unit.</p>
   </div>
   <div class="col">
-    <h3>2 · Previous treatment</h3>
+    <h3>2 · Current treatment</h3>
     ${previous}
   </div>
   <div class="col">
