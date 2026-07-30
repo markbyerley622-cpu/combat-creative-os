@@ -321,6 +321,24 @@ ledger; the take is not reused. Identity, hands, rear-facing phone rigidity and
 the absence of invented graphics were all correct. See the "Scene-1 acceptance"
 rules below and `docs/runbooks/ltx-scene-01-acceptance.md`.
 
+**The Scene-1 notification has been redesigned, at zero cost.** The prototype —
+a `drawbox` rectangle with one line of subtitle type over it — is replaced by a
+`LAYERED_SURFACE_COMPOSITE`: mark, header, timestamp, headline, supporting line,
+surface, radius, shadow and accent edge laid out as one document, rasterised to
+a transparent sheet by a real layout engine, and composited as a single
+assembled unit. `pnpm aamp:notification-proof` proves it over the Scene-1 slot
+without constructing a provider, reading a credential or making a request.
+**Proven live, 0¢:** an ffprobe-verified 1080×1920 proof; 27 of 27 frames with
+**zero** overlapping subject content and worst-case clearance 34px above and
+35px below the whole occupied rectangle, shadow included; 23 frames carrying the
+card at a minimum ink coverage of 0.1103, so no frame is an empty panel; exactly
+one accent excursion peaking at 0.417s; identical surface coverage at the settle
+and on the final frame, so no fade-out; and two renders of the same plan hashing
+to the same bytes — fourteen measured rows, all `OBSERVED`. **Not proven:**
+creative quality — nine rows carry `HUMAN_JUDGEMENT_REQUIRED` and no number, and
+the picture underneath remains the rejected take. See the "Scene-1 notification
+treatment" rules below and `docs/runbooks/ltx-scene-01-acceptance.md` §10.
+
 **Scenes 8 and 9 carry their authored `HANDHELD_DRIFT` in two stages.** The
 provider has no handheld value, so it is asked for `static` and AAMP supplies
 the drift deterministically afterwards — scene 8 a smooth 2% push preserving the
@@ -328,6 +346,78 @@ predictor-rank interface space, scene 9 a smooth 1% leftward drift preserving
 the phone geometry and discussion-interface region. Neither is substituted with
 `dolly_in`, `dolly_out` or any other LTX move. **The FFmpeg execution of the
 second stage is not implemented yet and neither scene has been generated.**
+
+## Scene-1 notification treatment — permanent rules
+
+- **The card is one document, laid out once and rasterised before FFmpeg is
+  invoked.** A `drawbox` rectangle with a subtitle line over it was the
+  prototype; it could not express a radius, a translucent surface, a shadow, a
+  second line of type or a mark placed against the type. Never reintroduce a
+  treatment where the surface and its contents are drawn by two mechanisms that
+  have to be kept in agreement by hand — that is what `MARK_LEFT_FRACTION` and
+  `TYPE_LEFT_FRACTION` existed for, and they are gone because there is now one
+  mechanism.
+- **No authored string reaches FFmpeg at all.** Not as filter grammar, and not
+  as a subtitle file named from a filter argument. The copy becomes pixels in
+  `notification-surface.ts` and the compositor never sees it. This is strictly
+  stronger than the rule it replaces; do not weaken it back to escaping.
+- **`drawbox` still cannot animate**, and the entrance is still a series of
+  complete states on disjoint `enable` windows. What changed is that each state
+  is rendered at its own transform, so type is rasterised sharp at every size it
+  is seen at rather than resampled from one master.
+- **Every state is a complete card, and the step count is matched to the frame
+  grid.** There is no assembly stage and no frame on which the surface exists
+  and its contents do not — a blank rectangle is not expressible. A step count
+  that does not divide onto the grid shows one state twice while skipping
+  another, which reads as a dropped frame.
+- **Placement is measured against the picture, never against a declared face
+  box.** A declared rectangle is a claim, and a claim checked against itself
+  always passes. Rows carrying any pixel at or above the subject-content luma
+  threshold are lit subject; the treatment's whole occupied rectangle — shadow
+  and accent glow included — must lie inside one contiguous clean run, on
+  **every** frame of the source, with clearance. Measuring the composited output
+  instead would find the card and report it as the subject.
+- **The occupied rectangle is what is checked, never the card alone.** The
+  shadow offsets downward and the entrance offsets the card downward, so the
+  occupied rectangle's centre is not the card's centre. A check that passed on
+  the card while the shadow hung over the phone would be checking the wrong
+  rectangle — and the push-in narrows that gap as the shot runs, which is how
+  17px of clearance was found on the last frame and nowhere else.
+- **The measurement says what it cannot establish.** That the clean run it found
+  is the gap between the face and the phone rather than some other empty region
+  is a person reading a picture. The nearest rows of subject content above and
+  below are recorded per frame so a reviewer can check that reading in numbers.
+- **An unmeasurable row fails the run.** `notMeasuredCount` gates the exit code
+  beside `measuredDefectCount`. A proof that could not take its own measurements
+  is not a proof, and a report counting only defects called one clean while five
+  of its claims were unknown.
+- **Each measurement section carries its own not-measured reason.** One failed
+  section must never discard the ones that succeeded — that understates what is
+  known, which is its own kind of dishonest report.
+- **`crop` on a chroma-subsampled format snaps to even dimensions.** Convert to
+  RGB _before_ cropping when the region has an odd dimension; a five-pixel
+  accent band comes back four pixels tall and the stream is then the wrong
+  length. The frame-count check is what catches it — keep it.
+- **The pulse is counted as excursions, not as local maxima.** A rise that
+  plateaus across a frame boundary is a measurement artefact, not a second
+  pulse. One contiguous run above the halfway mark between rest and peak is what
+  a viewer calls "it flashed once".
+- **The accent holds at rest into the cut; there is no fade-out.** Its resting
+  rectangle is recorded as the match-transition seed for Scene 2 rather than
+  left to be re-derived. Nothing in this milestone renders that transition.
+- **The proof path cannot spend money, structurally.** No provider construction,
+  no credential, no cost function, no `fetch(` — asserted over the modules by
+  name in `scene-acceptance-source-hygiene.test.ts`. It takes no cost ceiling
+  because a ceiling would imply there was something to cap.
+- **The proof composites over a rejected take, and says so everywhere.** The
+  Scene-1 clip stands rejected for `COMPOSITION_DRIFT` and `GAZE_LIFT`; it is
+  compositing material here and never a production source. Every artefact
+  records the rejection rather than quietly dropping it.
+- **The brief owns every word, colour, distance and timing**, including the
+  ranges the visual specification fixes — a height outside 190–220px or a radius
+  outside 28–36px is refused by the schema rather than rendered. Adding or
+  changing a state model, easing, pulse shape or surface layout is a
+  `NOTIFICATION_TREATMENT_VERSION` bump, not an edit in place.
 
 ## Scene-1 LTX acceptance — permanent rules
 

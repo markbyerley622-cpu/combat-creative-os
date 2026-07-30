@@ -8,6 +8,7 @@ import { NodeCommandRunner } from '@combat/media';
 import { FakeLtxServer } from '@combat/providers/testing';
 import { describe, expect, it } from 'vitest';
 
+import { chromiumIsAvailable } from '../capture/playwright-capture';
 import { STORYBOARD_VIDEO_EXIT_CODES } from '../storyboard-video/failures';
 import { runSceneAcceptance } from './run-scene-acceptance';
 
@@ -22,8 +23,10 @@ import { runSceneAcceptance } from './run-scene-acceptance';
  * otherwise.
  *
  * It needs a real FFmpeg, because the thing being proven is that a real file
- * is measured, composited and reported on. Without one it skips **loudly**
- * rather than passing quietly.
+ * is measured, composited and reported on — and, since the notification became
+ * a laid-out document rather than a filled rectangle, a real Chromium too.
+ * Without either it skips **loudly** rather than passing quietly, and the
+ * message names which one is missing.
  */
 
 const run = promisify(execFile);
@@ -48,6 +51,20 @@ async function ffmpegAvailable(): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/**
+ * The composite lays the notification out in a real browser, so this suite
+ * needs Chromium as well as FFmpeg.
+ *
+ * Stated separately from the FFmpeg check on purpose: the two skip for
+ * different reasons and an operator fixing one at a time should be told which.
+ * Without this guard the suite would *fail* on a machine that has FFmpeg and no
+ * browser — which is CI — rather than skipping loudly, and a hard failure there
+ * would get the test deleted rather than the browser installed.
+ */
+function browserAvailable(): boolean {
+  return chromiumIsAvailable();
 }
 
 /** Ten portrait plates, structured enough for layout correlation to mean something. */
@@ -112,10 +129,10 @@ async function buildLogo(target: string): Promise<void> {
 
 describe('Scene-1 acceptance lifecycle', () => {
   it('makes exactly one request, inspects, composites and leaves the review pending', async () => {
-    if (!(await ffmpegAvailable())) {
+    if (!(await ffmpegAvailable()) || !browserAvailable()) {
       // eslint-disable-next-line no-console -- a silent skip would read as a pass
       console.warn(
-        'SKIPPED: the Scene-1 lifecycle test needs a real FFmpeg and ffprobe on PATH (or FFMPEG_PATH/FFPROBE_PATH).',
+        `SKIPPED: the Scene-1 lifecycle test needs a real FFmpeg and ffprobe on PATH (or FFMPEG_PATH/FFPROBE_PATH) (${await ffmpegAvailable()}) and a Chromium build for the notification layout (${browserAvailable()}). Run "npx playwright install chromium".`,
       );
       return;
     }
@@ -234,7 +251,7 @@ describe('Scene-1 acceptance lifecycle', () => {
     expect(provenance.scenesNotGenerated).toEqual([2, 3, 4, 5, 6, 7, 8, 9, 10]);
     expect(provenance.finalAdvertisementRendered).toBe(false);
     expect(provenance.requiresHumanApproval).toBe(true);
-    expect(provenance.composite.treatment).toBe('SCREEN_SPACE_MOTION_GRAPHICS');
+    expect(provenance.composite.treatment).toBe('LAYERED_SURFACE_COMPOSITE');
 
     // --- the display checks are not applicable to this composition -----------
     const defects = JSON.parse(

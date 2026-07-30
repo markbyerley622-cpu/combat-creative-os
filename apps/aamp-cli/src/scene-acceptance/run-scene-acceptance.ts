@@ -459,11 +459,17 @@ export async function runSceneAcceptance(
       const compositedPath = join(runDirectory, COMPOSITED_DIRECTORY, 'scene-01-composited.mp4');
       await mkdir(join(runDirectory, COMPOSITED_DIRECTORY), { recursive: true });
       composite = await compositeNotification({
-        rawClipPath,
+        sourceClipPath: rawClipPath,
         outputPath: compositedPath,
         notification: brief.notification,
         logoPath: resolve(options.logoPath),
-        clipDurationSeconds: measuredRaw.durationSeconds,
+        // The review cut is the *scene*, not the whole purchase. The generation
+        // runs longer than the slot and the raw clip is shown beside this one
+        // in full; a composited cut that ran on past the cut would show the
+        // card vanishing from a shot that no longer exists.
+        outputDurationSeconds: Number(
+          (brief.scene.outputEndSeconds - brief.scene.outputStartSeconds).toFixed(6),
+        ),
         runner,
         binaries: options.binaries,
         ...(onProgress ? { onProgress } : {}),
@@ -975,12 +981,23 @@ function buildProvenance(input: {
     composite: input.composite
       ? {
           checksumSha256: input.composite.checksumSha256,
+          compositeVersion: input.composite.compositeVersion,
+          treatmentVersion: input.composite.treatmentVersion,
           treatment: input.composite.treatment,
           cardRect: input.composite.cardRect,
+          occupiedRect: input.composite.occupiedRect,
           withinSafeBounds: input.composite.withinSafeBounds,
-          settleWindows: input.composite.settleWindows,
-          pulse: input.composite.pulse,
+          states: input.composite.timeline.states.map((state) => ({
+            id: state.id,
+            kind: state.kind,
+            fromSeconds: state.fromSeconds,
+            toSeconds: state.toSeconds,
+            scale: state.scale,
+            accentOpacity: state.accentOpacity,
+          })),
+          matchTransitionSeed: input.composite.timeline.matchTransitionSeed,
           logoChecksumSha256: input.composite.logoChecksumSha256,
+          surfaceAssetChecksumSha256: input.composite.surfaces.assetChecksumSha256,
           notes: input.composite.notes,
         }
       : null,

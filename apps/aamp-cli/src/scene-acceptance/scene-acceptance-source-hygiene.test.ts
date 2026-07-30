@@ -18,7 +18,16 @@ import { describe, expect, it } from 'vitest';
 const MODULES = [
   'acceptance-brief.ts',
   'comparison-gallery.ts',
+  'notification-comparison-gallery.ts',
   'notification-composite.ts',
+  'notification-defects.ts',
+  'notification-pixels.ts',
+  'notification-placement.ts',
+  'notification-proof-cli.ts',
+  'notification-proof-main.ts',
+  'notification-proof.ts',
+  'notification-surface.ts',
+  'notification-timeline.ts',
   'one-request-guard.ts',
   'plate-library.ts',
   'plate-staging.ts',
@@ -28,6 +37,23 @@ const MODULES = [
   'scene-acceptance-cli.ts',
   'scene-acceptance-main.ts',
   'visual-defects.ts',
+];
+
+/**
+ * The notification proof path, which is the whole command and not merely a mode
+ * of the paid one. Nothing here may reach a provider, a credential or a cost.
+ */
+const ZERO_COST_MODULES = [
+  'notification-comparison-gallery.ts',
+  'notification-composite.ts',
+  'notification-defects.ts',
+  'notification-pixels.ts',
+  'notification-placement.ts',
+  'notification-proof-cli.ts',
+  'notification-proof-main.ts',
+  'notification-proof.ts',
+  'notification-surface.ts',
+  'notification-timeline.ts',
 ];
 
 /** Only one module may construct the paid provider, and only one may read the key. */
@@ -83,12 +109,13 @@ describe('the Scene-1 acceptance path', () => {
     }
   });
 
-  it('reaches for the process environment only in the entry point', async () => {
+  it('reaches for the process environment only in the entry points', async () => {
+    const entryPoints = ['scene-acceptance-main.ts', 'notification-proof-main.ts'];
     for (const name of MODULES) {
       // eslint-disable-next-line no-await-in-loop -- one file at a time
       const source = await readModule(name);
       const reaches = /process\s*\.\s*env/.test(source);
-      expect(`${name}: ${reaches}`).toBe(`${name}: ${name === 'scene-acceptance-main.ts'}`);
+      expect(`${name}: ${reaches}`).toBe(`${name}: ${entryPoints.includes(name)}`);
     }
   });
 
@@ -112,8 +139,19 @@ describe('the Scene-1 acceptance path', () => {
     for (const name of MODULES) {
       // eslint-disable-next-line no-await-in-loop -- one file at a time
       const source = await readModule(name);
-      for (const token of ['--force', '--skip-review', 'retryPaid', 'resubmit(']) {
-        expect(`${name}: ${source.includes(token) ? token : 'clean'}`).toBe(`${name}: clean`);
+      // Anchored so a longer flag that merely starts the same way is not a
+      // false positive: `--force-color-profile` is a Chromium rendering flag,
+      // not a way past a gate, and a check that cannot tell them apart is one
+      // that gets deleted the first time it fires wrongly.
+      for (const pattern of [
+        /--force(?![-\w])/,
+        /--skip-review(?![-\w])/,
+        /retryPaid/,
+        /resubmit\(/,
+      ]) {
+        expect(`${name}: ${pattern.test(source) ? pattern.source : 'clean'}`).toBe(
+          `${name}: clean`,
+        );
       }
     }
   });
@@ -128,13 +166,48 @@ describe('the Scene-1 acceptance path', () => {
     expect(source).toMatch(/verdict\s*:\s*null/);
   });
 
+  it('cannot spend money on the notification-proof path, structurally', async () => {
+    for (const name of ZERO_COST_MODULES) {
+      // eslint-disable-next-line no-await-in-loop -- one file at a time
+      const source = await readModule(name);
+      for (const token of [
+        'LTXV_API_KEY',
+        'apiKey',
+        'createLtxHostedProvider',
+        'VideoGenerationProvider',
+        'ltxGenerationCostCents',
+        'maxCostCents',
+        'fetchImpl',
+      ]) {
+        expect(`${name}: ${source.includes(token) ? token : 'clean'}`).toBe(`${name}: clean`);
+      }
+      // No transport at all. A module that cannot make a request cannot make a
+      // billable one, and that is a stronger statement than a spending ceiling.
+      expect(`${name}: ${/\bfetch\s*\(/.test(source) ? 'fetches' : 'clean'}`).toBe(
+        `${name}: clean`,
+      );
+    }
+  });
+
+  it('states the notification proof cost as zero, never as an estimate', async () => {
+    const source = await readModule('notification-proof.ts');
+    expect(source).toMatch(/paidProviderCalls:\s*0/);
+    expect(source).toMatch(/costCents:\s*0/);
+    expect(source).toContain('ZERO_COST');
+  });
+
   it('authors no creative copy: every headline, prompt and colour comes from the brief', async () => {
     const briefFields = [
       'headline',
+      'headerLabel',
+      'timestampLabel',
+      'supportingLine',
       'motionPrompt',
       'accentColorHex',
-      'cardColorHex',
+      'surfaceColorHex',
       'headlineColorHex',
+      'headerColorHex',
+      'supportingColorHex',
       'fontFamily',
     ];
     for (const name of MODULES) {

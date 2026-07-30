@@ -20,7 +20,7 @@ import { STORYBOARD_VIDEO_EXIT_CODES } from '../storyboard-video/failures';
 import { computeGenerationCacheKey } from '../storyboard-video/generation-cache';
 import { assertPromptsAreSafe } from '../storyboard-video/prompt-safety';
 import { parseAcceptanceBrief } from './acceptance-brief';
-import { buildNotificationAss, resolveCardGeometry } from './notification-composite';
+import { buildNotificationTimeline } from './notification-timeline';
 import { CountingFetch, OneRequestVideoGenerationProvider } from './one-request-guard';
 import {
   assertNotPermanentlyRejected,
@@ -229,10 +229,11 @@ describe('the committed Scene-1 brief', () => {
     expect(brief.generateAudio).toBe(false);
     expect(brief.generationDurationSeconds).toBe(6);
     expect(brief.model).toBe('ltx-2-3-fast');
-    expect(brief.notification.treatment).toBe('SCREEN_SPACE_MOTION_GRAPHICS');
-    // The headline carries no count: an unverified number of events is a claim
+    expect(brief.notification.treatment).toBe('LAYERED_SURFACE_COMPOSITE');
+    // Neither line carries a count: an unverified number of events is a claim
     // nobody made.
     expect(brief.notification.headline).not.toMatch(/\d/);
+    expect(brief.notification.supportingLine).not.toMatch(/\d/);
   });
 
   it('refuses a preservation flag on a generated scene', async () => {
@@ -241,7 +242,7 @@ describe('the committed Scene-1 brief', () => {
     expect(() => parseAcceptanceBrief({ ...raw, scene })).toThrow(/can never be regenerated/i);
   });
 
-  it('refuses a pulse that fires before its card or runs past the clip', async () => {
+  it('refuses a pulse that fires before its card has settled or runs past the cut', async () => {
     const raw = JSON.parse(await readBrief()) as Record<string, unknown>;
     const notification = raw.notification as Record<string, unknown>;
     expect(() =>
@@ -249,13 +250,37 @@ describe('the committed Scene-1 brief', () => {
         ...raw,
         notification: { ...notification, pulseStartSeconds: 0.1 },
       }),
-    ).toThrow(/before the card it belongs to/i);
+    ).toThrow(/before the card it belongs to has settled/i);
     expect(() =>
       parseAcceptanceBrief({
         ...raw,
-        notification: { ...notification, pulseStartSeconds: 5.95 },
+        notification: { ...notification, pulseStartSeconds: 1.0, pulseEndSeconds: 1.4 },
       }),
-    ).toThrow(/past the end of the clip/i);
+    ).toThrow(/past the cut it is meant to lead into/i);
+  });
+
+  it('refuses a notification that stops before the Scene-1 cut', async () => {
+    const raw = JSON.parse(await readBrief()) as Record<string, unknown>;
+    const notification = raw.notification as Record<string, unknown>;
+    // Anything short of the cut is a fade-out by another name, and this
+    // treatment does not have one.
+    expect(() =>
+      parseAcceptanceBrief({
+        ...raw,
+        notification: { ...notification, readableUntilSeconds: 0.9 },
+      }),
+    ).toThrow(/stays readable to 0\.9s but Scene 1 is cut at 1\.1s/i);
+  });
+
+  it('refuses an accent pulse that does not rise above its resting level', async () => {
+    const raw = JSON.parse(await readBrief()) as Record<string, unknown>;
+    const notification = raw.notification as Record<string, unknown>;
+    expect(() =>
+      parseAcceptanceBrief({
+        ...raw,
+        notification: { ...notification, accentPulsePeakOpacity: 0.4 },
+      }),
+    ).toThrow(/so nothing pulses/i);
   });
 
   it('refuses a brief with no named author', async () => {
@@ -499,34 +524,45 @@ describe('raw clip acceptance', () => {
 });
 
 describe('the notification card', () => {
-  it('stays inside the mobile-safe margin and clears the subject', async () => {
+  const FRAME = { widthPx: 1080, heightPx: 1920 };
+
+  it('stays inside the mobile-safe margin, shadow and accent glow included', async () => {
     const brief = await loadCommittedBrief();
-    const geometry = resolveCardGeometry(brief.notification);
-    expect(geometry.withinSafeBounds).toBe(true);
-    expect(geometry.xPx).toBeGreaterThanOrEqual(brief.notification.safeMarginPx);
-    // The subject's eyeline sits around 0.33 of frame height. The card is a
-    // banner at the top and must end well above it.
-    expect(geometry.yPx + geometry.heightPx).toBeLessThan(1920 * 0.3);
+    const timeline = buildNotificationTimeline(brief.notification, FRAME);
+    expect(timeline.withinSafeBounds).toBe(true);
+    expect(timeline.occupiedRect.xPx).toBeGreaterThanOrEqual(brief.notification.safeMarginPx);
+    // The occupied rectangle is strictly bigger than the card: a check that
+    // passed on the card alone while the shadow hung outside the safe area
+    // would be checking the wrong rectangle.
+    expect(timeline.occupiedRect.heightPx).toBeGreaterThan(timeline.restRect.heightPx);
+  });
+
+  it('sits between the face and the phone rather than over either', async () => {
+    const brief = await loadCommittedBrief();
+    const timeline = buildNotificationTimeline(brief.notification, FRAME);
+    // Measured on the authoritative plate: lit subject detail ends by y≈1010
+    // and the phone's top edge begins by y≈1365 across the Scene-1 slot.
+    expect(timeline.occupiedRect.yPx).toBeGreaterThan(1010);
+    expect(timeline.occupiedRect.yPx + timeline.occupiedRect.heightPx).toBeLessThan(1365);
+  });
+
+  it('is about three quarters of the frame width, at the specified height and radius', async () => {
+    const brief = await loadCommittedBrief();
+    const timeline = buildNotificationTimeline(brief.notification, FRAME);
+    expect(timeline.restRect.widthPx / FRAME.widthPx).toBeCloseTo(0.75, 2);
+    expect(timeline.restRect.heightPx).toBeGreaterThanOrEqual(190);
+    expect(timeline.restRect.heightPx).toBeLessThanOrEqual(220);
+    expect(brief.notification.cornerRadiusPx).toBeGreaterThanOrEqual(28);
+    expect(brief.notification.cornerRadiusPx).toBeLessThanOrEqual(36);
   });
 
   it('refuses a card that would leave the safe area', async () => {
     const brief = await loadCommittedBrief();
-    const geometry = resolveCardGeometry({ ...brief.notification, cardTopPx: 1900 });
-    expect(geometry.withinSafeBounds).toBe(false);
-  });
-
-  it('carries the headline in an ASS file rather than in filter grammar', async () => {
-    const brief = await loadCommittedBrief();
-    const ass = buildNotificationAss({
-      brief: brief.notification,
-      geometry: resolveCardGeometry(brief.notification),
-      fromSeconds: 1,
-      toSeconds: 6,
-    });
-    expect(ass).toContain(brief.notification.headline);
-    expect(ass).toContain('PlayResX: 1080');
-    expect(ass).toContain('PlayResY: 1920');
-    expect(ass.split('\r\n').filter((line) => line.startsWith('Dialogue:'))).toHaveLength(1);
+    const timeline = buildNotificationTimeline(
+      { ...brief.notification, cardCentreYPx: 1900 },
+      FRAME,
+    );
+    expect(timeline.withinSafeBounds).toBe(false);
   });
 });
 

@@ -313,7 +313,94 @@ words.
 
 ---
 
-## 10. Deferred production defects
+## 10. The notification treatment, and the zero-cost proof
+
+The first treatment was a prototype: a filled rectangle drawn by `drawbox` with
+one line of subtitle type over it. It could not express a corner radius, a
+translucent surface, a shadow, a second line of type, or a mark placed against
+the type rather than against the filter graph. It has been replaced.
+
+**What it is now.** A `LAYERED_SURFACE_COMPOSITE`: the mark, the header, the
+timestamp, the headline, the supporting line, the surface, its radius, its
+shadow and its accent edge are laid out as **one document** and rasterised by a
+real layout engine to a transparent sheet, which the compositor then only
+places. Three consequences follow, and they are the point:
+
+- **No authored string reaches FFmpeg at all** — not as filter grammar, and not
+  as a subtitle file named from a filter argument either. The copy becomes
+  pixels before the compositor is invoked. That is strictly stronger than the
+  rule it replaces.
+- **Every state is a complete card.** The entrance scales and lifts a finished
+  surface; there is no frame on which the rectangle exists and its contents do
+  not, so an empty panel is not something the treatment can expose.
+- **Type is rasterised at the size it is seen at.** Each entrance step is
+  rendered with its own transform, so the layout engine anti-aliases at the
+  final scale instead of resampling one master and softening the type.
+
+`drawbox` still cannot animate — its `t` is the box _thickness_, not the
+timestamp — so the entrance is still a series of complete states on disjoint
+`enable` windows. Five entrance steps, four pulse steps and a rest, matched to
+the 24fps grid so no state is shown twice while another is skipped.
+
+**The proof command.** Zero cost, and unable to be otherwise:
+
+```sh
+pnpm aamp:notification-proof \
+  --source .aamp-output/storyboard-02-ltx-scene-01-acceptance/raw/<scene-01-raw>.mp4 \
+  --logo   <asset-root>/brand/logo.png \
+  --previous .aamp-output/storyboard-02-ltx-scene-01-acceptance/composited/scene-01-composited.mp4
+```
+
+It takes no API key, no base URL and no cost ceiling, because there is nothing
+on the path that could charge anything — a ceiling here would imply there was
+something to cap. `scene-acceptance-source-hygiene.test.ts` asserts the modules
+contain no provider construction, no credential, no cost function and no
+`fetch(` at all.
+
+It composites over **the rejected Scene-1 take**. That decision stands: the clip
+was refused for `COMPOSITION_DRIFT` and `GAZE_LIFT`, it is not a production
+source, and every artefact records the rejection rather than quietly dropping
+it. It is used here because the notification is the one part of Scene 1 nobody
+has to pay to iterate on, and a card can only be judged against this room, this
+subject and this scale.
+
+**What the run measures, off the file it produced.**
+
+| Row                          | How it is established                                                                                                                                                                                                                                                                                    |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CLEARS_FACE_AND_PHONE`      | Every frame of the source picture, not a sample. Within the card's horizontal span, a row containing any pixel at or above luma 40 is lit subject; the treatment's whole occupied rectangle — shadow and accent glow included — must lie inside one contiguous run of clean rows with 20px of clearance. |
+| `NEVER_A_BLANK_RECTANGLE`    | On every frame where the surface covers the card, that rectangle must also contain ink. A bright frame with no type in it is the failure this catches.                                                                                                                                                   |
+| `ACCENT_PULSES_EXACTLY_ONCE` | Red-minus-green over the accent band, per frame, counted as **excursions** above the halfway mark rather than as local maxima — a rise that plateaus across a frame boundary is a measurement artefact, not a second pulse.                                                                              |
+| `NO_FADE_OUT_BEFORE_THE_CUT` | Surface coverage on the final frame against coverage at the settle.                                                                                                                                                                                                                                      |
+| `DETERMINISTIC_RE_RENDER`    | The same plan rendered twice and compared byte for byte.                                                                                                                                                                                                                                                 |
+
+Nine rows carry `HUMAN_JUDGEMENT_REQUIRED` and no number: whether it reads as
+premium, whether the translucency suits the room, whether the shadow is
+restrained, whether the accent is subtle, whether it avoids a template feel,
+whether the ease-out is calm, whether it reads as sitting between the face and
+the phone, whether the hierarchy is right, and whether the accent edge is a
+credible starting point for Scene 2's match transition.
+
+**An unmeasurable row fails the run.** `notMeasuredCount` gates the exit code
+alongside `measuredDefectCount`, because a proof that could not take its own
+measurements is not a proof — an early run reported zero defects while five of
+its claims were unknown, which read as clean and was not.
+
+**What the placement measurement deliberately does not establish.** That the
+clean run it found is _the gap between the face and the phone_ rather than some
+other empty region. That is a person reading a picture. The nearest rows of
+subject content above and below are recorded on every frame so a reviewer can
+check that reading in numbers.
+
+The measurement earned its keep on its first run: the camera's push-in narrows
+the gap over the shot, and the treatment's shadow came within 17px of the
+phone's rising top edge on the last frame. The authored centre moved up 18px,
+which balanced the whole occupied rectangle in the gap at 34px above and 35px
+below.
+
+---
+
+## 11. Deferred production defects
 
 Carried forward as mandatory requirements for the eventual fifteen-second
 master. None is reopened here, and Product Motion Proof-02 is not re-rendered.

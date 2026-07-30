@@ -29,6 +29,7 @@
     "aamp:storyboard-video": "pnpm --filter aamp-cli run build && node --env-file-if-exists=.env apps/aamp-cli/dist/storyboard-video/storyboard-video-main.js",
     "aamp:motion-review": "pnpm --filter aamp-cli run build && node apps/aamp-cli/dist/storyboard-video/motion-review-main.js",
     "aamp:ltx-scene-01": "pnpm --filter aamp-cli run build && node apps/aamp-cli/dist/scene-acceptance/scene-acceptance-main.js",
+    "aamp:notification-proof": "pnpm --filter aamp-cli run build && node apps/aamp-cli/dist/scene-acceptance/notification-proof-main.js",
     "aamp:product-motion": "pnpm --filter aamp-cli run build && node apps/aamp-cli/dist/product-motion/product-motion-main.js",
     "db:generate": "pnpm --filter @combat/database run generate",
     "db:migrate": "pnpm --filter @combat/database run migrate",

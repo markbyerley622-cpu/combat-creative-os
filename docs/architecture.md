@@ -3871,6 +3871,63 @@ and no automated measure in this repository scores drift. Nothing was retried.
 
 ---
 
+### Scene-1 notification treatment, and its zero-cost proof (2026-07-31)
+
+Corrective creative work, not a milestone. The Scene-1 notification shipped as a
+prototype — a `drawbox` rectangle with one line of subtitle type over it — and it
+has been replaced by a `LAYERED_SURFACE_COMPOSITE`. Runbook:
+`docs/runbooks/ltx-scene-01-acceptance.md` §10.
+
+**The structural change.** The card is now one document — mark, header,
+timestamp, headline, supporting line, surface, radius, shadow, accent edge — laid
+out by a real layout engine and rasterised to a transparent sheet, which the
+compositor only places. `notification-timeline.ts` turns the brief into complete
+states with disjoint windows; `notification-surface.ts` renders each one offline
+in Chromium at its own transform, with no network of any kind and the owned mark
+inlined from its own bytes; `notification-composite.ts` overlays them in RGB and
+converts to the delivery format once, at the end.
+
+Two old constraints, one of which changed status. `drawbox` still cannot animate
+— its `t` is the box _thickness_ — so movement is still complete states on
+disjoint `enable` windows. But "copy never becomes filter grammar" is now
+satisfied more completely than the subtitle route ever did: no authored string
+reaches FFmpeg at all, so there is nothing to escape. `MARK_LEFT_FRACTION` and
+`TYPE_LEFT_FRACTION` are gone with it — they existed because two mechanisms had
+to agree about where the mark ended, and there is now one.
+
+**The proof.** `pnpm aamp:notification-proof` renders the Scene-1 slot with the
+new treatment for nothing. It takes no API key, no base URL and no cost ceiling,
+because there is nothing on the path that could charge anything; the hygiene
+suite asserts the modules contain no provider construction, no credential, no
+cost function and no `fetch(`. It composites over the **rejected** Scene-1 take,
+records that rejection in every artefact, and renders no master.
+
+**Proven live, at zero cost:** an ffprobe-verified 1080×1920 proof over the
+1.1s slot; 27 of 27 frames measured with **zero** overlapping subject content and
+worst-case clearance of 34px above and 35px below the treatment's whole occupied
+rectangle, shadow and accent glow included; 23 frames carrying the card with a
+minimum ink coverage of 0.1103, so no frame is an empty panel; exactly **one**
+accent excursion, peaking at 0.417s and returning to rest; surface coverage
+identical at the settle and on the final frame, so no fade-out; and two
+independent renders of the same plan hashing to the same bytes. Fourteen measured
+rows, all `OBSERVED`. **Not proven:** creative quality — nine rows carry
+`HUMAN_JUDGEMENT_REQUIRED` and no number, and the picture underneath remains a
+rejected take.
+
+**Two defects the work found in itself.** The placement measurement caught the
+camera's push-in narrowing the gap over the shot: the shadow came within 17px of
+the phone's rising top edge on the final frame, and the authored centre moved up
+18px. And an early run reported "0 measured defects" while five of its claims
+were `NOT_MEASURED`, because one failed sub-measurement discarded two that had
+succeeded and the exit code counted only defects. The measurement is now split
+per section with its own reason, and `notMeasuredCount` gates the exit code
+alongside `measuredDefectCount` — an unmeasurable binding property is not a
+satisfied one.
+
+**Next milestone is unchanged: AAMP-1 step 4.**
+
+---
+
 ## 9. What this document deliberately does not do
 
 Per instructions, no application code, no package.json, no Prisma schema file, and

@@ -50,29 +50,90 @@ const SceneSchema = z
 /**
  * The notification, as a person specified it.
  *
- * `treatment` names where the card lives and `treatmentReason` says why, in
- * the author's own words. The decision to composite in screen space rather
- * than tracked into the handset is a real creative and technical trade-off,
- * and an artefact that recorded the choice without the reasoning would leave
- * the next person to rediscover it.
+ * `treatment` names what the card *is* and `treatmentReason` says why, in the
+ * author's own words. `LAYERED_SURFACE_COMPOSITE` is a designed surface —
+ * logo, header, timestamp, headline, supporting line, accent edge, shadow —
+ * laid out as one document and rasterised to transparent pixels, then
+ * composited over the picture as a single assembled unit. It replaced a
+ * prototype that drew a filled rectangle with `drawbox` and dropped a line of
+ * subtitle text on top; that treatment could not express a corner radius, a
+ * translucent surface, a shadow, a second line of type or a mark that sat
+ * anywhere but where the filter graph put it.
+ *
+ * Every creative decision below is a person's. The ranges are the visual
+ * specification the author signed off — a height outside 190–220px or a corner
+ * radius outside 28–36px is not a smaller mistake than a missing headline, so
+ * both are refused here rather than rendered.
  */
+export const NOTIFICATION_SURFACE_DESIGN_VERSION = 2 as const;
+
+/** The easings this treatment can actually execute. Named, never numeric. */
+export const NOTIFICATION_EASINGS = ['EASE_OUT_CUBIC', 'EASE_OUT_QUINT'] as const;
+/** Which edge of the card carries the accent. */
+export const NOTIFICATION_ACCENT_EDGES = ['BOTTOM', 'LEFT'] as const;
+
 const NotificationSchema = z
   .object({
-    treatment: z.enum(['SCREEN_SPACE_MOTION_GRAPHICS', 'TRACKED_IN_SCREEN']),
-    treatmentReason: z.string().min(20).max(800),
+    treatment: z.enum(['LAYERED_SURFACE_COMPOSITE', 'TRACKED_IN_SCREEN']),
+    treatmentReason: z.string().min(20).max(1200),
+    surfaceDesignVersion: z.literal(NOTIFICATION_SURFACE_DESIGN_VERSION),
+
+    // --- the copy, in the author's own words ---------------------------------
+    headerLabel: z.string().min(1).max(40),
+    timestampLabel: z.string().min(1).max(12),
     headline: z.string().min(1).max(60),
-    entranceStartSeconds: z.number().min(0),
-    settleStepSeconds: z.number().positive().max(0.5),
-    pulseStartSeconds: z.number().min(0),
-    pulseDurationSeconds: z.number().positive().max(1),
-    cardTopPx: z.number().int().positive(),
-    cardHeightPx: z.number().int().positive(),
+    supportingLine: z.string().min(1).max(80),
+
+    // --- geometry, in delivery pixels ----------------------------------------
+    /** Fraction of the delivery width. The specification asks for about 0.75. */
+    widthFraction: z.number().min(0.6).max(0.85),
+    cardHeightPx: z.number().int().min(190).max(220),
+    cornerRadiusPx: z.number().int().min(28).max(36),
+    /** Where the resting card is centred vertically. */
+    cardCentreYPx: z.number().int().positive(),
     safeMarginPx: z.number().int().min(24),
+    horizontalPaddingPx: z.number().int().min(16).max(64),
+
+    // --- the surface ---------------------------------------------------------
+    surfaceColorHex: HexColor,
+    /** Lightly translucent. Opaque is not this design and neither is a ghost. */
+    surfaceOpacity: z.number().min(0.7).max(0.98),
+    shadowBlurPx: z.number().int().min(8).max(48),
+    shadowOffsetYPx: z.number().int().min(0).max(24),
+    shadowOpacity: z.number().min(0).max(0.6),
     accentColorHex: HexColor,
-    cardColorHex: HexColor,
-    headlineColorHex: HexColor,
+    accentEdge: z.enum(NOTIFICATION_ACCENT_EDGES),
+    accentThicknessPx: z.number().int().min(3).max(10),
+    accentGlowBlurPx: z.number().int().min(0).max(40),
+    accentRestOpacity: z.number().min(0).max(1),
+    accentPulsePeakOpacity: z.number().min(0).max(1),
+
+    // --- typography ----------------------------------------------------------
     fontFamily: z.string().min(1).max(60),
-    fontSizePx: z.number().int().positive().max(200),
+    headerColorHex: HexColor,
+    headerFontSizePx: z.number().int().min(14).max(40),
+    headlineColorHex: HexColor,
+    headlineFontSizePx: z.number().int().min(28).max(80),
+    supportingColorHex: HexColor,
+    supportingFontSizePx: z.number().int().min(14).max(48),
+    markHeightPx: z.number().int().min(24).max(96),
+
+    // --- the entrance --------------------------------------------------------
+    entranceStartSeconds: z.number().min(0),
+    entranceSettleSeconds: z.number().positive(),
+    entranceSteps: z.number().int().min(3).max(10),
+    entranceEasing: z.enum(NOTIFICATION_EASINGS),
+    /** How far the card travels upward as it arrives. */
+    entranceRisePx: z.number().int().min(8).max(40),
+    entranceStartScale: z.number().min(0.9).max(0.995),
+
+    // --- the single accent pulse ---------------------------------------------
+    pulseStartSeconds: z.number().min(0),
+    pulseEndSeconds: z.number().positive(),
+    pulseSteps: z.number().int().min(2).max(8),
+
+    /** The card holds, unfaded, to here — the Scene-1 cut. */
+    readableUntilSeconds: z.number().positive(),
   })
   .strict();
 export type NotificationBrief = z.infer<typeof NotificationSchema>;
@@ -166,14 +227,35 @@ function assertBriefIsCoherent(brief: AcceptanceBrief, path?: string): void {
       `the notification enters at ${notification.entranceStartSeconds}s, at or after the ${brief.generationDurationSeconds}s the clip runs`,
     );
   }
-  if (
-    notification.pulseStartSeconds + notification.pulseDurationSeconds >
-    brief.generationDurationSeconds + 1e-9
-  ) {
-    problems.push('the accent pulse runs past the end of the clip');
+  if (notification.entranceSettleSeconds <= notification.entranceStartSeconds) {
+    problems.push('the notification settles at or before it starts entering');
   }
-  if (notification.pulseStartSeconds < notification.entranceStartSeconds) {
-    problems.push('the accent pulse fires before the card it belongs to has arrived');
+  if (notification.pulseEndSeconds <= notification.pulseStartSeconds) {
+    problems.push('the accent pulse ends at or before it starts');
+  }
+  if (notification.pulseStartSeconds + 1e-9 < notification.entranceSettleSeconds) {
+    // The pulse is a note struck on a card that has arrived. Firing it mid-entrance
+    // would read as an error light rather than an accent.
+    problems.push('the accent pulse fires before the card it belongs to has settled');
+  }
+  if (notification.pulseEndSeconds > notification.readableUntilSeconds + 1e-9) {
+    problems.push('the accent pulse runs past the cut it is meant to lead into');
+  }
+  if (notification.readableUntilSeconds > brief.generationDurationSeconds + 1e-9) {
+    problems.push('the notification is required to stay readable past the end of the clip');
+  }
+  if (
+    Math.abs(notification.readableUntilSeconds - scene.outputEndSeconds) > 1e-6 ||
+    scene.outputStartSeconds !== 0
+  ) {
+    // "Readable until the Scene-1 cut" is the specification. A card that stops
+    // short of the cut fades out, and this treatment has no fade-out.
+    problems.push(
+      `the notification stays readable to ${notification.readableUntilSeconds}s but Scene 1 is cut at ${scene.outputEndSeconds}s from ${scene.outputStartSeconds}s`,
+    );
+  }
+  if (notification.accentPulsePeakOpacity <= notification.accentRestOpacity) {
+    problems.push('the accent pulse peaks at or below its resting opacity, so nothing pulses');
   }
   if (problems.length > 0) {
     throw new StoryboardVideoError(
