@@ -20,6 +20,14 @@ const SOURCE_DIRECTORY = __dirname;
 /** Reading the environment belongs to the entry point, and only to it. */
 const ENV_EXEMPT = new Set(['product-motion-main.ts']);
 
+/**
+ * Playwright drives a local browser to lay out the product documents. It is a
+ * rendering engine here, not a network client: the context is created
+ * `offline`, every request is aborted by a default-deny route, and the only
+ * content it loads is a string this repository generated.
+ */
+const BROWSER_EXEMPT = new Set(['document-renderer.ts']);
+
 async function sourceFiles(): Promise<readonly { name: string; text: string }[]> {
   const names = (await readdir(SOURCE_DIRECTORY)).filter(
     (name) => name.endsWith('.ts') && !name.endsWith('.test.ts'),
@@ -63,7 +71,9 @@ describe('product-motion source hygiene', () => {
       expect(file.text, file.name).not.toMatch(/node:https?/);
       expect(file.text, file.name).not.toMatch(/\baxios\b/);
       expect(file.text, file.name).not.toMatch(/WebSocket/);
-      expect(file.text, file.name).not.toMatch(/playwright/);
+      if (!BROWSER_EXEMPT.has(file.name)) {
+        expect(file.text, file.name).not.toMatch(/playwright/);
+      }
     }
   });
 

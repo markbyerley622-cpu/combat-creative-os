@@ -20,7 +20,7 @@ object graph and `product-motion-source-hygiene.test.ts` asserts it.
 
 ```sh
 pnpm aamp:product-motion \
-  --plan apps/aamp-cli/plans/combat-reviews-product-motion-proof-01.json \
+  --plan apps/aamp-cli/plans/combat-reviews-product-motion-proof-02.json \
   --plates-root "<folder holding the photographic plates>" \
   --assets-root "<folder holding app-ui/, audio/ and brand/>"
 ```
@@ -157,21 +157,49 @@ file that looks plausible and is wrong:
   being arithmetic — do not, so the interface would drift off the handset. The
   refusal names the zoom that would make the requested pan legal.
 
-### Documents shorter than the screen
+### The canonical mobile screen
 
-A capture taken at a 1080×1920 viewport is shorter than a handset screen whose
-glass is proportionally taller. Two fields deal with it:
+Product documents are laid out by a real browser at **393 CSS pixels wide**,
+device scale factor 4, `isMobile`, `hasTouch`, portrait, a real handset user
+agent, and `fullPage: false` for the screen itself. The width is what decides
+the breakpoint, the type scale, the safe areas and the bottom-navigation
+geometry, and it is the same for every document on every plate.
 
-- `fit` shows the capture larger and crops horizontally. `cropXPx` is explicit
-  rather than centred, because these layouts are left-aligned and a centre crop
-  keeps the whitespace and loses the titles.
-- `headroomPx` extends the document upward **using the capture's own top rows**,
-  which measure as a uniform near-black band. A taller screen really does show
-  more above the application header. It is also what gives a short capture room
-  to scroll.
+Only the viewport **height** follows the calibrated screen. These plates depict
+stylised handsets whose glass measures about 2.86:1 rather than a real device's
+2.16:1, and a taller screen genuinely shows more of the same mobile layout.
+Matching it is what lets the whole rectangle map onto the glass with no
+stretch, no crop, no padding and no edge replication — all four of which are
+forbidden, and all four of which the first version of this path used.
 
-Stretching a capture to fill the screen is not an option and never will be: it
-warps every glyph, which is the one thing this proof exists to avoid.
+The additional height is filled by **more real content**, never by scaling.
+Documents are authored long enough to cover the screen and then some, which is
+also where the scroll travel comes from.
+
+Three things follow, and each has a test:
+
+- `canonicalMobileViewport` takes a scalar and cannot be handed a
+  quadrilateral, so sizing the layout from the photograph is not expressible.
+- `devicePixelRect` refuses an odd dimension rather than nudging the CSS
+  viewport to please the encoder. 393 × 3 is 1179, which h264 cannot encode;
+  the scale factor moved to 4 rather than the width to 394.
+- `measureMappingUniformity` reports what the homography will do to the
+  interface. It runs after sizing and is never fed back. On the hero plate the
+  implied stretch is 1.0003; on the tilted tap plate it is 0.842, and that is
+  recorded as a finding rather than corrected for.
+
+### Layout is measured, not asserted
+
+After rendering, every document is read back in the page: `scrollWidth` against
+`clientWidth`, every element's bounding box against the viewport, the bottom
+navigation's presence, and the absence of any wide-breakpoint navigation. A
+document that fails is refused by name. The numbers land in
+`viewport-measurements.json`.
+
+The bottom navigation is captured separately and composited as a fixed layer.
+It is `position: fixed` on a phone, and a full-page screenshot bakes a fixed
+element in wherever it sat when the capture began — it would ride up the screen
+as the content scrolls.
 
 ---
 

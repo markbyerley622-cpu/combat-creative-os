@@ -36,51 +36,33 @@ export const UI_EASINGS = ['LINEAR', 'EASE_OUT_CUBIC', 'EASE_IN_OUT_CUBIC'] as c
 export type UiEasing = (typeof UI_EASINGS)[number];
 
 /**
- * A captured screen prepared as a scrollable document.
+ * A product document: an interface rendered at the canonical mobile viewport
+ * width, taller than the viewport, scrolled behind it.
  *
- * `headroomPx` extends the capture upward using its own top rows. A handset
- * whose screen is taller than the captured viewport genuinely shows more above
- * the application header — the safe-area inset — and these captures' top rows
- * measure as a uniform near-black band, so repeating them is what the device
- * would display rather than an invention. It is also what gives a short
- * capture enough travel to scroll at all.
+ * There is deliberately **no preparation step**. An earlier version of this
+ * type carried a `fit` (scale up and crop horizontally) and a `headroom`
+ * (extend upward by replicating the top rows), and between them they produced
+ * every symptom the first proof was rejected for: headings clipped at the
+ * right edge, black bands where content ran out, and controls that read as a
+ * desktop layout squeezed into a phone.
+ *
+ * The correction is upstream, not here. A document arrives already laid out at
+ * the canonical phone width and already tall enough to cover the screen, so
+ * there is nothing left to crop, pad or stretch — and because the fields are
+ * gone, there is no way to express any of it.
  */
 export interface UiDocument {
   readonly id: string;
-  /** Index of this capture among the FFmpeg inputs. */
+  /** Index of this document among the FFmpeg inputs. */
   readonly inputIndex: number;
-  readonly captureWidthPx: number;
-  readonly captureHeightPx: number;
-  readonly headroomPx: number;
-  /**
-   * Optional preparation applied before the headroom is added.
-   *
-   * A capture taken at the delivery viewport is shorter than a handset screen
-   * whose glass is proportionally taller, and the only two ways to fill that
-   * screen are to stretch the capture — which warps every glyph — or to show
-   * it larger and crop. This is the second. `cropXPx` is deliberately explicit
-   * rather than centred: these layouts are left-aligned, so a centre crop
-   * throws away the title and keeps the whitespace.
-   */
-  readonly fit?: {
-    readonly scaleWidthPx: number;
-    readonly scaleHeightPx: number;
-    readonly cropXPx: number;
-  };
-}
-
-/** Scale applied to the capture before it becomes document body pixels. */
-export function documentFitScale(document: UiDocument): number {
-  return document.fit ? document.fit.scaleWidthPx / document.captureWidthPx : 1;
-}
-
-/** The body height after preparation, excluding headroom. */
-export function documentBodyHeightPx(document: UiDocument): number {
-  return document.fit ? document.fit.scaleHeightPx : document.captureHeightPx;
+  /** Must equal the canvas width exactly: the document was rendered for this screen. */
+  readonly widthPx: number;
+  /** Must be at least the canvas height: real content, never padding. */
+  readonly heightPx: number;
 }
 
 export function documentHeightPx(document: UiDocument): number {
-  return documentBodyHeightPx(document) + document.headroomPx;
+  return document.heightPx;
 }
 
 export interface UiScroll {
@@ -130,6 +112,25 @@ export interface UiAccent {
   readonly colorHex: string;
 }
 
+/**
+ * A layer pinned to the screen rather than to the document — the bottom
+ * navigation, which is `position: fixed` on a phone.
+ *
+ * It cannot be part of the scrolling document image: a full-page screenshot
+ * bakes a fixed element in wherever it sat when the capture began, so it would
+ * ride up the screen as the content scrolls. Compositing it here keeps it
+ * where a phone actually keeps it, and is what makes "the bottom navigation
+ * remains visible" true in every frame rather than in the first one.
+ */
+export interface UiFixedOverlay {
+  readonly id: string;
+  readonly inputIndex: number;
+  readonly xPx: number;
+  readonly yPx: number;
+  readonly startSeconds: number;
+  readonly endSeconds: number;
+}
+
 export interface UiLayerSpec {
   readonly canvasWidthPx: number;
   readonly canvasHeightPx: number;
@@ -137,6 +138,7 @@ export interface UiLayerSpec {
   readonly durationSeconds: number;
   readonly documents: readonly UiDocument[];
   readonly states: readonly UiState[];
+  readonly fixedOverlays: readonly UiFixedOverlay[];
   readonly accents: readonly UiAccent[];
   /** Input index of a black colour source used as the canvas base. */
   readonly baseInputIndex: number;
@@ -191,8 +193,8 @@ function assertScrollWithinDocument(
   const maximum = height - canvasHeight;
   if (maximum < 0) {
     throw new UiLayerError(
-      `document "${document.id}" is ${num(height)}px tall but the canvas is ${num(canvasHeight)}px; ` +
-        'it would leave the screen uncovered. Raise its headroom.',
+      `document "${document.id}" is ${num(height)}px tall but the screen is ${num(canvasHeight)}px; ` +
+        'it would leave the screen uncovered. Give it more real content.',
     );
   }
   for (const value of [state.scroll.fromPx, state.scroll.toPx]) {
@@ -242,47 +244,25 @@ export function compileUiLayerGraph(spec: UiLayerSpec): { graph: string; outputL
   }
 
   for (const document of spec.documents) {
-    const prepared: string[] = [];
-    if (document.fit) {
-      if (document.fit.scaleWidthPx < spec.canvasWidthPx) {
-        throw new UiLayerError(
-          `document "${document.id}" is prepared at ${num(document.fit.scaleWidthPx)}px wide, narrower than ` +
-            `the ${num(spec.canvasWidthPx)}px canvas; part of the screen would have no interface on it.`,
-        );
-      }
-      if (
-        document.fit.cropXPx < 0 ||
-        document.fit.cropXPx + spec.canvasWidthPx > document.fit.scaleWidthPx
-      ) {
-        throw new UiLayerError(
-          `document "${document.id}" crops at x=${num(document.fit.cropXPx)}, which falls outside its ` +
-            `${num(document.fit.scaleWidthPx)}px prepared width.`,
-        );
-      }
-      prepared.push(
-        `scale=${num(document.fit.scaleWidthPx)}:${num(document.fit.scaleHeightPx)}:flags=lanczos`,
-        `crop=${num(spec.canvasWidthPx)}:${num(document.fit.scaleHeightPx)}:${num(document.fit.cropXPx)}:0`,
-      );
-    } else if (document.captureWidthPx !== spec.canvasWidthPx) {
+    // Both of these are refusals rather than repairs, and the repairs are
+    // exactly what was removed: scaling a narrow document up would crop it,
+    // and padding a short one would put a fabricated band inside the screen.
+    if (document.widthPx !== spec.canvasWidthPx) {
       throw new UiLayerError(
-        `document "${document.id}" is ${num(document.captureWidthPx)}px wide but the canvas is ` +
-          `${num(spec.canvasWidthPx)}px, and it declares no fit; scaling it implicitly would resample the interface twice.`,
+        `document "${document.id}" is ${num(document.widthPx)}px wide but the screen is ` +
+          `${num(spec.canvasWidthPx)}px. Render it at the canonical viewport width instead — resampling it ` +
+          'here would either crop the interface or resample type that has already been rasterised.',
+      );
+    }
+    if (document.heightPx < spec.canvasHeightPx) {
+      throw new UiLayerError(
+        `document "${document.id}" is ${num(document.heightPx)}px tall but the screen is ` +
+          `${num(spec.canvasHeightPx)}px; part of the screen would have no interface on it. Give the document ` +
+          'more real content — it may not be padded or extended.',
       );
     }
 
-    const head = prepared.length > 0 ? `${prepared.join(',')},` : '';
-    // The headroom is built from the capture's own top rows rather than a
-    // colour literal, so the band is the application's background by
-    // construction and cannot drift from it.
-    if (document.headroomPx > 0) {
-      steps.push(
-        `[${document.inputIndex}:v]${head}split=2[${document.id}src][${document.id}top]`,
-        `[${document.id}top]crop=${num(spec.canvasWidthPx)}:2:0:0,scale=${num(spec.canvasWidthPx)}:${num(document.headroomPx)}:flags=neighbor[${document.id}head]`,
-        `[${document.id}head][${document.id}src]vstack=inputs=2,setsar=1[${document.id}base]`,
-      );
-    } else {
-      steps.push(`[${document.inputIndex}:v]${head}setsar=1[${document.id}base]`);
-    }
+    steps.push(`[${document.inputIndex}:v]setsar=1[${document.id}base]`);
 
     const copies = usageCount.get(document.id) ?? 0;
     const outputs = Array.from({ length: copies }, (_, index) => `[${document.id}doc${index}]`);
@@ -351,6 +331,18 @@ export function compileUiLayerGraph(spec: UiLayerSpec): { graph: string; outputL
     // later state renders onto black.
     steps.push(
       `[${carry}][${document.id}doc${copyIndex}]overlay=x=0:y='${y}':enable='between(t,${num(state.startSeconds)},${num(drawnUntil(index))})':eof_action=repeat:format=auto[${label}]`,
+    );
+    carry = label;
+  });
+
+  // Fixed layers go over every state and under every accent: the navigation is
+  // part of the interface, so an accent marking a row must still sit on top of
+  // it, and a state change must still pass behind it.
+  spec.fixedOverlays.forEach((overlay, index) => {
+    const label = `uifixed${index}`;
+    steps.push(
+      `[${carry}][${overlay.inputIndex}:v]overlay=x=${num(overlay.xPx)}:y=${num(overlay.yPx)}:` +
+        `enable='between(t,${num(overlay.startSeconds)},${num(overlay.endSeconds)})':eof_action=repeat:format=auto[${label}]`,
     );
     carry = label;
   });
@@ -442,24 +434,25 @@ export interface CaptureRect {
 }
 
 /**
- * Where a region of the original capture sits on the canvas at a given scroll.
+ * Where a region of the document sits on the screen at a given scroll.
  *
- * Accents are authored against the capture — the coordinate space an operator
- * can actually measure in a screenshot — and converted here. Authoring them in
- * canvas space instead would mean re-measuring every accent whenever a
- * document's headroom changed.
+ * Accents are authored in document coordinates — the space an operator can
+ * measure directly in the rendered document — and translated here. Authoring
+ * them in screen space instead would mean re-measuring every accent whenever a
+ * document's content changed length.
  */
-export function captureRectToCanvas(
+export function documentRectToScreen(
   rect: CaptureRect,
-  document: UiDocument,
+  _document: UiDocument,
   scrollPx: number,
 ): CaptureRect {
-  const scale = documentFitScale(document);
-  const cropX = document.fit?.cropXPx ?? 0;
+  // A pure translation. There is no scale or crop term because there is no
+  // longer any preparation between the document and the screen — the document
+  // was rendered at the screen's own width.
   return {
-    xPx: rect.xPx * scale - cropX,
-    yPx: rect.yPx * scale + document.headroomPx - scrollPx,
-    widthPx: rect.widthPx * scale,
-    heightPx: rect.heightPx * scale,
+    xPx: rect.xPx,
+    yPx: rect.yPx - scrollPx,
+    widthPx: rect.widthPx,
+    heightPx: rect.heightPx,
   };
 }

@@ -15,7 +15,7 @@ const PLAN_PATH = join(
   '..',
   '..',
   'plans',
-  'combat-reviews-product-motion-proof-01.json',
+  'combat-reviews-product-motion-proof-02.json',
 );
 
 async function committedPlan(): Promise<Record<string, unknown>> {
@@ -30,7 +30,7 @@ function minimalPlan(): Record<string, unknown> {
     authoredBy: 'operator',
     brief: 'a brief',
     output: { widthPx: 1080, heightPx: 1920, frameRate: 30, durationSeconds: 5 },
-    uiCanvas: { widthPx: 1080, heightPx: 3090 },
+    brandMarkFile: 'brand/logo.png',
     plates: [
       {
         id: 'hero',
@@ -49,17 +49,17 @@ function minimalPlan(): Record<string, unknown> {
     documents: [
       {
         id: 'card',
-        file: 'card.png',
-        widthPx: 1080,
-        heightPx: 3897,
-        headroomPx: 0,
+        surface: 'FIGHT_CARD',
         description: 'card',
       },
     ],
+    // All seven beats, because the parser requires the whole narrative to be
+    // present. `states[0]` scrolls and `states[1]` holds, which is what the
+    // accent tests below depend on.
     states: [
       {
         id: 's1',
-        state: 'EVENT_DISCOVERY',
+        state: 'EVENT_SCHEDULE_SCROLL',
         documentId: 'card',
         startSeconds: 0,
         endSeconds: 3,
@@ -68,17 +68,26 @@ function minimalPlan(): Record<string, unknown> {
         scroll: { fromPx: 0, toPx: 100, startSeconds: 0, endSeconds: 2, easing: 'EASE_OUT_CUBIC' },
         intent: 'open',
       },
-      {
-        id: 's2',
-        state: 'PREDICTOR_RANK_REWARD',
+      ...(
+        [
+          ['s2', 'EVENT_SELECTED', 3, 3.3],
+          ['s3', 'FIGHTER_COMPARISON', 3.3, 3.8],
+          ['s4', 'PREDICTION_READY', 3.8, 4.3],
+          ['s5', 'PREDICTION_TAP', 4.3, 4.5],
+          ['s6', 'PREDICTION_CONFIRMED', 4.5, 4.8],
+          ['s7', 'PREDICTOR_RANK_REWARD', 4.8, 5],
+        ] as const
+      ).map(([id, state, startSeconds, endSeconds]) => ({
+        id,
+        state,
         documentId: 'card',
-        startSeconds: 3,
-        endSeconds: 5,
+        startSeconds,
+        endSeconds,
         entrance: 'NONE',
         entranceSeconds: 0,
-        scroll: { fromPx: 100, toPx: 100, startSeconds: 3, endSeconds: 5, easing: 'LINEAR' },
+        scroll: { fromPx: 100, toPx: 100, startSeconds, endSeconds, easing: 'LINEAR' },
         intent: 'settle',
-      },
+      })),
     ],
     accents: [],
     shots: [
@@ -117,7 +126,7 @@ describe('the transition vocabulary', () => {
 describe('parseProductMotionPlan', () => {
   it('accepts the committed proof plan', async () => {
     const plan = parseProductMotionPlan(await committedPlan(), PLAN_PATH);
-    expect(plan.id).toBe('combat-reviews-product-motion-proof-01');
+    expect(plan.id).toBe('combat-reviews-product-motion-proof-02');
     expect(plan.output.durationSeconds).toBeGreaterThanOrEqual(5);
     expect(plan.output.durationSeconds).toBeLessThanOrEqual(6);
   });
@@ -125,9 +134,9 @@ describe('parseProductMotionPlan', () => {
   it('covers all four required product states in the committed plan', async () => {
     const plan = parseProductMotionPlan(await committedPlan(), PLAN_PATH);
     const states = new Set(plan.states.map((state) => state.state));
-    expect(states).toContain('EVENT_DISCOVERY');
+    expect(states).toContain('EVENT_SCHEDULE_SCROLL');
     expect(states).toContain('FIGHTER_COMPARISON');
-    expect(states).toContain('PREDICTION_SELECTION');
+    expect(states).toContain('PREDICTION_READY');
     expect(states).toContain('PREDICTOR_RANK_REWARD');
   });
 
@@ -177,7 +186,7 @@ describe('parseProductMotionPlan', () => {
         id: 'a1',
         key: 'SELECTION_OUTLINE',
         documentId: 'card',
-        captureRect: { xPx: 10, yPx: 100, widthPx: 500, heightPx: 200 },
+        documentRect: { xPx: 10, yPx: 100, widthPx: 500, heightPx: 200 },
         atScrollPx: 100,
         startSeconds: 1,
         endSeconds: 2.5,
@@ -195,7 +204,7 @@ describe('parseProductMotionPlan', () => {
         id: 'a1',
         key: 'SELECTION_OUTLINE',
         documentId: 'card',
-        captureRect: { xPx: 10, yPx: 100, widthPx: 500, heightPx: 200 },
+        documentRect: { xPx: 10, yPx: 100, widthPx: 500, heightPx: 200 },
         atScrollPx: 640,
         startSeconds: 3.2,
         endSeconds: 4,
@@ -208,24 +217,15 @@ describe('parseProductMotionPlan', () => {
 
   it('allows one accent to span consecutive states at the same resting scroll', () => {
     const plan = minimalPlan();
-    (plan.states as Record<string, unknown>[])[0]!.endSeconds = 2;
-    (plan.states as Record<string, unknown>[])[0]!.scroll = {
-      fromPx: 0,
-      toPx: 100,
-      startSeconds: 0,
-      endSeconds: 1.5,
-      easing: 'EASE_OUT_CUBIC',
-    };
-    (plan.states as Record<string, unknown>[])[1]!.startSeconds = 2;
     plan.accents = [
       {
         id: 'a1',
         key: 'SELECTION_OUTLINE',
         documentId: 'card',
-        captureRect: { xPx: 10, yPx: 100, widthPx: 500, heightPx: 200 },
+        documentRect: { xPx: 10, yPx: 100, widthPx: 500, heightPx: 200 },
         atScrollPx: 100,
-        startSeconds: 1.6,
-        endSeconds: 4,
+        startSeconds: 2.2,
+        endSeconds: 3.8,
         colorHex: '#DA0318',
         intent: 'x',
       },
@@ -237,11 +237,7 @@ describe('parseProductMotionPlan', () => {
     const plan = minimalPlan();
     (plan.documents as Record<string, unknown>[]).push({
       id: 'board',
-      file: 'b.png',
-      widthPx: 1080,
-      heightPx: 1920,
-      headroomPx: 430,
-      fit: { scaleWidthPx: 1738, scaleHeightPx: 3090, cropXPx: 0 },
+      surface: 'LEADERBOARD',
       description: 'board',
     });
     plan.accents = [
@@ -249,7 +245,7 @@ describe('parseProductMotionPlan', () => {
         id: 'a1',
         key: 'SELECTION_OUTLINE',
         documentId: 'board',
-        captureRect: { xPx: 10, yPx: 100, widthPx: 500, heightPx: 200 },
+        documentRect: { xPx: 10, yPx: 100, widthPx: 500, heightPx: 200 },
         atScrollPx: 100,
         startSeconds: 3.2,
         endSeconds: 4,
@@ -270,7 +266,7 @@ describe('parseProductMotionPlan', () => {
         id: 'a1',
         key: 'SELECTION_OUTLINE',
         documentId: 'card',
-        captureRect: { xPx: 10, yPx: 100, widthPx: 500, heightPx: 200 },
+        documentRect: { xPx: 10, yPx: 100, widthPx: 500, heightPx: 200 },
         atScrollPx: 100,
         startSeconds: 3.1,
         endSeconds: 4,

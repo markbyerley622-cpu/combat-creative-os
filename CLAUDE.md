@@ -287,6 +287,21 @@ the existing approved captures because the live application was unreachable. See
 the "Product motion compositor" rules below and
 `docs/runbooks/product-motion-proof.md`.
 
+**The mobile-native correction is done** — proof-01 was rejected on visual
+acceptance: headings clipped at the right edge, black bands, controls that read
+as a desktop dashboard squeezed into a phone. Two of the three root causes were
+real. The captures were _not_ taken at a desktop breakpoint (360×640 CSS at DPR
+3 is a phone width); the defects came from sizing the interface canvas from the
+**projected quadrilateral** and then making short captures fit it by scaling up,
+cropping horizontally and replicating edge rows. `pnpm aamp:product-motion` now
+lays every product document out at a canonical **393 CSS px** mobile viewport
+and maps the whole rectangle through the homography. **Proven live:** an
+ffprobe-verified 1080×1920 h264/AAC MP4 at exactly 5.600 s, QA `PASS`; zero
+horizontal overflow and zero clipped elements across all three documents;
+bottom navigation visible and no wide-breakpoint navigation anywhere; hero
+mapping uniformity 1.0003. See the rules below and
+`docs/runbooks/product-motion-proof.md`.
+
 ## Product motion compositor — permanent rules
 
 - **The interface is composited after the photographic move, never before.**
@@ -338,12 +353,44 @@ the "Product motion compositor" rules below and
   scenes declaring stillness from the frozen-frame walk, so a descriptor claiming
   `STATIC` switches off the one check that catches this proof failing at its own
   purpose.
-- **A capture is never stretched to fill a taller screen.** It is shown larger
-  and cropped (`fit`, with an explicit left-anchored crop, because these layouts
-  are left-aligned), and extended upward using its own top rows (`headroom`),
-  which is what a taller handset genuinely shows above the application header.
-  Stretching warps every glyph, which is the one thing this proof exists to
-  avoid.
+- **Three coordinate systems, kept apart.** The **CSS viewport** decides which
+  breakpoint renders and nothing else does; **device pixels** are a fidelity
+  multiplication that cannot affect layout; the **projected quadrilateral** is
+  the output of a camera and may never be an input to layout.
+  `canonicalMobileViewport` takes a scalar and cannot be handed a quad, so the
+  conflation that produced the first proof's clipped headings is not
+  expressible.
+- **The canonical CSS width is 393 px, for every document, on every plate.**
+  Only the viewport _height_ follows the calibrated screen, because these
+  stylised plates draw handsets at about 2.86:1 and a taller screen genuinely
+  shows more of the same mobile layout. Never widen the CSS viewport to fill a
+  screen — that changes the breakpoint, which is the whole defect.
+- **Extra height is filled with more real content, never by scaling.** There is
+  no `fit`, no `headroom`, no crop and no edge replication left in
+  `UiDocument`, and their absence is what makes "no black bands, nothing
+  clipped" structural rather than a promise. A document narrower or shorter
+  than the screen is refused by name.
+- **`devicePixelRect` refuses an odd dimension rather than nudging the CSS
+  viewport.** 393 × 3 is 1179 and h264 cannot encode it; the scale factor moved
+  to 4, the width did not move to 394.
+- **`measureMappingUniformity` reports, it never corrects.** It runs after the
+  document is sized and its result is written to the report — a plate whose
+  glass is drawn more elongated than a real device cannot carry a
+  correctly-proportioned layout at full coverage, and an operator is told that
+  in numbers rather than discovering it in the frames.
+- **Layout is measured in the page, not asserted.** `scrollWidth` against
+  `clientWidth`, every element's box against the viewport, the bottom
+  navigation present, no wide-breakpoint navigation. A document that fails is
+  refused.
+- **The bottom navigation is a fixed composited layer.** It is `position:
+fixed` on a phone, and a full-page screenshot bakes a fixed element in
+  wherever it sat when the capture began — it would ride up the screen as the
+  content scrolls.
+- **Offline documents are `PRODUCT_MOCKUP`, never captures.** When the live
+  application is unreachable they are reconstructed from its own visual system,
+  navigation, brand mark and the content the approved captures show — and every
+  artefact says so. The check against the live host is made **once**, read-only
+  and mobile-emulated; there is no retry loop.
 - **Nothing on this path constructs a provider, opens a database or makes a
   network request**, and asset roots are supplied at invocation so no operator
   pack path is ever committed. `product-motion-source-hygiene.test.ts` asserts

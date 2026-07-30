@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  captureRectToCanvas,
+  documentRectToScreen,
   compileUiLayerGraph,
   documentHeightPx,
   easedProgressExpression,
@@ -14,9 +14,8 @@ import {
 const document: UiDocument = {
   id: 'events',
   inputIndex: 1,
-  captureWidthPx: 1080,
-  captureHeightPx: 1920,
-  headroomPx: 1600,
+  widthPx: 1080,
+  heightPx: 3520,
 };
 
 const state: UiState = {
@@ -36,6 +35,7 @@ const spec: UiLayerSpec = {
   durationSeconds: 5.6,
   documents: [document],
   states: [state],
+  fixedOverlays: [],
   accents: [],
   baseInputIndex: 0,
 };
@@ -52,12 +52,22 @@ describe('easedProgressExpression', () => {
 });
 
 describe('compileUiLayerGraph', () => {
-  it('builds headroom from the capture own top rows rather than a colour literal', () => {
+  it('never crops, pads, scales or replicates an edge row of a document', () => {
     const { graph } = compileUiLayerGraph(spec);
-    expect(graph).toContain('crop=1080:2:0:0');
-    expect(graph).toContain('scale=1080:1600');
-    expect(graph).toContain('vstack=inputs=2');
-    expect(graph).not.toMatch(/color=0x[0-9A-F]{6}(?!.*drawbox)/);
+    // Every one of these was a preparation step that made a source which did
+    // not fit the screen appear to fit it, and between them they produced the
+    // clipped headings and black bands the first proof was rejected for.
+    // The document arrives at the screen's own width, so none of them exist.
+    const documentChain = graph
+      .split(';')
+      .filter((step) => step.startsWith('[1:v]') || step.startsWith('[eventsbase]'))
+      .join(';');
+    expect(documentChain).toContain('[1:v]setsar=1[eventsbase]');
+    expect(documentChain).not.toContain('crop=');
+    expect(documentChain).not.toContain('pad=');
+    expect(documentChain).not.toContain('scale=');
+    expect(documentChain).not.toContain('vstack');
+    expect(documentChain).not.toContain('tile=');
   });
 
   it('scrolls with a negative overlay offset so the document travels upward', () => {
@@ -149,11 +159,9 @@ describe('compileUiLayerGraph', () => {
   });
 
   it('refuses a document shorter than the canvas rather than leaving the screen uncovered', () => {
-    const short: UiDocument = { ...document, headroomPx: 0 };
+    const short: UiDocument = { ...document, heightPx: 1200 };
     expect(() => compileUiLayerGraph({ ...spec, documents: [short] })).toThrow(UiLayerError);
-    expect(() => compileUiLayerGraph({ ...spec, documents: [short] })).toThrow(
-      /Raise its headroom/,
-    );
+    expect(() => compileUiLayerGraph({ ...spec, documents: [short] })).toThrow(/more real content/);
   });
 
   it('refuses a scroll that would run past the end of the capture', () => {
@@ -167,7 +175,7 @@ describe('compileUiLayerGraph', () => {
   });
 
   it('refuses a document whose width does not match the canvas', () => {
-    const narrow: UiDocument = { ...document, captureWidthPx: 900 };
+    const narrow: UiDocument = { ...document, widthPx: 900 };
     expect(() => compileUiLayerGraph({ ...spec, documents: [narrow] })).toThrow(/resample/);
   });
 
@@ -223,19 +231,19 @@ describe('accents', () => {
   });
 });
 
-describe('captureRectToCanvas', () => {
-  it('shifts a measured region by the headroom and the scroll', () => {
-    const rect = captureRectToCanvas(
+describe('documentRectToScreen', () => {
+  it('translates a document region by the scroll, with no scale or crop term', () => {
+    const rect = documentRectToScreen(
       { xPx: 12, yPx: 1128, widthPx: 818, heightPx: 392 },
       document,
       600,
     );
     expect(rect.xPx).toBe(12);
-    expect(rect.yPx).toBe(1128 + 1600 - 600);
+    expect(rect.yPx).toBe(1128 - 600);
     expect(rect.heightPx).toBe(392);
   });
 
-  it('agrees with the document height helper', () => {
+  it('reports the document height as rendered', () => {
     expect(documentHeightPx(document)).toBe(3520);
   });
 });

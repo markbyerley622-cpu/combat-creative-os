@@ -17,6 +17,7 @@ export * from './qa/frame-sampling';
 export * from './qa/audio-measurement';
 export * from './qa/actual-media-qa';
 export * from './composite/screen-quad';
+export * from './composite/canonical-screen';
 export * from './composite/screen-calibration';
 export * from './composite/ui-layer';
 export * from './composite/screen-composite';

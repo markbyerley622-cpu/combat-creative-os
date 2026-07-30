@@ -68,49 +68,53 @@ const PlateSchema = z
   .strict();
 export type PlatePlan = z.infer<typeof PlateSchema>;
 
+/**
+ * A product document is *named*, not located.
+ *
+ * It carries no file, no width, no height and no preparation. Those fields are
+ * gone deliberately: every one of them was a way to make a source that did not
+ * fit the screen appear to fit it, and between them they produced the clipped
+ * headings and black bands the first proof was rejected for. A document is now
+ * rendered at the canonical phone viewport and measured, so its geometry is a
+ * result rather than a declaration.
+ */
 const DocumentSchema = z
   .object({
     id: z.string().min(1).max(60),
-    /** Relative to the assets root. */
-    file: z.string().min(1).max(200),
-    widthPx: z.number().int().positive(),
-    heightPx: z.number().int().positive(),
-    /**
-     * Extension above the capture, drawn from its own top rows. A handset
-     * screen taller than the captured viewport really does show more above the
-     * application header; this is that band, and it is also what gives a short
-     * capture room to scroll.
-     */
-    headroomPx: z.number().int().min(0).max(4000),
-    /**
-     * Present when the capture has to be shown larger and cropped to fill a
-     * screen taller than the viewport it was taken at. Absent means the
-     * capture is used at its own size, which is only possible when it is
-     * already as wide as the canvas.
-     */
-    fit: z
-      .object({
-        scaleWidthPx: z.number().int().positive(),
-        scaleHeightPx: z.number().int().positive(),
-        cropXPx: z.number().int().min(0),
-      })
-      .strict()
-      .optional(),
+    surface: z.enum(['EVENT_LIST', 'FIGHT_CARD', 'LEADERBOARD']),
     description: z.string().min(1).max(300),
   })
   .strict();
 export type DocumentPlan = z.infer<typeof DocumentSchema>;
 
+/**
+ * The seven beats, in the order they must read:
+ * find this weekend's events → inspect a fight → make a prediction → improve
+ * your rank.
+ */
 export const PRODUCT_STATES = [
-  'EVENT_DISCOVERY',
-  'EVENT_SELECTION',
+  'EVENT_SCHEDULE_SCROLL',
+  'EVENT_SELECTED',
   'FIGHTER_COMPARISON',
-  'PREDICTION_SELECTION',
+  'PREDICTION_READY',
   'PREDICTION_TAP',
   'PREDICTION_CONFIRMED',
   'PREDICTOR_RANK_REWARD',
 ] as const;
 export type ProductState = (typeof PRODUCT_STATES)[number];
+
+/**
+ * The prediction interaction is one decision, not a page to sit on.
+ *
+ * Ready, tap and confirmed together may not exceed this. The first proof spent
+ * 1.72s on them and only 1.32s on the schedule, which inverted what the
+ * sequence is about: the product's claim is that it consolidates the weekend,
+ * and the prediction is the thing you do once you are there.
+ */
+export const PREDICTION_INTERACTION_MAX_SECONDS = 1.0;
+
+/** The opening beat has to carry the schedule claim, so it gets the most time. */
+export const EVENT_SCHEDULE_MIN_SECONDS = 1.5;
 
 const StateSchema = z
   .object({
@@ -141,8 +145,13 @@ const AccentSchema = z
     id: z.string().min(1).max(60),
     key: z.enum(['SELECTION_OUTLINE', 'PRESS_OUTLINE', 'CONFIRM_BAR', 'FOCUS_UNDERLINE']),
     documentId: z.string().min(1),
-    /** Authored in the capture's own pixels — the space an operator can measure. */
-    captureRect: z
+    /**
+     * Authored in the rendered document's own device pixels — the space an
+     * operator measures directly in `documents/document-*.png`. There is no
+     * scale or crop term between it and the screen, because there is no longer
+     * any preparation step between them.
+     */
+    documentRect: z
       .object({
         xPx: z.number(),
         yPx: z.number(),
@@ -217,9 +226,11 @@ const PlanSchema = z
         durationSeconds: z.number().min(4).max(8),
       })
       .strict(),
-    uiCanvas: z
-      .object({ widthPx: z.literal(1080), heightPx: z.number().int().min(1920).max(6000) })
-      .strict(),
+    /**
+     * The brand mark, relative to the assets root. The only product asset this
+     * path reads: the documents are laid out, not composited from captures.
+     */
+    brandMarkFile: z.string().min(1).max(200),
     plates: z.array(PlateSchema).min(1).max(8),
     documents: z.array(DocumentSchema).min(1).max(8),
     states: z.array(StateSchema).min(2).max(16),
@@ -298,6 +309,37 @@ export function parseProductMotionPlan(value: unknown, path?: string): ProductMo
 
   covers('shot', plan.shots);
   covers('state', plan.states);
+
+  // The narrative weighting, enforced rather than trusted. Both of these were
+  // wrong in the first proof and neither is visible in a timing table until
+  // somebody adds up the columns.
+  const durationOf = (state: ProductState): number =>
+    plan.states
+      .filter((candidate) => candidate.state === state)
+      .reduce((total, candidate) => total + (candidate.endSeconds - candidate.startSeconds), 0);
+
+  const predictionSeconds =
+    durationOf('PREDICTION_READY') +
+    durationOf('PREDICTION_TAP') +
+    durationOf('PREDICTION_CONFIRMED');
+  if (predictionSeconds > PREDICTION_INTERACTION_MAX_SECONDS + 1e-6) {
+    failures.push(
+      `the prediction interaction runs ${predictionSeconds.toFixed(2)}s, above the ` +
+        `${PREDICTION_INTERACTION_MAX_SECONDS}s ceiling; ready → tap → confirmed is one decisive action`,
+    );
+  }
+  const scheduleSeconds = durationOf('EVENT_SCHEDULE_SCROLL');
+  if (scheduleSeconds < EVENT_SCHEDULE_MIN_SECONDS - 1e-6) {
+    failures.push(
+      `the schedule scroll runs ${scheduleSeconds.toFixed(2)}s, below the ` +
+        `${EVENT_SCHEDULE_MIN_SECONDS}s floor; the opening beat carries the product's claim`,
+    );
+  }
+  for (const required of PRODUCT_STATES) {
+    if (!plan.states.some((state) => state.state === required)) {
+      failures.push(`no state covers ${required}; all seven beats must be present`);
+    }
+  }
 
   plan.shots.forEach((shot, index) => {
     if (!plateIds.has(shot.plateId)) {

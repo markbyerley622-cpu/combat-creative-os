@@ -3740,6 +3740,79 @@ interface comes from the existing approved captures because
 
 ---
 
+### Mobile-native product motion correction (2026-07-30)
+
+Proof-01 failed visual acceptance: headings and event cards clipped at the
+right edge, large black bands in the fight-card and prediction states, controls
+compressed and small, and an overall read of a desktop dashboard squeezed into a
+phone. `pnpm aamp:product-motion` now renders proof-02 from a canonical mobile
+coordinate system. Runbook: `docs/runbooks/product-motion-proof.md`.
+
+**One of the three suspected root causes was not real, and saying so matters.**
+The approved captures were taken at **360×640 CSS pixels at device scale factor
+3** (`capture-contracts.ts`), which is a phone width — they did render the
+mobile breakpoint. The 1080×1920 figure everyone reached for is _device_ pixels.
+The actual defect was the other two: the interface canvas was sized from the
+**projected quadrilateral** (~2.86:1), and short captures were then made to fit
+it by scaling up, cropping horizontally by ~38% of the width, and extending
+upward by replicating edge rows. Those three operations produced every reported
+symptom.
+
+**New module: `packages/media/src/composite/canonical-screen.ts`.** It keeps
+three coordinate systems apart — CSS viewport (decides the breakpoint), device
+pixels (fidelity only), and the projected quad (a camera output, never a layout
+input). `canonicalMobileViewport` takes a scalar and cannot be handed a quad, so
+the conflation is not expressible rather than merely discouraged.
+`devicePixelRect` refuses an odd dimension instead of nudging the CSS viewport
+to please the encoder — 393 × 3 is 1179, so the scale factor moved to 4.
+`assertLayoutFitsViewport` gates on measured geometry.
+
+**`UiDocument` lost `fit` and `headroom`.** Both were removed rather than
+tightened: they were the crop and the pad. A document now arrives already laid
+out at the screen's own width and already tall enough to cover it, so a
+narrower or shorter one is refused by name and there is nothing left to stretch.
+Extra vertical room is filled with more real content, which is also where the
+scroll travel comes from.
+
+**Documents are laid out by a real browser and measured in the page.** Playwright
+renders each at 393 CSS px, DPR 4, `isMobile`, `hasTouch`, portrait, a handset
+user agent, `offline`, with a default-deny route aborting every request. The run
+then reads back `scrollWidth` against `clientWidth`, every element's bounding
+box, the bottom navigation's presence and the absence of wide-breakpoint
+navigation. The bottom navigation is captured separately and composited as a
+fixed layer, because a full-page screenshot bakes a `position: fixed` element in
+where it started and it would ride up the screen as content scrolls.
+
+**Timing rebalanced, and the weighting is now enforced.** The schedule carries
+1.70 s (was 1.32) and the prediction is one decisive second (was 1.72). The
+parser refuses a plan whose prediction exceeds 1.0 s, whose schedule is under
+1.5 s, or which is missing any of the seven beats — the narrative weighting was
+invisible in a timing table until somebody added up the columns.
+
+**Proven live.** An ffprobe-verified 1080×1920 h264/yuv420p MP4 at exactly
+5.600 s, AAC stereo 48 kHz, faststart, actual-media QA `PASS`. Canonical
+viewport 393×1122 CSS at DPR 4 → 1572×4488 device px. **Zero horizontal overflow
+and zero clipped elements** on all three documents; bottom navigation visible and
+no wide-breakpoint navigation anywhere. Hero mapping uniformity **1.0003**.
+Frames inspected at native resolution across all seven states and all four
+transitions: sport, fixture, date, start time and venue readable on five
+schedule cards; both push-up wipes show one interface pushing another with no
+empty screen; both cuts hold the handset.
+
+**Recorded, not fixed.** The tap plate's quad projects at 2.4034 against a
+2.8550 document, an implied vertical scale of **0.842** — the two plates depict
+handsets with different proportions, so one of them cannot map uniformly. It is
+reported in `viewport-measurements.json` rather than corrected for, because
+correcting it would mean sizing the layout from the photograph. The documents
+are `PRODUCT_MOCKUP`: the live host returned HTTP 503 to a single read-only
+mobile-emulated check, so they are reconstructions from the product's own visual
+system, brand mark and the content the approved captures show — labelled as such
+in every artefact.
+
+**Next milestone is unchanged: AAMP-1 step 4.**
+
+---
+
 ## 9. What this document deliberately does not do
 
 Per instructions, no application code, no package.json, no Prisma schema file, and

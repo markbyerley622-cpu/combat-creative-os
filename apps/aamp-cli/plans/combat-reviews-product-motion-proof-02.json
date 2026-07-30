@@ -1,0 +1,397 @@
+{
+  "planVersion": 1,
+  "id": "combat-reviews-product-motion-proof-02",
+  "authoredBy": "Combat Reviews creative operator",
+  "brief": "A 5.6-second continuous product demonstration, revised so the interface is mobile-native. The documents are laid out by a real browser at 393 CSS pixels — a phone breakpoint — and mapped whole into the calibrated handset screens, so nothing is stretched, cropped, padded or edge-replicated. The sequence reads: find this weekend's events, inspect a fight, make a prediction, improve your rank. The schedule carries the opening 1.70s because consolidating the weekend is the product's claim; the prediction is one decisive second.",
+  "output": {
+    "widthPx": 1080,
+    "heightPx": 1920,
+    "frameRate": 30,
+    "durationSeconds": 5.6
+  },
+  "brandMarkFile": "brand/logo.png",
+  "plates": [
+    {
+      "id": "hero",
+      "file": "FRAME4PLATE.png",
+      "widthPx": 941,
+      "heightPx": 1672,
+      "screen": {
+        "topLeft": {
+          "xPx": 500,
+          "yPx": 360
+        },
+        "topRight": {
+          "xPx": 858,
+          "yPx": 338
+        },
+        "bottomLeft": {
+          "xPx": 481,
+          "yPx": 1362
+        },
+        "bottomRight": {
+          "xPx": 838,
+          "yPx": 1381
+        }
+      },
+      "description": "Hero handset, near-frontal, unlit glass on a dark set with a red rim light. Its screen measures 2.856:1 — a stylised proportion, not a real device — and the canonical viewport height follows it so the mapping stays uniform."
+    },
+    {
+      "id": "tap",
+      "file": "FRAME6PLATE.png",
+      "widthPx": 941,
+      "heightPx": 1672,
+      "screen": {
+        "topLeft": {
+          "xPx": 512,
+          "yPx": 500
+        },
+        "topRight": {
+          "xPx": 822,
+          "yPx": 452
+        },
+        "bottomLeft": {
+          "xPx": 428,
+          "yPx": 1206
+        },
+        "bottomRight": {
+          "xPx": 738,
+          "yPx": 1240
+        }
+      },
+      "description": "Handset held in one hand with the other index finger at the glass. Used only for the tap, framed so its screen lands where the hero's screen just was."
+    }
+  ],
+  "documents": [
+    {
+      "id": "events",
+      "surface": "EVENT_LIST",
+      "description": "Fight schedule — seven dated cards, each carrying sport, fixture, date, start time and venue. Leads straight into the schedule rather than a full-height introduction."
+    },
+    {
+      "id": "card",
+      "surface": "FIGHT_CARD",
+      "description": "Fight card — red and blue corner comparison, the main event with its prediction split, and the undercard."
+    },
+    {
+      "id": "board",
+      "surface": "LEADERBOARD",
+      "description": "Challenge leaderboard — podium, ranked rows with points and accuracy, and how points are earned."
+    }
+  ],
+  "states": [
+    {
+      "id": "s1-event-schedule-scroll",
+      "state": "EVENT_SCHEDULE_SCROLL",
+      "documentId": "events",
+      "startSeconds": 0,
+      "endSeconds": 1.7,
+      "entrance": "NONE",
+      "entranceSeconds": 0,
+      "scroll": {
+        "fromPx": 0,
+        "toPx": 1267,
+        "startSeconds": 0,
+        "endSeconds": 1.45,
+        "easing": "EASE_OUT_CUBIC"
+      },
+      "intent": "The weekend's card list, already moving when the frame opens and decelerating into rest. Three dated fixtures are fully on screen at the settle, each with its sport, its date and its start time — that is the claim the whole advertisement rests on, so it gets the longest beat."
+    },
+    {
+      "id": "s2-event-selected",
+      "state": "EVENT_SELECTED",
+      "documentId": "events",
+      "startSeconds": 1.7,
+      "endSeconds": 2.05,
+      "entrance": "NONE",
+      "entranceSeconds": 0,
+      "scroll": {
+        "fromPx": 1267,
+        "toPx": 1267,
+        "startSeconds": 1.7,
+        "endSeconds": 2.05,
+        "easing": "LINEAR"
+      },
+      "intent": "The list holds and one fixture takes the accent. The scroll stops before the selection appears so the two readings never compete."
+    },
+    {
+      "id": "s3-fighter-comparison",
+      "state": "FIGHTER_COMPARISON",
+      "documentId": "card",
+      "startSeconds": 2.05,
+      "endSeconds": 2.95,
+      "entrance": "PUSH_UP",
+      "entranceSeconds": 0.3,
+      "scroll": {
+        "fromPx": 0,
+        "toPx": 0,
+        "startSeconds": 2.05,
+        "endSeconds": 2.95,
+        "easing": "LINEAR"
+      },
+      "intent": "The selected fixture's own card pushes up over the list, in the same direction the list was travelling, and the two corners take their accents in turn."
+    },
+    {
+      "id": "s4-prediction-ready",
+      "state": "PREDICTION_READY",
+      "documentId": "card",
+      "startSeconds": 2.95,
+      "endSeconds": 3.45,
+      "entrance": "NONE",
+      "entranceSeconds": 0,
+      "scroll": {
+        "fromPx": 0,
+        "toPx": 827,
+        "startSeconds": 2.95,
+        "endSeconds": 3.28,
+        "easing": "EASE_OUT_CUBIC"
+      },
+      "intent": "The same card scrolls on to the main event and its prediction split, and the side being backed takes the accent. Half a second — long enough to read, short enough that the interaction stays one movement."
+    },
+    {
+      "id": "s5-prediction-tap",
+      "state": "PREDICTION_TAP",
+      "documentId": "card",
+      "startSeconds": 3.45,
+      "endSeconds": 3.68,
+      "entrance": "NONE",
+      "entranceSeconds": 0,
+      "scroll": {
+        "fromPx": 827,
+        "toPx": 827,
+        "startSeconds": 3.45,
+        "endSeconds": 3.68,
+        "easing": "LINEAR"
+      },
+      "intent": "Held absolutely still under the finger. The prediction control takes the press."
+    },
+    {
+      "id": "s6-prediction-confirmed",
+      "state": "PREDICTION_CONFIRMED",
+      "documentId": "card",
+      "startSeconds": 3.68,
+      "endSeconds": 3.95,
+      "entrance": "NONE",
+      "entranceSeconds": 0,
+      "scroll": {
+        "fromPx": 827,
+        "toPx": 827,
+        "startSeconds": 3.68,
+        "endSeconds": 3.95,
+        "easing": "LINEAR"
+      },
+      "intent": "The press releases into a committed state. The cut back to the hero handset lands on this frame, so the tap visibly causes the confirmation."
+    },
+    {
+      "id": "s7-rank-reward",
+      "state": "PREDICTOR_RANK_REWARD",
+      "documentId": "board",
+      "startSeconds": 3.95,
+      "endSeconds": 5.6,
+      "entrance": "PUSH_UP",
+      "entranceSeconds": 0.3,
+      "scroll": {
+        "fromPx": 0,
+        "toPx": 827,
+        "startSeconds": 3.95,
+        "endSeconds": 5.2,
+        "easing": "EASE_OUT_CUBIC"
+      },
+      "intent": "The leaderboard pushes up in the same direction everything else has travelled, and the ranked row slides into its resting position under the accent. The reward is the last thing that moves and the last thing that stops."
+    }
+  ],
+  "accents": [
+    {
+      "id": "a1-select-event",
+      "key": "SELECTION_OUTLINE",
+      "documentId": "events",
+      "documentRect": {
+        "xPx": 64,
+        "yPx": 1824,
+        "widthPx": 1444,
+        "heightPx": 825
+      },
+      "atScrollPx": 1267,
+      "startSeconds": 1.74,
+      "endSeconds": 2.05,
+      "colorHex": "#DA0318",
+      "intent": "The fixture being opened."
+    },
+    {
+      "id": "a2-red-corner",
+      "key": "SELECTION_OUTLINE",
+      "documentId": "card",
+      "documentRect": {
+        "xPx": 129,
+        "yPx": 803,
+        "widthPx": 640,
+        "heightPx": 320
+      },
+      "atScrollPx": 0,
+      "startSeconds": 2.4,
+      "endSeconds": 2.95,
+      "colorHex": "#DA0318",
+      "intent": "Red corner, first. Staggering the two corners is what makes it read as a comparison rather than a label."
+    },
+    {
+      "id": "a3-blue-corner",
+      "key": "SELECTION_OUTLINE",
+      "documentId": "card",
+      "documentRect": {
+        "xPx": 803,
+        "yPx": 803,
+        "widthPx": 640,
+        "heightPx": 320
+      },
+      "atScrollPx": 0,
+      "startSeconds": 2.52,
+      "endSeconds": 2.95,
+      "colorHex": "#3FA9F5",
+      "intent": "Blue corner, 0.12s later. The one non-red accent in the cut, because the product itself colours the two corners."
+    },
+    {
+      "id": "a4-pick-red",
+      "key": "SELECTION_OUTLINE",
+      "documentId": "card",
+      "documentRect": {
+        "xPx": 140,
+        "yPx": 1993,
+        "widthPx": 1033,
+        "heightPx": 95
+      },
+      "atScrollPx": 827,
+      "startSeconds": 3.32,
+      "endSeconds": 3.95,
+      "colorHex": "#DA0318",
+      "intent": "The side being backed stays marked through the press and the confirmation — one decision, one mark."
+    },
+    {
+      "id": "a5-press",
+      "key": "PRESS_OUTLINE",
+      "documentId": "card",
+      "documentRect": {
+        "xPx": 64,
+        "yPx": 2235,
+        "widthPx": 1444,
+        "heightPx": 163
+      },
+      "atScrollPx": 827,
+      "startSeconds": 3.47,
+      "endSeconds": 3.68,
+      "colorHex": "#DA0318",
+      "intent": "The prediction control taking the touch: a wash and a heavier frame, for the fifth of a second the finger is down."
+    },
+    {
+      "id": "a6-confirm",
+      "key": "CONFIRM_BAR",
+      "documentId": "card",
+      "documentRect": {
+        "xPx": 64,
+        "yPx": 2427,
+        "widthPx": 1444,
+        "heightPx": 19
+      },
+      "atScrollPx": 827,
+      "startSeconds": 3.7,
+      "endSeconds": 3.95,
+      "colorHex": "#DA0318",
+      "intent": "Committed. A rule rather than a wash, because the interface underneath still has to be readable."
+    },
+    {
+      "id": "a7-rank-row",
+      "key": "SELECTION_OUTLINE",
+      "documentId": "board",
+      "documentRect": {
+        "xPx": 64,
+        "yPx": 1993,
+        "widthPx": 1444,
+        "heightPx": 252
+      },
+      "atScrollPx": 827,
+      "startSeconds": 5.24,
+      "endSeconds": 5.6,
+      "colorHex": "#DA0318",
+      "intent": "The row the list has just settled under. It arrives after the scroll stops, so the mark and the movement never fight."
+    }
+  ],
+  "shots": [
+    {
+      "id": "shot-a-hero",
+      "plateId": "hero",
+      "startSeconds": 0,
+      "endSeconds": 3.2,
+      "transitionIn": "OPENING",
+      "transitionNote": "Opens already in motion, on the hero handset, at the shallow end of the push.",
+      "move": {
+        "startZoom": 1.06,
+        "endZoom": 1.126,
+        "offsetU": 0,
+        "offsetV": 0
+      }
+    },
+    {
+      "id": "shot-b-tap",
+      "plateId": "tap",
+      "startSeconds": 3.2,
+      "endSeconds": 3.68,
+      "transitionIn": "SCREEN_POSITION_MATCH_CUT",
+      "transitionNote": "Hard cut to the held handset, framed so the screen centre lands where the hero's screen centre just was. The interface does not jump; the hands and the lighting change around it.",
+      "move": {
+        "startZoom": 1.126,
+        "endZoom": 1.138,
+        "offsetU": -0.047,
+        "offsetV": -0.0064
+      }
+    },
+    {
+      "id": "shot-c-hero",
+      "plateId": "hero",
+      "startSeconds": 3.68,
+      "endSeconds": 5.6,
+      "transitionIn": "TAP_CUT",
+      "transitionNote": "Cut on the release of the tap, landing exactly on the confirmed state, so the tap visibly causes the confirmation. The push-in continues from where shot A left it.",
+      "move": {
+        "startZoom": 1.138,
+        "endZoom": 1.22,
+        "offsetU": 0,
+        "offsetV": 0
+      }
+    }
+  ],
+  "audio": {
+    "bedFile": "audio/music-bed.wav",
+    "bedGainDb": -13,
+    "cues": [
+      {
+        "id": "c1-select",
+        "file": "audio/sfx-ui-click.wav",
+        "atSeconds": 1.74,
+        "gainDb": -16,
+        "intent": "Fixture selected."
+      },
+      {
+        "id": "c2-pick",
+        "file": "audio/sfx-ui-click.wav",
+        "atSeconds": 3.32,
+        "gainDb": -15,
+        "intent": "Prediction side chosen."
+      },
+      {
+        "id": "c3-tap",
+        "file": "audio/sfx-ui-click.wav",
+        "atSeconds": 3.47,
+        "gainDb": -12,
+        "intent": "Finger contact."
+      },
+      {
+        "id": "c4-confirm",
+        "file": "audio/sfx-confirmation-pulse.wav",
+        "atSeconds": 3.7,
+        "gainDb": -13,
+        "intent": "Prediction committed."
+      }
+    ],
+    "integratedLufs": -14,
+    "truePeakDbtp": -1.5
+  }
+}

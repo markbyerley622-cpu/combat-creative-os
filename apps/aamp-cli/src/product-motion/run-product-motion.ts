@@ -3,10 +3,15 @@ import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
 
 import {
+  CANONICAL_SCREEN_ASPECT,
+  canonicalMobileViewport,
   compileShotComposite,
   compileUiLayerGraph,
   concatDemuxerList,
-  captureRectToCanvas,
+  devicePixelRect,
+  documentRectToScreen,
+  measureMappingUniformity,
+  measureQuadGeometry,
   normaliseQuadForCover,
   quadAtZoom,
   runActualMediaQa,
@@ -19,10 +24,13 @@ import {
   type ShotCompositeSpec,
   type UiAccent,
   type UiDocument,
+  type UiFixedOverlay,
   type UiState,
 } from '@combat/media';
 
 import { calibrateScreen, readPlateLuma, type CalibratedScreen } from './calibration';
+import { renderMobileDocuments } from './document-renderer';
+import { buildMobileDocuments, loadMarkDataUri, MOCKUP_NOTICE } from './mobile-documents';
 import { buildComparisonGallery } from './gallery';
 import { buildDefectsReport, buildTimingReport, type ProductMotionReports } from './reports';
 import {
@@ -136,13 +144,13 @@ export async function runProductMotionProof(
       `plate-${plate.id}.png`,
     );
   }
-  for (const document of plan.documents) {
-    await stage(
-      `document:${document.id}`,
-      resolveUnder(request.assetsRoot, document.file, 'document'),
-      `document-${document.id}.png`,
-    );
-  }
+  // Documents are not staged: they are rendered, below, from the canonical
+  // viewport. Only the brand mark is read from the assets root.
+  await stage(
+    'brand:mark',
+    resolveUnder(request.assetsRoot, plan.brandMarkFile, 'brand mark'),
+    'brand-mark.png',
+  );
   await stage(
     'audio:bed',
     resolveUnder(request.assetsRoot, plan.audio.bedFile, 'audio bed'),
@@ -184,23 +192,54 @@ export async function runProductMotionProof(
     );
   }
 
-  // ---- pass 1: the interface layer ----------------------------------------
-  const documentsById = new Map(plan.documents.map((document) => [document.id, document]));
-  const uiDocumentIdFor = (planId: string): string => planId.replace(/[^A-Za-z0-9]/g, '');
-  const toUiDocument = (
-    document: (typeof plan.documents)[number],
-    inputIndex: number,
-  ): UiDocument => ({
-    id: uiDocumentIdFor(document.id),
-    inputIndex,
-    captureWidthPx: document.widthPx,
-    captureHeightPx: document.heightPx,
-    headroomPx: document.headroomPx,
-    ...(document.fit ? { fit: document.fit } : {}),
+  // ---- the canonical mobile screen ----------------------------------------
+  // The viewport width is fixed at the canonical phone width for every
+  // document. Only its height follows the calibrated screen, which is what
+  // lets the whole rectangle map onto the glass without stretching, cropping
+  // or padding — all three of which are forbidden. The reference height and
+  // the deviation are reported.
+  const referenceQuad = normalisedQuads.get(plan.shots[0]?.plateId ?? '');
+  if (!referenceQuad) {
+    throw new ProductMotionError('INVALID_PLAN', 'the first shot names no calibrated plate');
+  }
+  const referencePlate = plan.plates.find((plate) => plate.id === plan.shots[0]?.plateId);
+  const screenAspect = referencePlate
+    ? measureQuadGeometry(referencePlate.screen).aspectRatio
+    : CANONICAL_SCREEN_ASPECT;
+  const viewport = canonicalMobileViewport(screenAspect);
+  const screen = devicePixelRect(viewport);
+
+  const documentDirectory = join(runDirectory, 'documents');
+  await mkdir(documentDirectory, { recursive: true });
+  const markDataUri = await loadMarkDataUri(stagedPath('brand:mark'));
+  const renderedDocuments = await renderMobileDocuments({
+    viewport,
+    documents: buildMobileDocuments({ viewport, markDataUri }).filter((specification) =>
+      plan.documents.some((planned) => planned.id === specification.id),
+    ),
+    outputDirectory: documentDirectory,
   });
-  const uiDocuments: UiDocument[] = plan.documents.map((document, index) =>
-    toUiDocument(document, index + 1),
-  );
+  const renderedById = new Map(renderedDocuments.map((entry) => [entry.id, entry]));
+
+  const uniformity = plan.plates.map((plate) => ({
+    plateId: plate.id,
+    ...measureMappingUniformity(viewport, plate.screen),
+  }));
+
+  // ---- pass 1: the interface layer ----------------------------------------
+  const uiDocumentIdFor = (planId: string): string => planId.replace(/[^A-Za-z0-9]/g, '');
+  const uiDocuments: UiDocument[] = plan.documents.map((document, index) => {
+    const renderedDocument = renderedById.get(document.id);
+    if (!renderedDocument) {
+      throw new ProductMotionError('INVALID_PLAN', `document "${document.id}" was not rendered`);
+    }
+    return {
+      id: uiDocumentIdFor(document.id),
+      inputIndex: index + 1,
+      widthPx: renderedDocument.documentWidthPx,
+      heightPx: renderedDocument.documentHeightPx,
+    };
+  });
 
   const uiStates: UiState[] = plan.states.map((state) => ({
     id: state.id,
@@ -213,16 +252,9 @@ export async function runProductMotionProof(
   }));
 
   const uiAccents: UiAccent[] = plan.accents.map((accent) => {
-    const document = documentsById.get(accent.documentId);
-    if (!document) {
-      throw new ProductMotionError(
-        'INVALID_PLAN',
-        `accent "${accent.id}" names unknown document "${accent.documentId}"`,
-      );
-    }
-    const rect = captureRectToCanvas(
-      accent.captureRect,
-      toUiDocument(document, 0),
+    const rect = documentRectToScreen(
+      accent.documentRect,
+      uiDocuments[0] as UiDocument,
       accent.atScrollPx,
     );
     return {
@@ -238,13 +270,35 @@ export async function runProductMotionProof(
     };
   });
 
+  // The bottom navigation is fixed to the screen, so it is composited rather
+  // than scrolled with the document. Each surface's own variant is enabled
+  // while that surface is showing.
+  const navigationInputBase = 1 + plan.documents.length;
+  const fixedOverlays: UiFixedOverlay[] = plan.documents.flatMap((document, index) => {
+    const renderedDocument = renderedById.get(document.id);
+    if (!renderedDocument) return [];
+    const windows = plan.states.filter((state) => state.documentId === document.id);
+    if (windows.length === 0) return [];
+    return [
+      {
+        id: `nav-${document.id}`,
+        inputIndex: navigationInputBase + index,
+        xPx: 0,
+        yPx: screen.heightPx - renderedDocument.navigationHeightPx,
+        startSeconds: Math.min(...windows.map((state) => state.startSeconds)),
+        endSeconds: Math.max(...windows.map((state) => state.endSeconds)),
+      },
+    ];
+  });
+
   const uiLayer = compileUiLayerGraph({
-    canvasWidthPx: plan.uiCanvas.widthPx,
-    canvasHeightPx: plan.uiCanvas.heightPx,
+    canvasWidthPx: screen.widthPx,
+    canvasHeightPx: screen.heightPx,
     frameRate: plan.output.frameRate,
     durationSeconds: plan.output.durationSeconds,
     documents: uiDocuments,
     states: uiStates,
+    fixedOverlays,
     accents: uiAccents,
     baseInputIndex: 0,
   });
@@ -256,12 +310,18 @@ export async function runProductMotionProof(
     '-f',
     'lavfi',
     '-i',
-    `color=c=black:s=${plan.uiCanvas.widthPx}x${plan.uiCanvas.heightPx}:r=${plan.output.frameRate}`,
+    `color=c=black:s=${screen.widthPx}x${screen.heightPx}:r=${plan.output.frameRate}`,
     ...plan.documents.flatMap((document) => [
       '-loop',
       '1',
       '-i',
-      stagedPath(`document:${document.id}`),
+      renderedById.get(document.id)?.documentPath ?? '',
+    ]),
+    ...plan.documents.flatMap((document) => [
+      '-loop',
+      '1',
+      '-i',
+      renderedById.get(document.id)?.navigationPath ?? '',
     ]),
     '-filter_complex',
     uiLayer.graph,
@@ -316,8 +376,8 @@ export async function runProductMotionProof(
       uiInputIndex: 1,
       outputWidthPx: plan.output.widthPx,
       outputHeightPx: plan.output.heightPx,
-      uiCanvasWidthPx: plan.uiCanvas.widthPx,
-      uiCanvasHeightPx: plan.uiCanvas.heightPx,
+      uiCanvasWidthPx: screen.widthPx,
+      uiCanvasHeightPx: screen.heightPx,
       frameRate: plan.output.frameRate,
       durationSeconds: duration,
       uiStartSeconds: shot.startSeconds,
@@ -475,6 +535,50 @@ export async function runProductMotionProof(
     `${JSON.stringify(reports.defects, null, 2)}\n`,
     'utf8',
   );
+  // The measurements that answer "is this a phone layout?" — written whether
+  // or not anything failed, because a reader needs the numbers, not a verdict.
+  await writeFile(
+    join(runDirectory, 'viewport-measurements.json'),
+    `${JSON.stringify(
+      {
+        label: PRODUCT_MOTION_LABEL,
+        classification: 'PRODUCT_MOCKUP',
+        notice: MOCKUP_NOTICE,
+        canonicalViewport: {
+          cssWidthPx: viewport.cssWidthPx,
+          cssHeightPx: viewport.cssHeightPx,
+          deviceScaleFactor: viewport.deviceScaleFactor,
+          isMobile: viewport.isMobile,
+          hasTouch: viewport.hasTouch,
+          orientation: viewport.orientation,
+          fullPage: viewport.fullPage,
+          userAgent: viewport.userAgent,
+        },
+        canonicalReferenceCssHeightPx: Math.round(viewport.cssWidthPx * CANONICAL_SCREEN_ASPECT),
+        deviceScreenPx: screen,
+        documentAspect: viewport.cssHeightPx / viewport.cssWidthPx,
+        mappingUniformity: uniformity,
+        documents: renderedDocuments.map((entry) => ({
+          id: entry.id,
+          surface: entry.surface,
+          documentWidthPx: entry.documentWidthPx,
+          documentHeightPx: entry.documentHeightPx,
+          scrollTravelPx: entry.documentHeightPx - screen.heightPx,
+          navigationHeightPx: entry.navigationHeightPx,
+          measurement: entry.measurement,
+          horizontalOverflowPx: Math.max(
+            0,
+            entry.measurement.scrollWidthPx - entry.measurement.clientWidthPx,
+          ),
+          clippedElementCount: entry.measurement.overflowingElements.length,
+        })),
+      },
+      null,
+      2,
+    )}\n`,
+    'utf8',
+  );
+
   await writeFile(
     join(runDirectory, 'calibration.json'),
     `${JSON.stringify(
