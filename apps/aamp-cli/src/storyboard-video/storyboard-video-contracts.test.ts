@@ -1,8 +1,10 @@
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { beforeEach, describe, expect, it } from 'vitest';
+
+import { LTX_CAMERA_MOTIONS, toLtxCameraMotion } from '@combat/providers';
 
 import { findArtefactSafetyProblems, assertStoryboardVideoArtefactSafe } from './artefact-safety';
 import { assertWithinCostCeiling, buildCostEstimate } from './cost-estimate';
@@ -894,5 +896,96 @@ describe('keyframe library', () => {
     await expect(
       resolveKeyframeLibrary({ framesDirectory: directory, runner, binaries }),
     ).rejects.toThrow(/non-empty file/);
+  });
+});
+
+/**
+ * The committed campaign against the provider's real vocabulary.
+ *
+ * Pinned as its own test because it is a live blocker on the advertisement, not
+ * a detail of the adapter: two scenes ask `ltx-hosted` for a move it cannot
+ * perform, so they are refused before any upload. Nothing here decides what the
+ * author should write instead — it records, in executable form, that a decision
+ * is owed.
+ */
+describe('the committed campaign manifest against the LTX vocabulary', () => {
+  it('cannot express HANDHELD_DRIFT, and the two scenes asking for it are named', async () => {
+    const manifest = parseSceneManifest(
+      JSON.parse(
+        await readFile(
+          join(
+            __dirname,
+            '..',
+            '..',
+            'campaigns',
+            'combat-reviews-flagship-02',
+            'scene-manifest.json',
+          ),
+          'utf8',
+        ),
+      ),
+    );
+
+    const blocked = manifest.scenes
+      .filter((scene) => modeReachesGenerationProvider(scene.generationMode))
+      .filter((scene) => {
+        try {
+          toLtxCameraMotion(scene.cameraMotion);
+          return false;
+        } catch {
+          return true;
+        }
+      })
+      .map((scene) => `${scene.sceneNumber}:${scene.cameraMotion}`);
+
+    expect(blocked).toEqual(['8:HANDHELD_DRIFT', '9:HANDHELD_DRIFT']);
+    expect(() => toLtxCameraMotion('HANDHELD_DRIFT')).toThrow(/no handheld quality/i);
+  });
+
+  it('can express every other scene that reaches the provider', async () => {
+    const manifest = parseSceneManifest(
+      JSON.parse(
+        await readFile(
+          join(
+            __dirname,
+            '..',
+            '..',
+            'campaigns',
+            'combat-reviews-flagship-02',
+            'scene-manifest.json',
+          ),
+          'utf8',
+        ),
+      ),
+    );
+    const expressible = manifest.scenes
+      .filter((scene) => modeReachesGenerationProvider(scene.generationMode))
+      .filter((scene) => scene.cameraMotion !== 'HANDHELD_DRIFT');
+
+    expect(expressible.length).toBeGreaterThan(0);
+    for (const scene of expressible) {
+      expect(LTX_CAMERA_MOTIONS).toContain(toLtxCameraMotion(scene.cameraMotion));
+    }
+  });
+
+  it('binds Scene 1 to the move that was actually generated', async () => {
+    const manifest = parseSceneManifest(
+      JSON.parse(
+        await readFile(
+          join(
+            __dirname,
+            '..',
+            '..',
+            'campaigns',
+            'combat-reviews-flagship-02',
+            'scene-manifest.json',
+          ),
+          'utf8',
+        ),
+      ),
+    );
+    const scene = manifest.scenes.find((candidate) => candidate.sceneNumber === 1);
+    expect(scene?.cameraMotion).toBe('SLOW_PUSH_IN');
+    expect(toLtxCameraMotion(scene?.cameraMotion as string)).toBe('dolly_in');
   });
 });

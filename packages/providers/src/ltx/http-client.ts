@@ -106,7 +106,27 @@ export const LTX_ALLOWED_TRANSFER_HOST_SUFFIXES: readonly string[] = ['.ltx.io',
  */
 export const LTX_ALLOWED_UPLOAD_HOSTS: readonly string[] = ['storage.googleapis.com'];
 
-/** Which operation a transfer URL was returned for. Uploads get a wider host list. */
+/**
+ * Hosts a **result download** may additionally target, matched as **exact
+ * hostnames**.
+ *
+ * Deliberately a second list holding the same string rather than one list
+ * shared by both purposes. Upload and download are different operations with
+ * different risks — one sends owned media out, the other pulls bytes in that
+ * become an advertisement — and an allowance granted for one must never be
+ * inherited by the other by accident. Two lists means removing an upload
+ * permission cannot silently remove a download permission, and adding one
+ * cannot silently grant the other. The duplication is the point.
+ *
+ * A URL only reaches this check after an authenticated `GET
+ * /v2/image-to-video/{id}` reported the job `completed` and carried a
+ * `video_url`: `downloadResult` is called from nowhere else. So the host
+ * allowance never applies to an arbitrary URL — only to one this client asked
+ * a job it created for.
+ */
+export const LTX_ALLOWED_RESULT_HOSTS: readonly string[] = ['storage.googleapis.com'];
+
+/** Which operation a transfer URL was returned for. Each purpose has its own host list. */
 export type LtxTransferPurpose = 'UPLOAD' | 'RESULT';
 
 /** 512 MiB. A 10-second 1080x1920 clip is orders of magnitude under this. */
@@ -155,13 +175,16 @@ export interface LtxHostAllowance {
  * credentials-in-URL, non-http(s) schemes and unknown hosts, and it names the
  * host it refused so an operator can tell a misconfiguration from an attack.
  *
- * `purpose` defaults to `RESULT`, the stricter of the two: a caller that forgets
- * to say what it is doing gets the narrower host list, never the wider one.
+ * `purpose` is **required and has no default**. There is no such thing as a
+ * generally-trusted transfer host here: every caller states which operation it
+ * is performing, and gets only that operation's allowance. A default would be
+ * exactly the implicit sharing between upload and download this separation
+ * exists to prevent, and it would apply to whichever call site forgot.
  */
 export function assertTransferUrlAllowed(
   raw: string,
+  purpose: LtxTransferPurpose,
   allowance: LtxHostAllowance = {},
-  purpose: LtxTransferPurpose = 'RESULT',
 ): URL {
   let url: URL;
   try {
@@ -190,12 +213,14 @@ export function assertTransferUrlAllowed(
   const permittedBySuffix = suffixes.some(
     (suffix) => hostname === suffix.replace(/^\./, '') || hostname.endsWith(suffix),
   );
-  // Equality, and only for an upload. `endsWith` here would admit
+  // Equality, and per purpose. `endsWith` here would admit
   // `attacker.storage.googleapis.com`; a substring test would admit
-  // `storage.googleapis.com.example.com`. Neither is this host.
-  const permittedExactlyForUpload =
-    purpose === 'UPLOAD' && LTX_ALLOWED_UPLOAD_HOSTS.includes(hostname);
-  const permitted = permittedBySuffix || permittedExactlyForUpload;
+  // `storage.googleapis.com.example.com`. Neither is this host. The two lists
+  // are consulted separately so neither purpose can inherit the other's grant.
+  const exactHostsForPurpose =
+    purpose === 'UPLOAD' ? LTX_ALLOWED_UPLOAD_HOSTS : LTX_ALLOWED_RESULT_HOSTS;
+  const permittedExactly = exactHostsForPurpose.includes(hostname);
+  const permitted = permittedBySuffix || permittedExactly;
   if (!permitted) {
     throw new LtxRequestError(
       'MALFORMED_RESPONSE',
@@ -292,7 +317,7 @@ export class LtxHttpClient {
    * redirect would otherwise walk around.
    */
   async putUpload(ticket: LtxUploadTicket, bytes: Uint8Array, contentType: string): Promise<void> {
-    const target = assertTransferUrlAllowed(ticket.upload_url, this.hostAllowance, 'UPLOAD');
+    const target = assertTransferUrlAllowed(ticket.upload_url, 'UPLOAD', this.hostAllowance);
     const headers: Record<string, string> = {
       'content-type': contentType,
       ...ticket.required_headers,
@@ -377,15 +402,23 @@ export class LtxHttpClient {
    * 404 or 410 here is `EXPIRED` rather than a generic rejection: the
    * distinction is the difference between "re-request this result" and
    * "regenerate this scene".
+   *
+   * Called from `fetchResult` and nowhere else, which is what makes the
+   * `RESULT` host allowance narrow in practice as well as in principle: the URL
+   * always came from an authenticated status response for a job this client
+   * created. **Redirects are refused, not followed** — a cross-host redirect
+   * would fetch the advertisement's pixels from a host that never passed the
+   * allowlist.
    */
   async downloadResult(videoUrl: string): Promise<Uint8Array> {
-    const target = assertTransferUrlAllowed(videoUrl, this.hostAllowance);
+    const target = assertTransferUrlAllowed(videoUrl, 'RESULT', this.hostAllowance);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.requestTimeoutMs);
     let response: Response;
     try {
       response = await this.fetchImpl(target.toString(), {
         method: 'GET',
+        redirect: 'manual',
         signal: controller.signal,
       });
     } catch (error) {
@@ -394,6 +427,12 @@ export class LtxHttpClient {
       clearTimeout(timer);
     }
 
+    if (isRedirect(response)) {
+      throw new LtxRequestError(
+        'MALFORMED_RESPONSE',
+        `the LTX result at ${redactUrl(target.toString())} answered with a redirect. It is refused rather than followed: the bytes that become an advertisement are never fetched from a host that did not pass the allowlist.`,
+      );
+    }
     if (response.status === 404 || response.status === 410) {
       throw new LtxRequestError(
         'EXPIRED',

@@ -302,30 +302,28 @@ bottom navigation visible and no wide-breakpoint navigation anywhere; hero
 mapping uniformity 1.0003. See the rules below and
 `docs/runbooks/product-motion-proof.md`.
 
-**The capped Scene-1 LTX acceptance path is built, and the live API refused to
-be reached on a host this repository trusts — so no paid generation has been
-made.** `pnpm aamp:ltx-scene-01` takes the authoritative high-quality Scene-1
-plate, prices exactly one LTX 2.3 Fast request, and — after inspection — hands a
-person a raw clip, a composited review cut, a comparison gallery and a `PENDING`
-review. **Proven at zero cost:** deterministic `FRAMEnPLATE.*` → `FRAME-NN`
-discovery over the operator's real folder with all ten plates measured and
-checksummed, a dry run making zero network requests and pricing the run at 36¢
-against a 40¢ ceiling, and 43 tests — the full lifecycle against the fake LTX
-server with real FFmpeg (one request, cache hit costing nothing, 402 with zero
-submissions, missing key with zero requests), plus ten source-hygiene checks.
-**Proven against the live `api.ltx.io`, at zero cost:** the endpoint exists and
-accepts the credential; `POST /v1/upload` signs to `storage.googleapis.com`; and
-**the FRAME-01 plate uploaded successfully** through that signed PUT once the
-exact-hostname authorisation was added — the first bytes this repository has
-moved to a live generation provider. **Not proven, and the blocker is exact:**
-`POST /v2/image-to-video` answered **HTTP 400** before any job existed —
-`Invalid input for 'camera_motion': expected one of
-"dolly_in"|"dolly_out"|"dolly_left"|"dolly_right"|"jib_up"|"jib_down"|"static"|"focus_shift"`.
-Three network requests in total, **zero billable submissions, nothing charged**,
-no job, no clip, no composite. Nothing was retried and the single authorised
-submission is still unspent. `LTX_RESPONSE_CONTRACT_STATUS` stays
-`DOCUMENTED_NOT_EXECUTED` and no LTX-driven clip exists. See the "Scene-1
-acceptance" rules below and `docs/runbooks/ltx-scene-01-acceptance.md`.
+**The first real paid AAMP storyboard-to-LTX generation is done, and the clip
+is not approved.** `pnpm aamp:ltx-scene-01` took the authoritative high-quality
+Scene-1 plate through one capped `ltx-2-3-fast` request to a genuine
+1080x1920 clip. **Proven live:** exactly **1 of 1** authorised billable
+submission; **36¢** charged against a **40¢** ceiling; the plate uploaded
+through a signed PUT on `storage.googleapis.com` and the result downloaded from
+the same host under a _separate_ grant; an ffprobe-verified 1080x1920 h264
+yuv420p MP4 at 24.000 fps and 6.042 s with **no audio stream**; first-frame
+agreement **0.9988** against FRAME-01 and motion energy **2.0534**; 17 of 17
+binding checks `PASS`, zero measured defects; the post-LTX `FIGHTS THIS WEEKEND`
+notification composited over real generated footage; and no credential, signed
+URL or query string in any artefact. **Also proven at zero cost:** 68 tests,
+including a camera-motion boundary that refuses before any network access and a
+`--dry-run` that reads no key. **Not proven — creative quality, and the clip
+fails its own brief:** the brief asked for a ~3% push holding the same framing,
+and the model delivered roughly **1.75x**, ending with the subject's eyes
+outside the frame, plus a gaze lift to the lens in the opening seconds. Identity,
+hands, rear-facing phone rigidity and the absence of invented graphics are all
+correct. **Recommendation on the evidence: reject on composition drift.** The
+review is `PENDING`, nothing was retried, and Scenes 2–10 were not generated.
+See the "Scene-1 acceptance" rules below and
+`docs/runbooks/ltx-scene-01-acceptance.md`.
 
 ## Scene-1 LTX acceptance — permanent rules
 
@@ -341,6 +339,32 @@ acceptance" rules below and `docs/runbooks/ltx-scene-01-acceptance.md`.
   allowance that quietly covered it would be the widening this guard exists to
   prevent. Never add a per-invocation override or let a host arrive from
   configuration.
+- **The camera-motion vocabulary is provider-neutral and stays whole.** LTX
+  accepting eight strings is not a reason to delete a move from AAMP.
+  `ltx/camera-motion.ts` is the single serialization boundary, and it maps only
+  pairs that are **the same physical move**: `SLOW_PUSH_IN → dolly_in`,
+  `SLOW_PULL_OUT → dolly_out`, the two lateral tracks to `dolly_left`/`dolly_right`,
+  `STATIC → static`. A tilt is a rotation and a jib is a translation, so
+  `TILT_UP`/`TILT_DOWN` are **refused, not mapped to `jib_up`/`jib_down`** —
+  nearest-looking is not equivalent. `HANDHELD_DRIFT` and the two orbits have no
+  counterpart at all. `CRANE_DOWN` is not in `CAMERA_MOTIONS`, so there is
+  nothing to map; were it added as a vertical camera descent, `jib_down` would
+  be its defensible equivalent.
+- **An unsupported motion is a typed `UNSUPPORTED_PROVIDER_CAMERA_MOTION`
+  raised before any network access**, naming the value and `ltx-hosted`. Never
+  silently omit the field, never substitute `static`, and never let the prose
+  prompt carry it as a hidden fallback — a request whose structured field and
+  prose disagree lets the model follow either. No internal enum name may ever
+  reach the wire, and no speed, strength or intensity field is invented to carry
+  "slow": the API defines none, and a fabricated field is a guess with a number
+  in it.
+- **Upload and result hosts are two grants, never one.**
+  `LTX_ALLOWED_UPLOAD_HOSTS` and `LTX_ALLOWED_RESULT_HOSTS` hold the same string
+  today and must stay separate lists, so removing or adding one permission
+  cannot silently move the other. `assertTransferUrlAllowed` takes the purpose
+  as a **required argument with no default** — there is no generally-trusted
+  transfer host, and no call site can inherit a grant by forgetting to say what
+  it is doing.
 - **A redirect away from a signed upload target is refused, never followed.**
   `redirect: 'manual'` plus an explicit refusal, because following one would
   carry the bytes _and the ticket's signature headers_ to a host that never

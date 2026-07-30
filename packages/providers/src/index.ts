@@ -5,6 +5,7 @@ export * from './video-generation.comfyui';
 export * from './video-generation.ltx-hosted';
 export * from './video-generation-factory';
 export * from './ltx/models';
+export * from './ltx/camera-motion';
 export * from './ltx/protocol';
 export * from './ltx/http-client';
 export * from './video-generation-profiles';

@@ -551,7 +551,12 @@ export function translateProviderError(
                 ? 'EXPIRED_RESULT'
                 : error.ltxKind === 'TIMEOUT'
                   ? 'POLLING_TIMEOUT'
-                  : error.ltxKind === 'UNSUPPORTED_REQUEST'
+                  : error.ltxKind === 'UNSUPPORTED_REQUEST' ||
+                      // A move this provider cannot express is a request that
+                      // was refused before any network access, not a provider
+                      // failure — same class of operator action as an
+                      // unsupported duration: edit the request, do not retry.
+                      error.ltxKind === 'UNSUPPORTED_PROVIDER_CAMERA_MOTION'
                     ? 'UNSUPPORTED_MODEL_OR_DURATION'
                     : fallback;
     return new StoryboardVideoError(kind, `scene ${sceneNumber}: ${error.message}`, sceneNumber);

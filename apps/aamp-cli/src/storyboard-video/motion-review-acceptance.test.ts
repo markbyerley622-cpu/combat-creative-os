@@ -1,6 +1,16 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import {
+  copyFile,
+  cp,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -55,13 +65,27 @@ if (!available) {
 }
 
 const API_KEY = 'ltx_test_key_do_not_use_0123456789';
-const CAMPAIGN_DIRECTORY = resolve(
+const CAMPAIGN_SOURCE_DIRECTORY = resolve(
   __dirname,
   '..',
   '..',
   'campaigns',
   'combat-reviews-flagship-02',
 );
+
+/**
+ * A fixture copy of the campaign, with the two `HANDHELD_DRIFT` scenes retimed
+ * to a motion `ltx-hosted` can express.
+ *
+ * The committed campaign asks LTX for a handheld drift on scenes 8 and 9, and
+ * that provider has no handheld value at all — so those scenes are now refused
+ * before upload, by design. This suite is about the *motion gate*, not the
+ * camera vocabulary, and it needs ten resolvable scenes to exercise one.
+ * Choosing a motion here is a fixture concern; the advertisement's own
+ * manifest is left exactly as its author wrote it, and the refusal it now
+ * provokes is pinned by its own test in `storyboard-video-contracts`.
+ */
+let campaignDirectory: string;
 const REVIEWER = 'Riki Taylor';
 
 /** Scenes whose source is a clip the operator animated outside this pipeline. */
@@ -205,6 +229,22 @@ async function makeTone(target: string, frequency: number, seconds: number): Pro
 beforeAll(async () => {
   if (!available) return;
   workspace = await mkdtemp(join(tmpdir(), 'aamp-motion-acceptance-'));
+
+  campaignDirectory = join(workspace, 'campaign');
+  await cp(CAMPAIGN_SOURCE_DIRECTORY, campaignDirectory, { recursive: true });
+  const fixtureManifestPath = join(campaignDirectory, 'scene-manifest.json');
+  const fixtureManifest = JSON.parse(await readFile(fixtureManifestPath, 'utf8')) as {
+    scenes: { cameraMotion: string }[];
+  };
+  for (const scene of fixtureManifest.scenes) {
+    if (scene.cameraMotion === 'HANDHELD_DRIFT') scene.cameraMotion = 'STATIC';
+  }
+  await writeFile(
+    fixtureManifestPath,
+    `${JSON.stringify(fixtureManifest, null, 2)}
+`,
+    'utf8',
+  );
   storyboardRoot = join(workspace, 'storyboard');
   framesDirectory = join(workspace, 'keyframes');
   manualClipsDirectory = join(framesDirectory, 'generated-clips');
@@ -505,7 +545,7 @@ async function runOnce(
     framesDirectory,
     outputDirectory,
     workPackRoot,
-    campaignDirectory: CAMPAIGN_DIRECTORY,
+    campaignDirectory,
     footagePackRoot,
     preGeneratedClipsDirectory: manualClipsDirectory,
     reviewDirectory,
@@ -546,7 +586,7 @@ async function review(
       '--pre-generated-clips-dir',
       manualClipsDirectory,
       '--campaign-dir',
-      CAMPAIGN_DIRECTORY,
+      campaignDirectory,
       '--review-dir',
       reviewDirectory,
     ],

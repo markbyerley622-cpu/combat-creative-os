@@ -13,7 +13,19 @@ import {
   LtxModelSupportError,
   smallestCoveringDuration,
 } from './ltx/models';
-import { assertTransferUrlAllowed, LtxRequestError, redactUrl } from './ltx/http-client';
+import {
+  assertTransferUrlAllowed,
+  LtxRequestError,
+  redactUrl,
+  LTX_ALLOWED_RESULT_HOSTS,
+  LTX_ALLOWED_UPLOAD_HOSTS,
+} from './ltx/http-client';
+import {
+  toLtxCameraMotion,
+  LtxCameraMotionError,
+  LTX_CAMERA_MOTIONS,
+  LTX_CAMERA_MOTION_MAP,
+} from './ltx/camera-motion';
 import { LTX_RESPONSE_CONTRACT_STATUS } from './ltx/protocol';
 import {
   createLtxHostedProvider,
@@ -123,7 +135,8 @@ describe('LTX hosted — upload contract', () => {
       resolution: '1080x1920',
       fps: 24,
       generate_audio: false,
-      camera_motion: 'SLOW_PUSH_IN',
+      // The internal name never reaches the wire; the boundary translated it.
+      camera_motion: 'dolly_in',
     });
     expect((submitCall?.body as { image_uri: string }).image_uri).toMatch(/^ltx:\/\/uploads\//);
   });
@@ -313,23 +326,27 @@ describe('LTX hosted — no credential or signed URL escapes', () => {
 
 describe('LTX hosted — transfer URLs are untrusted input', () => {
   it('refuses a signed URL on an unexpected host', () => {
-    expect(() => assertTransferUrlAllowed('https://evil.example.com/x')).toThrow(
+    expect(() => assertTransferUrlAllowed('https://evil.example.com/x', 'RESULT')).toThrow(
       /unexpected host/i,
     );
   });
 
   it('refuses a non-https transfer URL', () => {
-    expect(() => assertTransferUrlAllowed('http://uploads.ltx.io/x')).toThrow(/non-https/i);
+    expect(() => assertTransferUrlAllowed('http://uploads.ltx.io/x', 'RESULT')).toThrow(
+      /non-https/i,
+    );
   });
 
   it('refuses a URL embedding credentials', () => {
-    expect(() => assertTransferUrlAllowed('https://user:pw@uploads.ltx.io/x')).toThrow(
+    expect(() => assertTransferUrlAllowed('https://user:pw@uploads.ltx.io/x', 'RESULT')).toThrow(
       /credentials/i,
     );
   });
 
   it('accepts an ltx.io host', () => {
-    expect(assertTransferUrlAllowed('https://uploads.ltx.io/x?sig=1').host).toBe('uploads.ltx.io');
+    expect(assertTransferUrlAllowed('https://uploads.ltx.io/x?sig=1', 'RESULT').host).toBe(
+      'uploads.ltx.io',
+    );
   });
 });
 
@@ -346,7 +363,6 @@ describe('LTX hosted — the authorised signed-upload host', () => {
   it('accepts exactly https://storage.googleapis.com for an upload', () => {
     const url = assertTransferUrlAllowed(
       'https://storage.googleapis.com/bucket/object?X-Goog-Signature=abc',
-      {},
       UPLOAD,
     );
     expect(url.host).toBe('storage.googleapis.com');
@@ -354,24 +370,24 @@ describe('LTX hosted — the authorised signed-upload host', () => {
 
   it('refuses it over http', () => {
     expect(() =>
-      assertTransferUrlAllowed('http://storage.googleapis.com/bucket/object', {}, UPLOAD),
+      assertTransferUrlAllowed('http://storage.googleapis.com/bucket/object', UPLOAD),
     ).toThrow(/non-https/i);
   });
 
   it('refuses a suffixed lookalike', () => {
     expect(() =>
-      assertTransferUrlAllowed('https://storage.googleapis.com.example.com/x', {}, UPLOAD),
+      assertTransferUrlAllowed('https://storage.googleapis.com.example.com/x', UPLOAD),
     ).toThrow(/unexpected host/i);
   });
 
   it('refuses a subdomain of the authorised host', () => {
     expect(() =>
-      assertTransferUrlAllowed('https://attacker.storage.googleapis.com/x', {}, UPLOAD),
+      assertTransferUrlAllowed('https://attacker.storage.googleapis.com/x', UPLOAD),
     ).toThrow(/unexpected host/i);
   });
 
   it('refuses a hyphenated lookalike', () => {
-    expect(() => assertTransferUrlAllowed('https://storage-googleapis.com/x', {}, UPLOAD)).toThrow(
+    expect(() => assertTransferUrlAllowed('https://storage-googleapis.com/x', UPLOAD)).toThrow(
       /unexpected host/i,
     );
   });
@@ -383,19 +399,21 @@ describe('LTX hosted — the authorised signed-upload host', () => {
       'https://storage.cloud.google.com/x',
       'https://storage.googleapis.evil.com/x',
     ]) {
-      expect(() => assertTransferUrlAllowed(host, {}, UPLOAD)).toThrow(/unexpected host/i);
+      expect(() => assertTransferUrlAllowed(host, UPLOAD)).toThrow(/unexpected host/i);
     }
   });
 
-  it('does not extend the allowance to a result download', () => {
-    // Uploads and results are different operations with different risks. A
-    // result signed to this host is a separate, explicit decision.
-    expect(() =>
-      assertTransferUrlAllowed('https://storage.googleapis.com/bucket/out.mp4', {}, 'RESULT'),
-    ).toThrow(/unexpected host/i);
-    expect(() => assertTransferUrlAllowed('https://storage.googleapis.com/bucket/out.mp4')).toThrow(
-      /unexpected host/i,
-    );
+  it('grants each purpose from its own list, never implicitly from the other', () => {
+    // The two lists happen to hold the same host today. What is being proven is
+    // that the *grants* are separate: neither purpose is served by the other's
+    // list, and there is no default purpose that could quietly serve both.
+    expect(LTX_ALLOWED_UPLOAD_HOSTS).toEqual(['storage.googleapis.com']);
+    expect(LTX_ALLOWED_RESULT_HOSTS).toEqual(['storage.googleapis.com']);
+    expect(LTX_ALLOWED_UPLOAD_HOSTS).not.toBe(LTX_ALLOWED_RESULT_HOSTS);
+
+    // A caller must say which operation it is performing. There is no arity
+    // that omits the purpose, so an unrelated transfer cannot inherit a grant.
+    expect(assertTransferUrlAllowed.length).toBeGreaterThanOrEqual(2);
   });
 
   it('refuses a redirect away from the upload target rather than following it', async () => {
@@ -569,5 +587,253 @@ describe('LtxRequestError', () => {
         'REJECTED',
       ).ltxKind,
     ).toBe('REJECTED');
+  });
+});
+
+/**
+ * The camera-motion serialization boundary.
+ *
+ * AAMP's vocabulary is provider-neutral and stays whole; this is the one place
+ * it is translated into the eight values the live API supplied in its own 400
+ * response. The tests that matter most are the refusals: a nearest-looking
+ * substitute is a different shot from the one the storyboard approved.
+ */
+describe('LTX hosted — camera motion is serialized, never leaked or substituted', () => {
+  it('serializes SLOW_PUSH_IN as exactly dolly_in', () => {
+    expect(toLtxCameraMotion('SLOW_PUSH_IN')).toBe('dolly_in');
+  });
+
+  it('maps every supported internal value to an official LTX value', () => {
+    expect([...LTX_CAMERA_MOTION_MAP.entries()]).toEqual([
+      ['STATIC', 'static'],
+      ['SLOW_PUSH_IN', 'dolly_in'],
+      ['SLOW_PULL_OUT', 'dolly_out'],
+      ['LATERAL_TRACK_LEFT', 'dolly_left'],
+      ['LATERAL_TRACK_RIGHT', 'dolly_right'],
+    ]);
+    for (const [internal, wire] of LTX_CAMERA_MOTION_MAP) {
+      expect(LTX_CAMERA_MOTIONS).toContain(wire);
+      expect(toLtxCameraMotion(internal)).toBe(wire);
+      // No internal enum name may ever be a legal wire value.
+      expect(LTX_CAMERA_MOTIONS).not.toContain(internal as never);
+    }
+  });
+
+  it('passes an already-official value through unchanged', () => {
+    for (const wire of LTX_CAMERA_MOTIONS) expect(toLtxCameraMotion(wire)).toBe(wire);
+  });
+
+  it('refuses every internal value with no defensible equivalent, by name', () => {
+    for (const internal of ['HANDHELD_DRIFT', 'ORBIT_LEFT', 'ORBIT_RIGHT']) {
+      let caught: unknown = null;
+      try {
+        toLtxCameraMotion(internal);
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toBeInstanceOf(LtxCameraMotionError);
+      const typed = caught as LtxCameraMotionError;
+      expect(typed.kind).toBe('UNSUPPORTED_PROVIDER_CAMERA_MOTION');
+      expect(typed.providerName).toBe('ltx-hosted');
+      expect(typed.requestedCameraMotion).toBe(internal);
+      expect(typed.message).toContain(internal);
+    }
+  });
+
+  it('refuses a tilt rather than substituting a jib — they are different moves', () => {
+    for (const internal of ['TILT_UP', 'TILT_DOWN']) {
+      expect(() => toLtxCameraMotion(internal)).toThrow(LtxCameraMotionError);
+      expect(() => toLtxCameraMotion(internal)).toThrow(/different moves/i);
+    }
+    // And the substitution is genuinely absent, not merely discouraged.
+    expect([...LTX_CAMERA_MOTION_MAP.values()]).not.toContain('jib_up');
+    expect([...LTX_CAMERA_MOTION_MAP.values()]).not.toContain('jib_down');
+  });
+
+  it('refuses CRANE_DOWN, which no internal contract defines', () => {
+    expect(() => toLtxCameraMotion('CRANE_DOWN')).toThrow(LtxCameraMotionError);
+    expect(LTX_CAMERA_MOTION_MAP.has('CRANE_DOWN')).toBe(false);
+  });
+
+  it('never substitutes static and never silently omits the field', () => {
+    for (const internal of ['HANDHELD_DRIFT', 'ORBIT_LEFT', 'TILT_UP', 'CRANE_DOWN', '']) {
+      expect(() => toLtxCameraMotion(internal)).toThrow();
+    }
+    expect(() => toLtxCameraMotion('HANDHELD_DRIFT')).toThrow(/refused rather than omitted/i);
+  });
+
+  it('refuses before any network access — nothing is uploaded and no job is created', async () => {
+    const server = new FakeLtxServer();
+    const provider = build(server);
+    const error = await provider
+      .submit(
+        submitInput({
+          params: {
+            durationSeconds: 6,
+            aspectRatio: '9:16',
+            resolution: '1080x1920',
+            frameRate: 24,
+            providerOptions: { generateAudio: false, cameraMotion: 'ORBIT_LEFT' },
+          },
+        }),
+      )
+      .catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(LtxVideoGenerationError);
+    expect((error as LtxVideoGenerationError).ltxKind).toBe('UNSUPPORTED_PROVIDER_CAMERA_MOTION');
+    expect(String(error)).toContain('ORBIT_LEFT');
+    expect(String(error)).toContain('ltx-hosted');
+    // The decisive assertion: not one request left this process.
+    expect(server.requests).toHaveLength(0);
+    expect(server.submissions).toBe(0);
+  });
+
+  it('puts no internal enum name anywhere in the outgoing JSON', async () => {
+    const server = new FakeLtxServer();
+    await build(server).submit(submitInput());
+
+    const wire = JSON.stringify(server.requests.map((request) => request.body));
+    for (const internal of [
+      'STATIC',
+      'SLOW_PUSH_IN',
+      'SLOW_PULL_OUT',
+      'HANDHELD_DRIFT',
+      'LATERAL_TRACK_LEFT',
+      'LATERAL_TRACK_RIGHT',
+      'TILT_UP',
+      'TILT_DOWN',
+      'ORBIT_LEFT',
+      'ORBIT_RIGHT',
+    ]) {
+      expect(wire).not.toContain(internal);
+    }
+  });
+
+  it('sends the Scene-1 body the live contract expects, and no invented field', async () => {
+    const server = new FakeLtxServer();
+    await build(server).submit(submitInput());
+    const body = server.requests.find((r) => r.path === '/v2/image-to-video')?.body as Record<
+      string,
+      unknown
+    >;
+
+    expect(Object.keys(body).sort()).toEqual(
+      [
+        'camera_motion',
+        'duration',
+        'fps',
+        'generate_audio',
+        'image_uri',
+        'model',
+        'prompt',
+        'resolution',
+      ].sort(),
+    );
+    expect(body.model).toBe('ltx-2-3-fast');
+    expect(body.duration).toBe(6);
+    expect(body.resolution).toBe('1080x1920');
+    expect(body.fps).toBe(24);
+    expect(body.generate_audio).toBe(false);
+    expect(body.camera_motion).toBe('dolly_in');
+    // No speed, strength or intensity field is invented to carry "slow".
+    for (const invented of ['speed', 'strength', 'intensity', 'motion_strength', 'camera_speed']) {
+      expect(body[invented]).toBeUndefined();
+    }
+  });
+});
+
+/**
+ * The result download, authorised separately from the upload.
+ */
+describe('LTX hosted — the authorised result-download host', () => {
+  const RESULT = 'RESULT' as const;
+
+  it('accepts exactly https://storage.googleapis.com for a result', () => {
+    expect(
+      assertTransferUrlAllowed(
+        'https://storage.googleapis.com/bucket/out.mp4?X-Goog-Signature=abc',
+        RESULT,
+      ).host,
+    ).toBe('storage.googleapis.com');
+  });
+
+  it('refuses it over http', () => {
+    expect(() =>
+      assertTransferUrlAllowed('http://storage.googleapis.com/bucket/out.mp4', RESULT),
+    ).toThrow(/non-https/i);
+  });
+
+  it('refuses lookalikes and subdomains', () => {
+    for (const host of [
+      'https://storage.googleapis.com.example.com/x',
+      'https://attacker.storage.googleapis.com/x',
+      'https://storage-googleapis.com/x',
+      'https://www.googleapis.com/x',
+      'https://storage.cloud.google.com/x',
+    ]) {
+      expect(() => assertTransferUrlAllowed(host, RESULT)).toThrow(/unexpected host/i);
+    }
+  });
+
+  it('downloads a completed result from the authorised host and hashes the bytes', async () => {
+    const payload = new Uint8Array([0, 0, 0, 24, 102, 116, 121, 112, 9, 9, 9]);
+    const server = new FakeLtxServer({
+      transferHost: 'storage.googleapis.com',
+      defaultJob: { videoBytes: payload },
+    });
+    // No `additionalTransferHostSuffixes`: the host passes on the RESULT
+    // allowance alone, which is the property under test.
+    const provider = build(server, { hostAllowance: {} });
+    const handle = await provider.submit(submitInput());
+    await provider.getStatus(handle);
+
+    const [candidate] = await provider.fetchResult(handle);
+    expect(candidate?.sizeBytes).toBe(payload.byteLength);
+    expect(candidate?.checksumSha256).toMatch(/^[0-9a-f]{64}$/);
+    const bytes = await readFile(candidate?.localPath as string);
+    expect(new Uint8Array(bytes)).toEqual(payload);
+  });
+
+  it('refuses a redirect on the result rather than following it', async () => {
+    const server = new FakeLtxServer({
+      transferHost: 'storage.googleapis.com',
+      defaultJob: { downloadStatus: 302 },
+    });
+    const provider = build(server, { hostAllowance: {} });
+    const handle = await provider.submit(submitInput());
+    await provider.getStatus(handle);
+
+    const error = await provider.fetchResult(handle).catch((e: unknown) => e);
+    expect(String(error)).toMatch(/redirect/i);
+    expect(String(error)).toMatch(/refused rather than followed/i);
+  });
+
+  it('keeps the signed result URL and its query out of every message', async () => {
+    const server = new FakeLtxServer({
+      transferHost: 'storage.googleapis.com',
+      defaultJob: { downloadStatus: 500 },
+    });
+    const provider = build(server, { hostAllowance: {} });
+    const handle = await provider.submit(submitInput());
+    await provider.getStatus(handle);
+
+    const error = await provider.fetchResult(handle).catch((e: unknown) => e);
+    const text = String(error);
+    expect(text).not.toContain('?');
+    expect(text).not.toContain('signature');
+    expect(text).not.toContain(API_KEY);
+  });
+
+  it('exposes no signed URL on the candidate it returns', async () => {
+    const server = new FakeLtxServer({ transferHost: 'storage.googleapis.com' });
+    const provider = build(server, { hostAllowance: {} });
+    const handle = await provider.submit(submitInput());
+    await provider.getStatus(handle);
+
+    const [candidate] = await provider.fetchResult(handle);
+    const serialised = JSON.stringify(candidate);
+    expect(serialised).not.toContain('signature');
+    expect(serialised).not.toContain('storage.googleapis.com');
+    expect(serialised).not.toContain(API_KEY);
   });
 });

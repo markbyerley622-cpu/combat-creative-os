@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { basename, extname, join, resolve } from 'node:path';
 
 import { describeReferenceProvenance, gateReferenceImages } from './comfyui/reference-rights';
+import { LtxCameraMotionError, toLtxCameraMotion, type LtxCameraMotion } from './ltx/camera-motion';
 import {
   LtxHttpClient,
   LtxRequestError,
@@ -121,7 +122,8 @@ export function mapLtxFailureKind(kind: LtxFailureKind): {
 export class LtxVideoGenerationError extends VideoGenerationError {
   constructor(
     failure: VideoGenerationFailure,
-    public readonly ltxKind: LtxFailureKind | 'UNSUPPORTED_REQUEST',
+    public readonly ltxKind:
+      LtxFailureKind | 'UNSUPPORTED_REQUEST' | 'UNSUPPORTED_PROVIDER_CAMERA_MOTION',
     public readonly retryAfterSeconds?: number,
   ) {
     super(failure);
@@ -131,6 +133,15 @@ export class LtxVideoGenerationError extends VideoGenerationError {
 
 function toLtxError(error: unknown): LtxVideoGenerationError {
   if (error instanceof LtxVideoGenerationError) return error;
+  // Preserved as its own kind rather than folded into UNSUPPORTED_REQUEST: an
+  // operator reading "this provider cannot express that move" takes a different
+  // action from one reading "this duration is unsupported".
+  if (error instanceof LtxCameraMotionError) {
+    return new LtxVideoGenerationError(
+      { reason: 'UNSUPPORTED_CAPABILITY', retryable: false, message: error.message },
+      'UNSUPPORTED_PROVIDER_CAMERA_MOTION',
+    );
+  }
   if (error instanceof LtxRequestError) {
     const mapped = mapLtxFailureKind(error.kind);
     return new LtxVideoGenerationError(
@@ -239,6 +250,14 @@ export class LtxHostedVideoGenerationProvider implements VideoGenerationProvider
       );
       const fps = assertSupportedLtxFps(input.params.frameRate ?? 0);
 
+      // Translated here, before the upload, so a scene this provider cannot
+      // express costs nothing and transfers nothing. Doing it at the point the
+      // body is assembled would mean an image had already been sent.
+      const options = readProviderOptions(input.params.providerOptions);
+      const cameraMotion: LtxCameraMotion | undefined = options.cameraMotion
+        ? toLtxCameraMotion(options.cameraMotion)
+        : undefined;
+
       // Same rights gate the ComfyUI adapter uses. Rights policy lives in one
       // place so two adapters cannot become two policies.
       const references = gateReferenceImages(input.referenceImages ?? [], { now: this.now() });
@@ -255,7 +274,6 @@ export class LtxHostedVideoGenerationProvider implements VideoGenerationProvider
       const imageUri = await this.uploadReference(startFrame);
       const lastFrameUri = lastFrame ? await this.uploadReference(lastFrame) : undefined;
 
-      const options = readProviderOptions(input.params.providerOptions);
       const submission = await this.client.submitImageToVideo(
         {
           image_uri: imageUri,
@@ -266,7 +284,9 @@ export class LtxHostedVideoGenerationProvider implements VideoGenerationProvider
           fps,
           generate_audio: options.generateAudio,
           ...(lastFrameUri ? { last_frame_uri: lastFrameUri } : {}),
-          ...(options.cameraMotion ? { camera_motion: options.cameraMotion } : {}),
+          // Already an official LTX value. An internal enum name cannot reach
+          // this field: the only path to it is through the boundary above.
+          ...(cameraMotion ? { camera_motion: cameraMotion } : {}),
         },
         input.idempotencyKey,
       );

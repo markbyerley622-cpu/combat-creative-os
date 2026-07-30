@@ -3822,85 +3822,50 @@ post-LTX notification composite, a comparison gallery, and a human review left
 `PENDING`. It renders no master and generates no other scene. Runbook:
 `docs/runbooks/ltx-scene-01-acceptance.md`.
 
-**The live API was contacted twice, and both attempts cost nothing.** The first
-found that `POST /v1/upload` signs its PUT target to **`storage.googleapis.com`**,
-outside `LTX_ALLOWED_TRANSFER_HOST_SUFFIXES`; the client refused to send bytes
-there, which is why that attempt spent nothing rather than moving owned media to
-an unverified host. That host was then authorised narrowly and deliberately:
-`LTX_ALLOWED_UPLOAD_HOSTS` holds the single exact hostname, matched by equality,
-for uploads only, over HTTPS only, with redirects refused rather than followed,
-and with result downloads deliberately **not** covered. Nine focused tests hold
-each property, including the three lookalikes.
+**The live API was contacted three times. The first two cost nothing and each
+found a real contract mismatch; the third produced the clip.** Attempt one found
+`POST /v1/upload` signing its PUT target to `storage.googleapis.com`, outside
+the suffix allowlist, and the client refused to send bytes there. Attempt two,
+after that host was authorised, uploaded the plate and was answered **HTTP 400**
+on `camera_motion` before a job existed — the API named its own eight values.
+Attempt three, after the serialization boundary was built, submitted once and
+succeeded.
 
-**The plate then uploaded successfully — the first bytes this repository has
-moved to a live generation provider — and the run is blocked one step later.**
-`POST /v2/image-to-video` answered **HTTP 400** before any job existed:
-`Invalid input for 'camera_motion': expected one of "dolly_in"|"dolly_out"|
-"dolly_left"|"dolly_right"|"jib_up"|"jib_down"|"static"|"focus_shift"`. Three
-network requests in total, **zero billable submissions, nothing charged**, no
-job, no clip. Nothing was retried; the single authorised submission is unspent.
-`LTX_RESPONSE_CONTRACT_STATUS` stays `DOCUMENTED_NOT_EXECUTED` and **no
-LTX-driven clip exists**.
+**One billable submission, 36¢ against a 40¢ ceiling.** The result is an
+ffprobe-verified 1080x1920 h264/yuv420p MP4 at 24.000 fps and 6.042 s with no
+audio stream, sha256 `ecc2dcb5…`, first-frame agreement **0.9988** against
+FRAME-01, motion energy **2.0534**, 17 of 17 binding checks `PASS` and zero
+measured defects. The plate uploaded through the signed PUT and the result
+downloaded from the same host under a **separate** grant. No credential, signed
+URL or query string reached any artefact. `paidProviderCalls: 1`,
+`scenesNotGenerated: [2…10]`, `finalAdvertisementRendered: false`.
 
-**Reconciling the two camera vocabularies is a creative decision, not a
-rename.** Six of this repository's ten `CAMERA_MOTIONS` map cleanly onto the
-API's eight; `HANDHELD_DRIFT`, `ORBIT_LEFT` and `ORBIT_RIGHT` have no
-counterpart at all. This repository's own rule is that a closed vocabulary
-listing what is not implemented is decoration, so what happens to those three —
-refused by name, or removed — is the operator's call, and it governs the nine
-scenes after this one rather than just Scene 1.
+**The camera-motion boundary keeps the vocabulary provider-neutral.**
+`ltx/camera-motion.ts` maps only pairs that are the same physical move —
+`SLOW_PUSH_IN → dolly_in`, `SLOW_PULL_OUT → dolly_out`, the lateral tracks to
+`dolly_left`/`dolly_right`, `STATIC → static`. `TILT_UP`/`TILT_DOWN` are refused
+rather than mapped to `jib_up`/`jib_down`, because a tilt rotates the camera and
+a jib translates it; `HANDHELD_DRIFT` and the orbits have no counterpart;
+`CRANE_DOWN` is not in `CAMERA_MOTIONS` at all. A refused value raises a typed
+`UNSUPPORTED_PROVIDER_CAMERA_MOTION` **before any network access**, naming the
+value and the provider — never omitted, never replaced with `static`, never left
+to the prompt to imply.
 
-**New module: `apps/aamp-cli/src/scene-acceptance/`.** It reuses rather than
-reimplements: the existing LTX adapter and rate card, the existing prompt gate,
-the existing motion inspection and review identity, the existing generation
-cache, the existing artefact-safety walk and the existing exit-code table. What
-is new is the plate discovery, the one-request guard, the notification
-composite, the whole-clip survey and the pending review record.
+**Two transfer grants, never one.** `LTX_ALLOWED_UPLOAD_HOSTS` and
+`LTX_ALLOWED_RESULT_HOSTS` are separate lists holding the same host, and
+`assertTransferUrlAllowed` takes the purpose as a required argument with no
+default, so neither operation can inherit the other's permission. Redirects are
+refused on both paths.
 
-**Discovery is deterministic and every ambiguity is a refusal.**
-`FRAMEnPLATE.*` maps to `FRAME-NN` case-insensitively; two files resolving to
-one number, a plate-shaped name with an unusable extension, a landscape plate, a
-symlink escaping the folder and an undecodable file are each refused by name.
-A plate-shaped file with a bad extension is refused rather than skipped —
-reporting the number as "missing" would send an operator hunting for a file
-sitting in front of them. The operator's folder is read-only: the plate is
-copied out and the copy re-hashed before anything uses it.
-
-**`OneRequestVideoGenerationProvider` makes "exactly one" structural.** It wraps
-the real adapter, so every property of it is untouched, and permits one billable
-`submit`. A repeat of the same idempotency key is answered from the first
-handle; a different key is refused. Polling, fetching and usage are free
-operations against a job already bought and are deliberately not counted.
-`CountingFetch` counts at the transport, so the dry run's "no request was made"
-is checkable rather than asserted.
-
-**The notification is composited after generation, and could not have been
-generated.** LTX is asked for a clean plate and never sees a card, a mark or
-lettering. The card is `drawbox` with disjoint `enable` windows (it cannot
-animate), the mark is the owned asset overlaid from its own file, and the
-headline travels in a generated ASS file — copy never becomes filter grammar.
-The headline carries no number, because no verified event count exists.
-
-**Scene 1 has no display in frame, and the report says so.** The plate is shot
-over the subject's hands with the rear of the phone toward the viewer, so the
-blank-screen and four-corner checks are recorded `NOT_APPLICABLE` with their
-reason rather than dropped; what Scene 1 requires instead is that the phone's
-silhouette, rear surface, rigidity and orientation survive. Active-display
-corner tracking belongs to Scenes 3, 4, 6 and 10.
-
-**Nothing scores creative quality.** Eight observations carry
-`HUMAN_JUDGEMENT_REQUIRED` and no number — identity, hand anatomy, phone
-rigidity, the blink, the push, the rim light, hallucinated graphics and realism
-against the plate. `safeAsProductionSource` is never true from a run.
-
-**Proven, at zero cost:** 43 tests. Thirty contracts with no FFmpeg, network or
-key; ten source-hygiene checks proving the path constructs no other provider, no
-reasoning provider and no database client, reads the credential only at its
-entry point, hardcodes no operator path, offers no bypass and can assign no
-verdict or creative literal; and three lifecycle tests against the fake LTX
-server with real FFmpeg — one request, the request body matching the brief, the
-artefacts, a cache hit costing nothing on a second run, a 402 with zero
-submissions, and a missing key with zero network requests.
+**Not proven — creative quality, and the clip does not execute its own brief.**
+The brief asked for a ~3% push holding the same framing and eyeline; the model
+delivered roughly **1.75x**, ending with the subject's eyes outside the frame,
+and lifted his gaze to the lens for the opening two seconds. Identity, hand
+anatomy, rear-facing phone rigidity, palette and the absence of any invented
+lettering, mark, interface or notification are all correct — the prompt gate
+held. The recommendation on the evidence is to reject on composition drift; the
+review record stays `PENDING`, because an approval is a named person's decision
+and no automated measure in this repository scores drift. Nothing was retried.
 
 **Next milestone is unchanged: AAMP-1 step 4.**
 

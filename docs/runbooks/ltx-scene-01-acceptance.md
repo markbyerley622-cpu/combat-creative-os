@@ -23,70 +23,122 @@ key refusing with zero network requests, one-request enforcement, deterministic
 plate discovery with every ambiguity refused, and no credential or signed URL in
 any artefact.
 
-**Proven against the live `api.ltx.io`, at zero cost:**
+**Proven against the live `api.ltx.io` — the real generation happened.** One
+capped `ltx-2-3-fast` request produced a genuine 1080x1920 clip:
 
-- the endpoint exists and accepts the configured credential;
-- `POST /v1/upload` returns a signed upload ticket, and it signs to
-  **`storage.googleapis.com`**;
-- **the FRAME-01 plate uploaded successfully** through that signed PUT, with
-  every required header, after the exact-hostname authorisation below was added.
-  This is the first time this repository has moved bytes to a live generation
-  provider.
+|                       |                                                                    |
+| --------------------- | ------------------------------------------------------------------ |
+| Billable submissions  | **1 of 1 authorised**                                              |
+| Charged               | **36¢** against a **40¢** ceiling (`DECLARED_RATE_CARD`)           |
+| Network requests      | 11 — ticket, PUT, submit, polls, one download                      |
+| Raw clip              | `raw/scene-01-raw-ecc2dcb54f794957.mp4`                            |
+| sha256                | `ecc2dcb54f7949578add46ba0f47fe5a5c1fca2163ab99b4faa62fe3d6155da7` |
+| Measured              | 1080x1920, h264, yuv420p, 24.000 fps, 6.042 s, **no audio stream** |
+| First-frame agreement | **0.9988** against FRAME-01 (floor 0.85)                           |
+| Motion energy         | **2.0534** (floor 0.30 — the picture genuinely moves)              |
+| Binding checks        | 17 of 17 `PASS`, zero measured defects                             |
+| Technical verdict     | `TECHNICALLY_VALID`                                                |
+| Review                | `PENDING` — no reviewer, no verdict                                |
 
-**Not proven — the milestone is blocked at the submission, and no money has
-been spent.** `POST /v2/image-to-video` was called once and answered
-**HTTP 400** before any job existed:
+The plate uploaded through the signed PUT on `storage.googleapis.com`, the job
+was created, polled to `completed`, and the result downloaded from the same host
+under the separate result allowance. No credential, signed URL or query string
+reached any artefact.
 
-```
-Invalid input for 'camera_motion': Invalid option: expected one of
-"dolly_in"|"dolly_out"|"dolly_left"|"dolly_right"|"jib_up"|"jib_down"|"static"|"focus_shift"
-```
+### The clip is technically valid and it does not execute the brief
 
-So: three network requests in total (ticket, PUT, submit); **zero billable
-submissions**; **nothing charged**; no job created, no clip downloaded, no
-composite, no gallery. `LTX_RESPONSE_CONTRACT_STATUS` stays
-`DOCUMENTED_NOT_EXECUTED` and **no LTX-driven Scene-1 clip exists.**
+This is the part a technical report would miss, and it is why nothing is
+approved. Measured facts first, then what a person can see:
 
-Nothing was retried. The single authorised generation submission is still
-entirely unspent.
+**What the brief asked for:** "The camera pushes in very slowly, about three
+percent across the shot, holding the same framing and eyeline", and "the subject
+remains focused on the phone", with "no dramatic head turn".
 
-### The one decision this is waiting on
+**What the clip does:**
 
-**`CAMERA_MOTIONS` and the live API's vocabulary are different sets, and
-reconciling them is a creative decision, not a rename.** This repository's
-closed vocabulary is `STATIC`, `SLOW_PUSH_IN`, `SLOW_PULL_OUT`,
-`HANDHELD_DRIFT`, `LATERAL_TRACK_LEFT`, `LATERAL_TRACK_RIGHT`, `TILT_UP`,
-`TILT_DOWN`, `ORBIT_LEFT`, `ORBIT_RIGHT`. The API's is the eight values above.
-Four map cleanly — `SLOW_PUSH_IN → dolly_in`, `SLOW_PULL_OUT → dolly_out`,
-`TILT_UP → jib_up`, `TILT_DOWN → jib_down`, `STATIC → static`, and the two
-lateral tracks to `dolly_left`/`dolly_right`. **`HANDHELD_DRIFT`, `ORBIT_LEFT`
-and `ORBIT_RIGHT` have no counterpart at all**, and this repository's own rule
-is that a closed vocabulary listing what is not implemented is decoration. So
-the decision is what happens to those three: refused by name, or removed from
-the vocabulary.
+- **The push is roughly 1.75x, not 3%.** At 0.50 s the head and both shoulders
+  are in frame; by 5.54 s the frame is cropped above the mouth and **the
+  subject's eyes have left the picture entirely**, with the handset filling the
+  lower two-thirds. That is major composition drift, not a restrained move.
+- **The subject lifts his gaze to the lens** for roughly the first two seconds
+  before returning to the phone, against an explicit instruction to stay on the
+  device with no dramatic head turn.
 
-Scene 1 itself needs only `SLOW_PUSH_IN → dolly_in`. The rest of the set is what
-makes this a decision rather than a one-line edit, because the next nine scenes
-will use it.
+**What is correct, and worth saying:** identity is stable throughout — same
+face, hair, beard and clothing as the plate; hands and fingers are plausible
+with no duplication or melting; the phone stays rigid, rectangular and
+**rear-facing**, exactly as Scene 1 requires; the black-and-deep-red palette
+holds; and there is no invented lettering, mark, interface or notification
+anywhere in frame. The prompt gate worked: nothing the model could have
+fabricated was asked for.
 
-Until that is settled, rerunning this command reaches the same 400 at the same
-cost: nothing.
+**Recommendation on the evidence: reject on composition drift.** No retry was
+made and none may be made automatically — a regeneration is a decision to spend
+again, and it belongs to a person. The single authorised submission for this
+milestone is now spent.
 
-### What was authorised, and how narrowly
+Note that first-frame agreement of 0.9988 is not in tension with this. It
+measures the _opening_ composition against the plate, which is excellent; drift
+is what happens after, and no automated measure in this repository scores it.
 
-`LTX_ALLOWED_UPLOAD_HOSTS` permits the single exact hostname
-`storage.googleapis.com`, for **uploads only**, over **HTTPS only**, matched by
-**equality** rather than by suffix. It is not a wildcard, it does not extend to
-subdomains, it does not extend to result downloads, and a redirect away from the
-upload target is refused rather than followed. Nine focused tests hold each of
-those, including the lookalikes `storage.googleapis.com.example.com`,
-`attacker.storage.googleapis.com` and `storage-googleapis.com`.
+### The two transfer-host grants, and why there are two
 
-**A result download signed to that host is still refused**, deliberately: a
-download is a different operation with a different risk, and extending an upload
-allowance to it silently is exactly the kind of widening this guard exists to
-prevent. If the vendor signs results there too, that is the operator's next
-explicit decision after the one above.
+`LTX_ALLOWED_UPLOAD_HOSTS` and `LTX_ALLOWED_RESULT_HOSTS` each permit the single
+exact hostname `storage.googleapis.com`, matched by **equality**, over **HTTPS
+only**, each for **its own operation only**.
+
+They are two lists holding the same string on purpose. Upload and download are
+different operations with different risks — one sends owned media out, the other
+pulls in the bytes that become an advertisement — so a grant for one must never
+be inherited by the other. `assertTransferUrlAllowed` takes the purpose as a
+**required argument with no default**: there is no generally-trusted transfer
+host, and no call site can forget to say what it is doing.
+
+Neither grant is a wildcard, neither covers a subdomain, and a redirect away
+from either target is refused rather than followed — following one would carry
+the bytes, and the upload ticket's signature headers, to a host that never
+passed the allowlist. Fifteen focused tests hold it, including
+`storage.googleapis.com.example.com`, `attacker.storage.googleapis.com`,
+`storage-googleapis.com`, `www.googleapis.com` and `storage.cloud.google.com`.
+
+### The camera-motion boundary
+
+AAMP's motion vocabulary is provider-neutral and was **not** narrowed to suit
+one vendor. `packages/providers/src/ltx/camera-motion.ts` is the single place it
+is translated into the eight values the live API named in its own 400 response.
+
+Mapped, because each pair is the same physical move:
+
+| Internal              | LTX           |
+| --------------------- | ------------- |
+| `STATIC`              | `static`      |
+| `SLOW_PUSH_IN`        | `dolly_in`    |
+| `SLOW_PULL_OUT`       | `dolly_out`   |
+| `LATERAL_TRACK_LEFT`  | `dolly_left`  |
+| `LATERAL_TRACK_RIGHT` | `dolly_right` |
+
+Refused, with a typed `UNSUPPORTED_PROVIDER_CAMERA_MOTION` raised **before any
+network access** — before the upload, before the submission, before a byte
+leaves the process. The failure names the value and names `ltx-hosted`:
+
+- `HANDHELD_DRIFT` — the LTX vocabulary has no handheld quality.
+- `ORBIT_LEFT`, `ORBIT_RIGHT` — it contains no arc around the subject.
+- `TILT_UP`, `TILT_DOWN` — a **tilt** rotates the camera from a fixed position;
+  a **jib** raises or lowers the whole camera. They are different moves, so
+  `jib_up`/`jib_down` are the nearest-_looking_ values and are not substitutes.
+- `CRANE_DOWN` — considered and deliberately not mapped. It is not a member of
+  `CAMERA_MOTIONS` and no internal contract defines it, so the condition for
+  mapping it to `jib_down` (an internal contract defining it as a vertical
+  camera descent) is not met. Were it ever added as one, `jib_down` would be its
+  defensible equivalent and the table above is where that would be recorded.
+
+A refused value is never silently omitted, never replaced with `static`, and
+never left to the prompt wording to imply — a request whose structured field and
+prose disagree lets the model follow either.
+
+"Slow" travels in the prose prompt, where it belongs. **No speed, strength or
+intensity field is invented** to carry it, because the API defines none and a
+fabricated field is a guess with a number in it.
 
 ---
 
@@ -155,11 +207,12 @@ operator-declared rate card (`LTX_PRICING_PROFILE`, version 1), under a **40¢**
 ceiling. The ceiling is checked **before** anything is staged, resampled or
 uploaded.
 
-**There is no exact provider-reported cost.** The documented LTX status contract
-carries no billed-amount field, so the charge is computed from the declared rate
-card and labelled `DECLARED_RATE_CARD`. It is the maximum the run could have
-cost, not a figure the provider reported. `cost-report.json` states the two
-separately and never infers one from the other.
+**There is no exact provider-reported cost, and the live run confirmed it.**
+The completed job's status body carried no billed-amount field, so the charge is
+computed from the declared rate card and labelled `DECLARED_RATE_CARD`. The
+executed run was charged **36¢** on that basis against a **40¢** ceiling.
+`cost-report.json` states the ceiling, the computed maximum, the charge and its
+basis as four separate facts and never infers one from another.
 
 ---
 
