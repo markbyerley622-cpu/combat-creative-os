@@ -3647,6 +3647,99 @@ need re-animating at delivery framing.
 
 ---
 
+### Continuous product motion compositor (2026-07-30)
+
+`pnpm aamp:product-motion` renders one 5–6 second Product Motion Proof: real
+captured Combat Reviews interface pixels composited onto a photographed handset,
+moving through event discovery, fighter comparison, prediction selection and the
+predictor-rank reward as one continuous demonstration. It exists to settle
+whether the visual language reads as a product film before the flagship
+advertisement is rebuilt around it. Runbook:
+`docs/runbooks/product-motion-proof.md`.
+
+**New boundary: `packages/media/src/composite/`.** Four vendor-neutral modules —
+`screen-quad.ts` (quadrilateral geometry, mappability, the camera transform),
+`screen-calibration.ts` (verifying a declared screen against plate pixels),
+`ui-layer.ts` (the interface-motion vocabulary) and `screen-composite.ts` (the
+per-shot filter graph). The package's dependency rule is unchanged: `zod` only,
+no workspace dependency, no I/O. Taking the pixel samples is the caller's job;
+verification is a pure function over them, so it is testable without a plate,
+an FFmpeg build or a filesystem. The orchestration, reports and gallery live in
+`apps/aamp-cli/src/product-motion/`, which constructs no provider, no database
+client and makes no network request — asserted by
+`product-motion-source-hygiene.test.ts`.
+
+**Compositing happens after the photographic move, and that ordering is the
+whole design.** Compositing first and moving the result scales the interface by
+the camera's own zoom factor, and softened type reads as an enlarged screenshot
+rather than a screen. So the plate is moved by `zoompan`, the four screen
+corners are carried through the _same_ zoom analytically, and the interface is
+warped once at delivery resolution onto where the screen actually is on that
+frame. A push-in is a similarity transform, so both are readings of one formula
+— if they ever disagreed the interface would slide off the handset, which is the
+most visible failure this module can produce. `assertPanWindowInsidePlate`
+refuses the case where they would: `zoompan` silently clamps a window that runs
+off the plate edge while arithmetic does not.
+
+**A declared screen is verified before anything is composited.** Convexity,
+area, aspect, corner angles, opposite-edge agreement, containment within the
+plate, and — the two that matter most — that the region is **dark** and
+**uniform**, which is what separates an unlit screen from the background, from
+the phone's body, and from a screen that already carries an interface.
+A screen that fails is refused by name. There is deliberately no fallback that
+lays a full-frame screenshot over the plate: that produces a file passing every
+technical gate while showing an interface which is not on the handset. Rim
+contrast is measured and reported but never gates — on a black-glass handset
+shot against a black set the bezel and the screen genuinely are within three
+luma levels of each other, and a contrast floor would refuse the very plates
+this exists for.
+
+**The interface layer moves captured pixels; it never draws an interface.** The
+only marks added are rectangles in the brand accent, and a rectangle cannot
+assert anything the product does not already say. Scrolling and the push-up
+state change are `overlay` offsets in `t`; accents are `drawbox` with `enable`
+windows, because `drawbox` cannot animate — so an accent may only appear while
+its document is at rest, which is also the restraint the brief asks for. The
+transition vocabulary is closed and contains no dissolve: `OPENING`,
+`SCREEN_POSITION_MATCH_CUT`, `TAP_CUT`. Dissolving between two product states
+says the states are interchangeable, and the point of a demonstration is that
+one leads to the next.
+
+**Proven live, against real FFmpeg and the operator's real material.** An
+ffprobe-verified 1080×1920 h264/yuv420p MP4 at exactly 5.600 s, AAC stereo
+48 kHz, faststart, actual-media QA `PASS` — including the frozen-frame walk,
+which runs because the QA descriptor manifest honestly declares that every shot
+pushes in. Seven product states and seven accents on a continuous timeline; two
+cuts whose measured screen-centre displacement is **0.09 px**; both screens
+verified (`hero` interior luma 14.6 / spread 12.9 / aspect 2.856; `tap` 8.9 /
+6.4 / 2.403). Frames were extracted and inspected at every state and both
+transitions: no warped type, no slipped placement, no exposed empty screen.
+Plus 60 composite contract tests and 24 CLI contract and source-hygiene tests
+that need no FFmpeg.
+
+**Four defects found by looking at frames rather than by a test.** An FFmpeg
+filter output label may be consumed exactly once, so every state after the
+first on a given document rendered black _while the graph still succeeded_ —
+the accents drew perfectly over an empty screen. A push-up left the outgoing
+layer un-drawn, so the band the incoming document had not reached was the black
+base. Compiling all shots into one `filter_complex` buffered looped stills to
+1.5 GB resident at a tenth of the CPU doing useful work. And the first QA
+descriptor declared `motion: STATIC`, which switched off the frozen-frame walk —
+the one check that would catch this proof failing at its own purpose. All four
+are fixed, and each has a test.
+
+**Not proven: creative quality.** No measurement here scores it, and
+`defects.json` records every run's standing limitations rather than only its
+failures: the plates are 941×1672 and upscale 1.148× before the camera move; the
+audio is the temporary synthetic work-pack material; the photographic layer is a
+still under a camera move, so nothing in the photograph itself moves; and the
+interface comes from the existing approved captures because
+`globalfight.onrender.com` returned 503 throughout this work.
+
+**Next milestone is unchanged: AAMP-1 step 4.**
+
+---
+
 ## 9. What this document deliberately does not do
 
 Per instructions, no application code, no package.json, no Prisma schema file, and

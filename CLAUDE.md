@@ -270,6 +270,85 @@ proven:** creative quality — the gate proves a named person decided about
 specific bytes, not that they were right. See the "Motion quality gate" rules
 below and `docs/runbooks/storyboard-motion-quality-gate.md`.
 
+**The continuous product motion compositor is done** — `pnpm aamp:product-motion`
+renders a 5–6 second Product Motion Proof in which real captured Combat Reviews
+interface pixels are composited onto a photographed handset _after_ the camera
+move, so type never warps. **Proven live:** an ffprobe-verified 1080×1920
+h264/yuv420p MP4 at exactly 5.600 s, AAC stereo 48 kHz, faststart, actual-media
+QA `PASS` including the frozen-frame walk; seven product states and seven accents
+on one continuous timeline; two cuts measuring 0.09 px of screen-centre
+displacement; both screens verified against plate pixels; and frames inspected at
+every state and transition showing no warped type, no slipped placement and no
+exposed empty screen. **Not proven:** creative quality — nothing here measures
+it. **Standing limitations, recorded every run:** the plates are 941×1672 and
+upscale before the move, the audio is temporary synthetic material, the
+photographic layer is a still under a camera move, and the interface comes from
+the existing approved captures because the live application was unreachable. See
+the "Product motion compositor" rules below and
+`docs/runbooks/product-motion-proof.md`.
+
+## Product motion compositor — permanent rules
+
+- **The interface is composited after the photographic move, never before.**
+  Compositing first scales the type by the camera's own zoom factor, and soft
+  type reads as an enlarged screenshot rather than a screen. The plate moves,
+  the four screen corners are carried through the _same_ zoom analytically, and
+  the interface is warped once at delivery resolution. Both are readings of one
+  formula on purpose; two implementations would agree until the first fix.
+- **A pan that `zoompan` would clamp is refused.** The framing clamps at the
+  plate edge and the corner arithmetic does not, so the interface would drift
+  off the handset in a way that looks like a calibration fault rather than a
+  framing one. The refusal names the zoom that would make the pan legal.
+- **A declared screen is verified against the plate's own pixels, and a screen
+  that fails is refused by name.** Dark and uniform are what separate an unlit
+  screen from the background, from the phone's body, and from a screen that
+  already carries an interface. **Never add a fallback that lays a full-frame
+  screenshot over the plate** — it passes every technical gate while showing an
+  interface that is not on the handset. Rim contrast is measured and never
+  gates: on black glass against a black set the bezel and the screen are within
+  a few luma levels, and a floor there would refuse the plates this exists for.
+- **Calibration is not evidence about placement.** It proves the region is a
+  blank dark rectangle, not that it is the _right_ rectangle. The gallery
+  overlay is generated on every run for exactly that reason, and it is built
+  from the same `perspective` call the composite uses.
+- **The interface layer moves captured pixels and never draws an interface.**
+  The only marks are rectangles in the brand accent. No text, label, number or
+  interface element is drawn by this pipeline — a re-typeset rankings table is
+  an invented rankings table, however carefully it is copied.
+- **`drawbox` cannot animate, so an accent only appears while its document is at
+  rest** — never during a scroll and never during a push-up entrance. An accent
+  may span consecutive states only if they all show the same document at the
+  same resting scroll.
+- **The transition vocabulary is closed and contains no dissolve.** `OPENING`,
+  `SCREEN_POSITION_MATCH_CUT`, `TAP_CUT`, and it lists only what is implemented.
+  Dissolving between two product states says they are interchangeable; the point
+  of a demonstration is that one leads to the next.
+- **A push-up holds the outgoing layer underneath until the incoming one covers
+  the canvas.** Otherwise the band not yet reached is the black base, and the
+  handset appears to go blank mid-transition.
+- **An FFmpeg filter output label may be consumed exactly once.** Two states on
+  one document is the normal case here; without an explicit `split` every later
+  state renders black _while the graph still succeeds_. Found with the accents
+  drawing perfectly over an empty screen.
+- **One FFmpeg invocation per shot, then the concat demuxer.** Compiling every
+  shot into one `filter_complex` buffers looped stills without bound — measured
+  at 1.5 GB resident for a five-second cut at a tenth of the CPU doing useful
+  work.
+- **The QA descriptor manifest must declare that the picture moves.** QA excludes
+  scenes declaring stillness from the frozen-frame walk, so a descriptor claiming
+  `STATIC` switches off the one check that catches this proof failing at its own
+  purpose.
+- **A capture is never stretched to fill a taller screen.** It is shown larger
+  and cropped (`fit`, with an explicit left-anchored crop, because these layouts
+  are left-aligned), and extended upward using its own top rows (`headroom`),
+  which is what a taller handset genuinely shows above the application header.
+  Stretching warps every glyph, which is the one thing this proof exists to
+  avoid.
+- **Nothing on this path constructs a provider, opens a database or makes a
+  network request**, and asset roots are supplied at invocation so no operator
+  pack path is ever committed. `product-motion-source-hygiene.test.ts` asserts
+  all of it.
+
 ## Motion quality gate — permanent rules
 
 - **A deterministic measurement is never evidence about creative quality.**
