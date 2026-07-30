@@ -333,6 +333,93 @@ describe('LTX hosted — transfer URLs are untrusted input', () => {
   });
 });
 
+/**
+ * The one host outside `*.ltx.io` this client may upload to.
+ *
+ * The live `POST /v1/upload` signs its PUT target to Google Cloud Storage. That
+ * exact hostname is authorised for uploads and nothing else is — so the tests
+ * that matter most here are the ones that must still fail.
+ */
+describe('LTX hosted — the authorised signed-upload host', () => {
+  const UPLOAD = 'UPLOAD' as const;
+
+  it('accepts exactly https://storage.googleapis.com for an upload', () => {
+    const url = assertTransferUrlAllowed(
+      'https://storage.googleapis.com/bucket/object?X-Goog-Signature=abc',
+      {},
+      UPLOAD,
+    );
+    expect(url.host).toBe('storage.googleapis.com');
+  });
+
+  it('refuses it over http', () => {
+    expect(() =>
+      assertTransferUrlAllowed('http://storage.googleapis.com/bucket/object', {}, UPLOAD),
+    ).toThrow(/non-https/i);
+  });
+
+  it('refuses a suffixed lookalike', () => {
+    expect(() =>
+      assertTransferUrlAllowed('https://storage.googleapis.com.example.com/x', {}, UPLOAD),
+    ).toThrow(/unexpected host/i);
+  });
+
+  it('refuses a subdomain of the authorised host', () => {
+    expect(() =>
+      assertTransferUrlAllowed('https://attacker.storage.googleapis.com/x', {}, UPLOAD),
+    ).toThrow(/unexpected host/i);
+  });
+
+  it('refuses a hyphenated lookalike', () => {
+    expect(() => assertTransferUrlAllowed('https://storage-googleapis.com/x', {}, UPLOAD)).toThrow(
+      /unexpected host/i,
+    );
+  });
+
+  it('refuses any other Google host — there is no wildcard', () => {
+    for (const host of [
+      'https://googleapis.com/x',
+      'https://www.googleapis.com/x',
+      'https://storage.cloud.google.com/x',
+      'https://storage.googleapis.evil.com/x',
+    ]) {
+      expect(() => assertTransferUrlAllowed(host, {}, UPLOAD)).toThrow(/unexpected host/i);
+    }
+  });
+
+  it('does not extend the allowance to a result download', () => {
+    // Uploads and results are different operations with different risks. A
+    // result signed to this host is a separate, explicit decision.
+    expect(() =>
+      assertTransferUrlAllowed('https://storage.googleapis.com/bucket/out.mp4', {}, 'RESULT'),
+    ).toThrow(/unexpected host/i);
+    expect(() => assertTransferUrlAllowed('https://storage.googleapis.com/bucket/out.mp4')).toThrow(
+      /unexpected host/i,
+    );
+  });
+
+  it('refuses a redirect away from the upload target rather than following it', async () => {
+    const server = new FakeLtxServer({ uploadPutStatus: 307 });
+    const provider = build(server);
+    const error = await provider.submit(submitInput()).catch((e: unknown) => e);
+    expect(String(error)).toMatch(/redirect/i);
+    expect(String(error)).toMatch(/refused rather than followed/i);
+    // The bytes never reached a second host.
+    expect(server.requests.filter((request) => request.method === 'PUT')).toHaveLength(1);
+  });
+
+  it('never lets the signed URL or its query reach a message', async () => {
+    const server = new FakeLtxServer({ uploadPutStatus: 500 });
+    const provider = build(server);
+    const error = await provider.submit(submitInput()).catch((e: unknown) => e);
+    const text = String(error);
+    expect(text).not.toContain('?');
+    expect(text).not.toContain('signature');
+    expect(text).not.toContain('X-Goog-Signature');
+    expect(text).not.toContain(API_KEY);
+  });
+});
+
 describe('LTX hosted — supported models, durations and pricing', () => {
   it('refuses the deprecated names by name and says what to use', () => {
     expect(() => assertSupportedLtxModel('ltx-2-fast')).toThrow(/deprecated.*ltx-2-3-fast/is);

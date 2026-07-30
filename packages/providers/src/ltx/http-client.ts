@@ -83,6 +83,32 @@ export const LTX_DEFAULT_BASE_URL = 'https://api.ltx.io';
  */
 export const LTX_ALLOWED_TRANSFER_HOST_SUFFIXES: readonly string[] = ['.ltx.io', 'ltx.io'];
 
+/**
+ * Hosts an **upload** may additionally target, matched as **exact hostnames**.
+ *
+ * The live `POST /v1/upload` on `api.ltx.io` returns a signed PUT target on
+ * Google Cloud Storage, which the suffix list above does not cover — and that
+ * refusal is why the first live attempt spent nothing rather than sending owned
+ * media somewhere unverified. This entry authorises that one observed host and
+ * nothing more.
+ *
+ * **Exact, never a suffix.** A suffix rule spelled `.googleapis.com` would
+ * admit every Google API host; spelled `storage.googleapis.com` it would still
+ * admit `attacker.storage.googleapis.com`. Equality admits neither, and it also
+ * rejects the lookalikes — `storage.googleapis.com.example.com` and
+ * `storage-googleapis.com` — that a suffix or substring rule waves through.
+ *
+ * **Uploads only.** A result download is a different operation with a different
+ * risk, and this list is not consulted for one. If the vendor also signs
+ * *results* to a host outside the suffix list, that is a separate, explicit
+ * decision for a person to take — not something an upload allowance quietly
+ * extends to.
+ */
+export const LTX_ALLOWED_UPLOAD_HOSTS: readonly string[] = ['storage.googleapis.com'];
+
+/** Which operation a transfer URL was returned for. Uploads get a wider host list. */
+export type LtxTransferPurpose = 'UPLOAD' | 'RESULT';
+
 /** 512 MiB. A 10-second 1080x1920 clip is orders of magnitude under this. */
 export const LTX_MAX_DOWNLOAD_BYTES = 512 * 1024 * 1024;
 
@@ -128,8 +154,15 @@ export interface LtxHostAllowance {
  * Called for the signed upload target and for the result download. It rejects
  * credentials-in-URL, non-http(s) schemes and unknown hosts, and it names the
  * host it refused so an operator can tell a misconfiguration from an attack.
+ *
+ * `purpose` defaults to `RESULT`, the stricter of the two: a caller that forgets
+ * to say what it is doing gets the narrower host list, never the wider one.
  */
-export function assertTransferUrlAllowed(raw: string, allowance: LtxHostAllowance = {}): URL {
+export function assertTransferUrlAllowed(
+  raw: string,
+  allowance: LtxHostAllowance = {},
+  purpose: LtxTransferPurpose = 'RESULT',
+): URL {
   let url: URL;
   try {
     url = new URL(raw);
@@ -154,9 +187,15 @@ export function assertTransferUrlAllowed(raw: string, allowance: LtxHostAllowanc
     ...(allowance.additionalTransferHostSuffixes ?? []),
   ];
   const hostname = url.hostname.toLowerCase();
-  const permitted = suffixes.some(
+  const permittedBySuffix = suffixes.some(
     (suffix) => hostname === suffix.replace(/^\./, '') || hostname.endsWith(suffix),
   );
+  // Equality, and only for an upload. `endsWith` here would admit
+  // `attacker.storage.googleapis.com`; a substring test would admit
+  // `storage.googleapis.com.example.com`. Neither is this host.
+  const permittedExactlyForUpload =
+    purpose === 'UPLOAD' && LTX_ALLOWED_UPLOAD_HOSTS.includes(hostname);
+  const permitted = permittedBySuffix || permittedExactlyForUpload;
   if (!permitted) {
     throw new LtxRequestError(
       'MALFORMED_RESPONSE',
@@ -245,9 +284,15 @@ export class LtxHttpClient {
    * header cannot be silently dropped. Our own `Authorization` is deliberately
    * not added: a signed URL already carries its authorisation, and sending the
    * API key to a storage host would widen where the credential travels.
+   *
+   * **Redirects are never followed.** `redirect: 'manual'` means a 3xx comes
+   * back as a response rather than as a second request, and it is refused here.
+   * Following one would move the bytes — and the ticket's signature headers —
+   * to a host that never passed the allowlist, which is precisely the check a
+   * redirect would otherwise walk around.
    */
   async putUpload(ticket: LtxUploadTicket, bytes: Uint8Array, contentType: string): Promise<void> {
-    const target = assertTransferUrlAllowed(ticket.upload_url, this.hostAllowance);
+    const target = assertTransferUrlAllowed(ticket.upload_url, this.hostAllowance, 'UPLOAD');
     const headers: Record<string, string> = {
       'content-type': contentType,
       ...ticket.required_headers,
@@ -261,12 +306,23 @@ export class LtxHttpClient {
         method: 'PUT',
         body: bytes as unknown as FetchRequestBody,
         headers,
+        redirect: 'manual',
         signal: controller.signal,
       });
     } catch (error) {
       throw this.transportError('PUT', redactUrl(target.toString()), controller, error);
     } finally {
       clearTimeout(timer);
+    }
+    // Two shapes, because the platform has two. A 3xx arrives verbatim from a
+    // test double; the WHATWG-conformant runtime hands back an opaque-redirect
+    // filtered response whose status is 0. Both are a redirect, and both are
+    // refused — checking only one would leave the real runtime unguarded.
+    if (isRedirect(response)) {
+      throw new LtxRequestError(
+        'MALFORMED_RESPONSE',
+        `the LTX upload target ${redactUrl(target.toString())} answered with a redirect. It is refused rather than followed: a redirect would carry the bytes and the ticket's signature headers to a host that never passed the allowlist.`,
+      );
     }
     if (!response.ok) {
       throw new LtxRequestError(
@@ -478,6 +534,13 @@ export class LtxHttpClient {
       `LTX returned a ${what} body this client does not recognise`,
     );
   }
+}
+
+/** Every way a runtime can hand back "this was a redirect" under `redirect: manual`. */
+export function isRedirect(response: Pick<Response, 'status' | 'type'>): boolean {
+  if (response.type === 'opaqueredirect') return true;
+  if (response.status === 0) return true;
+  return response.status >= 300 && response.status < 400;
 }
 
 function readRetryAfter(response: Response): number | undefined {

@@ -302,6 +302,114 @@ bottom navigation visible and no wide-breakpoint navigation anywhere; hero
 mapping uniformity 1.0003. See the rules below and
 `docs/runbooks/product-motion-proof.md`.
 
+**The capped Scene-1 LTX acceptance path is built, and the live API refused to
+be reached on a host this repository trusts — so no paid generation has been
+made.** `pnpm aamp:ltx-scene-01` takes the authoritative high-quality Scene-1
+plate, prices exactly one LTX 2.3 Fast request, and — after inspection — hands a
+person a raw clip, a composited review cut, a comparison gallery and a `PENDING`
+review. **Proven at zero cost:** deterministic `FRAMEnPLATE.*` → `FRAME-NN`
+discovery over the operator's real folder with all ten plates measured and
+checksummed, a dry run making zero network requests and pricing the run at 36¢
+against a 40¢ ceiling, and 43 tests — the full lifecycle against the fake LTX
+server with real FFmpeg (one request, cache hit costing nothing, 402 with zero
+submissions, missing key with zero requests), plus ten source-hygiene checks.
+**Proven against the live `api.ltx.io`, at zero cost:** the endpoint exists and
+accepts the credential; `POST /v1/upload` signs to `storage.googleapis.com`; and
+**the FRAME-01 plate uploaded successfully** through that signed PUT once the
+exact-hostname authorisation was added — the first bytes this repository has
+moved to a live generation provider. **Not proven, and the blocker is exact:**
+`POST /v2/image-to-video` answered **HTTP 400** before any job existed —
+`Invalid input for 'camera_motion': expected one of
+"dolly_in"|"dolly_out"|"dolly_left"|"dolly_right"|"jib_up"|"jib_down"|"static"|"focus_shift"`.
+Three network requests in total, **zero billable submissions, nothing charged**,
+no job, no clip, no composite. Nothing was retried and the single authorised
+submission is still unspent. `LTX_RESPONSE_CONTRACT_STATUS` stays
+`DOCUMENTED_NOT_EXECUTED` and no LTX-driven clip exists. See the "Scene-1
+acceptance" rules below and `docs/runbooks/ltx-scene-01-acceptance.md`.
+
+## Scene-1 LTX acceptance — permanent rules
+
+- **A signing host outside the allowlist is a decision, not an obstacle.** The
+  guard refusing `storage.googleapis.com` is why the first live attempt cost
+  nothing instead of sending owned media to an unverified host. It was then
+  authorised **by a person, narrowly**: `LTX_ALLOWED_UPLOAD_HOSTS` holds that one
+  exact hostname, matched by **equality**, for **uploads only**, over **HTTPS
+  only**. Never make it a suffix — `.googleapis.com` admits every Google API host
+  and `storage.googleapis.com` as a suffix admits
+  `attacker.storage.googleapis.com`. Never extend it to result downloads: a
+  download is a different operation with a different risk, and an upload
+  allowance that quietly covered it would be the widening this guard exists to
+  prevent. Never add a per-invocation override or let a host arrive from
+  configuration.
+- **A redirect away from a signed upload target is refused, never followed.**
+  `redirect: 'manual'` plus an explicit refusal, because following one would
+  carry the bytes _and the ticket's signature headers_ to a host that never
+  passed the allowlist — the one move that walks around the check entirely. Both
+  shapes are handled: a verbatim 3xx and the opaque-redirect filtered response
+  whose status is 0.
+- **Exactly one billable request, structurally.**
+  `OneRequestVideoGenerationProvider` wraps the real adapter and permits one
+  `submit`; a different idempotency key is refused, a repeat of the same one is
+  answered from the first handle. Polling, fetching and usage are free
+  operations against a job already bought and are never counted as requests.
+  There is no retry, no second variation, no alternate model and no fallback
+  provider — a rejection never buys a replacement on its own.
+- **Everything that can refuse happens before anything costs money**, and the
+  cost check happens before anything is even staged or resampled. `--dry-run`
+  reads no API key at all, which is a property of the code rather than a promise
+  in the help text, and `CountingFetch` proves the request count is zero rather
+  than asserting it.
+- **The rate card is a maximum, never a provider-reported charge.** The
+  documented LTX status contract carries no billed-amount field, so
+  `cost-report.json` states the computed maximum, its `DECLARED_RATE_CARD`
+  basis and the enforced ceiling as three separate facts. Never infer, round or
+  fabricate a charge.
+- **Discovery refuses every ambiguity rather than resolving it.** Two files
+  resolving to one frame, a plate-shaped name with an unusable extension, a
+  landscape plate, a symlink leaving the folder, an undecodable file — each is
+  refused by name, and a plate-shaped file is never silently reported as
+  missing. The operator's folder is read-only: the plate is copied out and the
+  copy re-hashed before anything uses it.
+- **`generated-clips/` is refused by location, not by filename.** The landscape
+  `FRAME-01.mp4` and `FRAME-07.mp4` failed portrait fidelity and are
+  permanently rejected; a structural rule survives a rename and a filename does
+  not.
+- **The upload resample is declared, never claimed as detail.** The plates are
+  941×1672 and delivery is 1080×1920, so the staged upload records the method,
+  both scale factors, the anisotropy and `createsNewDetail: false` explicitly.
+- **The notification is composited after LTX and could not have been
+  generated.** The model is asked for a clean plate and never sees a card, a
+  mark or lettering. `drawbox` cannot animate, so the entrance settles across
+  disjoint `enable` windows; the mark is the owned asset overlaid from its own
+  file; the headline travels in a generated ASS file and never becomes filter
+  grammar; and it carries no number, because no verified event count exists.
+- **Scene 1 contains no display, and the report says so rather than omitting
+  it.** The plate is shot with the rear of the phone toward the viewer, so the
+  blank-screen and four-corner checks are `NOT_APPLICABLE` with their reason,
+  and what Scene 1 requires instead is that the phone's silhouette, rear
+  surface, rigidity and orientation survive. **Active-display corner tracking
+  belongs to Scenes 3, 4, 6 and 10** — never add it as a Scene-1 requirement.
+- **The run approves nothing, and cannot.** The human review record is `PENDING`
+  with a null reviewer, verdict and date; no flag writes one;
+  `safeAsProductionSource` is never true from a run. The identity is the
+  existing `reviewIdentitySha256`, so a later decision binds to the same four
+  inputs a production approval binds to.
+- **Eight observations carry `HUMAN_JUDGEMENT_REQUIRED` and no number** —
+  identity, hand anatomy, phone rigidity, the blink, the push, the rim light,
+  hallucinated graphics and realism against the plate. No measurement of any of
+  them exists here, and inventing one would put the single unverifiable figure
+  into the report a person relies on.
+- **The brief owns the creative; this code owns the discipline.** Every prompt,
+  headline, colour and timing lives in
+  `campaigns/combat-reviews-flagship-02/scene-01-ltx-acceptance.json` with a
+  named author. `scene-acceptance-source-hygiene.test.ts` asserts no creative
+  literal is assigned anywhere in the module, that only one file constructs the
+  provider, that only the entry point reads the credential, and that no operator
+  path is hardcoded.
+- **This milestone renders no master and generates no other scene.** Scenes 2–10
+  and the fifteen-second cut are out of scope, and every artefact says so
+  explicitly rather than leaving it to be inferred.
+
 ## Product motion compositor — permanent rules
 
 - **The interface is composited after the photographic move, never before.**

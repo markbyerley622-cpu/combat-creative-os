@@ -3813,6 +3813,99 @@ in every artefact.
 
 ---
 
+### Capped Scene-1 LTX acceptance path (2026-07-30)
+
+`pnpm aamp:ltx-scene-01` is the first path in this repository built to spend
+real money on a single, bounded generation: one authoritative Scene-1 plate, one
+capped LTX 2.3 Fast request, the raw portrait clip, a local inspection, a
+post-LTX notification composite, a comparison gallery, and a human review left
+`PENDING`. It renders no master and generates no other scene. Runbook:
+`docs/runbooks/ltx-scene-01-acceptance.md`.
+
+**The live API was contacted twice, and both attempts cost nothing.** The first
+found that `POST /v1/upload` signs its PUT target to **`storage.googleapis.com`**,
+outside `LTX_ALLOWED_TRANSFER_HOST_SUFFIXES`; the client refused to send bytes
+there, which is why that attempt spent nothing rather than moving owned media to
+an unverified host. That host was then authorised narrowly and deliberately:
+`LTX_ALLOWED_UPLOAD_HOSTS` holds the single exact hostname, matched by equality,
+for uploads only, over HTTPS only, with redirects refused rather than followed,
+and with result downloads deliberately **not** covered. Nine focused tests hold
+each property, including the three lookalikes.
+
+**The plate then uploaded successfully — the first bytes this repository has
+moved to a live generation provider — and the run is blocked one step later.**
+`POST /v2/image-to-video` answered **HTTP 400** before any job existed:
+`Invalid input for 'camera_motion': expected one of "dolly_in"|"dolly_out"|
+"dolly_left"|"dolly_right"|"jib_up"|"jib_down"|"static"|"focus_shift"`. Three
+network requests in total, **zero billable submissions, nothing charged**, no
+job, no clip. Nothing was retried; the single authorised submission is unspent.
+`LTX_RESPONSE_CONTRACT_STATUS` stays `DOCUMENTED_NOT_EXECUTED` and **no
+LTX-driven clip exists**.
+
+**Reconciling the two camera vocabularies is a creative decision, not a
+rename.** Six of this repository's ten `CAMERA_MOTIONS` map cleanly onto the
+API's eight; `HANDHELD_DRIFT`, `ORBIT_LEFT` and `ORBIT_RIGHT` have no
+counterpart at all. This repository's own rule is that a closed vocabulary
+listing what is not implemented is decoration, so what happens to those three —
+refused by name, or removed — is the operator's call, and it governs the nine
+scenes after this one rather than just Scene 1.
+
+**New module: `apps/aamp-cli/src/scene-acceptance/`.** It reuses rather than
+reimplements: the existing LTX adapter and rate card, the existing prompt gate,
+the existing motion inspection and review identity, the existing generation
+cache, the existing artefact-safety walk and the existing exit-code table. What
+is new is the plate discovery, the one-request guard, the notification
+composite, the whole-clip survey and the pending review record.
+
+**Discovery is deterministic and every ambiguity is a refusal.**
+`FRAMEnPLATE.*` maps to `FRAME-NN` case-insensitively; two files resolving to
+one number, a plate-shaped name with an unusable extension, a landscape plate, a
+symlink escaping the folder and an undecodable file are each refused by name.
+A plate-shaped file with a bad extension is refused rather than skipped —
+reporting the number as "missing" would send an operator hunting for a file
+sitting in front of them. The operator's folder is read-only: the plate is
+copied out and the copy re-hashed before anything uses it.
+
+**`OneRequestVideoGenerationProvider` makes "exactly one" structural.** It wraps
+the real adapter, so every property of it is untouched, and permits one billable
+`submit`. A repeat of the same idempotency key is answered from the first
+handle; a different key is refused. Polling, fetching and usage are free
+operations against a job already bought and are deliberately not counted.
+`CountingFetch` counts at the transport, so the dry run's "no request was made"
+is checkable rather than asserted.
+
+**The notification is composited after generation, and could not have been
+generated.** LTX is asked for a clean plate and never sees a card, a mark or
+lettering. The card is `drawbox` with disjoint `enable` windows (it cannot
+animate), the mark is the owned asset overlaid from its own file, and the
+headline travels in a generated ASS file — copy never becomes filter grammar.
+The headline carries no number, because no verified event count exists.
+
+**Scene 1 has no display in frame, and the report says so.** The plate is shot
+over the subject's hands with the rear of the phone toward the viewer, so the
+blank-screen and four-corner checks are recorded `NOT_APPLICABLE` with their
+reason rather than dropped; what Scene 1 requires instead is that the phone's
+silhouette, rear surface, rigidity and orientation survive. Active-display
+corner tracking belongs to Scenes 3, 4, 6 and 10.
+
+**Nothing scores creative quality.** Eight observations carry
+`HUMAN_JUDGEMENT_REQUIRED` and no number — identity, hand anatomy, phone
+rigidity, the blink, the push, the rim light, hallucinated graphics and realism
+against the plate. `safeAsProductionSource` is never true from a run.
+
+**Proven, at zero cost:** 43 tests. Thirty contracts with no FFmpeg, network or
+key; ten source-hygiene checks proving the path constructs no other provider, no
+reasoning provider and no database client, reads the credential only at its
+entry point, hardcodes no operator path, offers no bypass and can assign no
+verdict or creative literal; and three lifecycle tests against the fake LTX
+server with real FFmpeg — one request, the request body matching the brief, the
+artefacts, a cache hit costing nothing on a second run, a 402 with zero
+submissions, and a missing key with zero network requests.
+
+**Next milestone is unchanged: AAMP-1 step 4.**
+
+---
+
 ## 9. What this document deliberately does not do
 
 Per instructions, no application code, no package.json, no Prisma schema file, and

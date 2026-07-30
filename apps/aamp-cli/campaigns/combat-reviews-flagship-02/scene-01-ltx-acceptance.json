@@ -1,0 +1,40 @@
+{
+  "briefVersion": 1,
+  "storyboardId": "combat-reviews-flagship-storyboard-02",
+  "authoredBy": "Riki Taylor — Scene-1 LTX acceptance direction",
+  "plateFrameId": "FRAME-01",
+  "model": "ltx-2-3-fast",
+  "generationDurationSeconds": 6,
+  "generateAudio": false,
+  "maximumAuthorisedCostCents": 40,
+  "scene": {
+    "sceneNumber": 1,
+    "sourceFrame": "FRAME-01",
+    "outputStartSeconds": 0,
+    "outputEndSeconds": 1.1,
+    "generationMode": "LTX_IMAGE_TO_VIDEO",
+    "motionPrompt": "A young man in near darkness, head lowered toward the phone held in both hands. He blinks once. His chest rises and falls with one quiet breath. His right thumb shifts a few millimetres and settles. The camera pushes in very slowly, about three percent across the shot, holding the same framing and eyeline. Soft red rim light drifts almost imperceptibly along the left of his hair and jaw. Shallow natural depth and gentle parallax, low key black and deep red lighting, photorealistic and restrained, premium sports commercial. The phone is seen from behind, its rear surface dark and matte, held rigid and flat. Do not alter his facial identity, features, skin, hair or clothing, and do not add or change any person. Do not add lettering, numbers, a mark, a badge or any product interface anywhere in frame. Do not bend, warp, reshape, resize or reorient the phone; its silhouette and dark rear surface stay rigid, and the whole phone stays inside frame. Do not duplicate or deform fingers or hands. Do not turn the head sharply, smile or speak. Do not add camera shake, particles, sparks, flares, neon or cyberpunk effects. Do not generate audio.",
+    "cameraMotion": "SLOW_PUSH_IN",
+    "preserveExactTypography": false,
+    "preserveExactProductUi": false,
+    "acceptableFootageRoles": ["TALENT_PHONE_NOTIFICATION"],
+    "intent": "The hook. A fan finding out first, lit only by the room. The plate shows the rear of the phone, so there is no display in shot at all: the notification is a screen-space graphic composited afterwards, and a model is never asked to invent an interface."
+  },
+  "notification": {
+    "treatment": "SCREEN_SPACE_MOTION_GRAPHICS",
+    "treatmentReason": "The authoritative plate is shot over the subject's hands with the rear of the phone facing the viewer, so no display is visible in Scene 1 and there is no active screen to seat a card in. The notification is therefore a sharp screen-space graphic composited after generation. Active-display corner tracking belongs to Scenes 3, 4, 6 and 10, where the screen faces the viewer; requiring it here would be requiring a surface this composition does not contain.",
+    "headline": "FIGHTS THIS WEEKEND",
+    "entranceStartSeconds": 0.85,
+    "settleStepSeconds": 0.07,
+    "pulseStartSeconds": 1.45,
+    "pulseDurationSeconds": 0.18,
+    "cardTopPx": 118,
+    "cardHeightPx": 196,
+    "safeMarginPx": 60,
+    "accentColorHex": "#DA0318",
+    "cardColorHex": "#F7F7F7",
+    "headlineColorHex": "#111111",
+    "fontFamily": "Arial",
+    "fontSizePx": 52
+  }
+}
