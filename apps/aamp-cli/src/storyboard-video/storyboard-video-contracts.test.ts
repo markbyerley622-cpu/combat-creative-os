@@ -910,6 +910,9 @@ describe('keyframe library', () => {
  * is owed.
  */
 describe('the committed campaign manifest against the LTX vocabulary', () => {
+  /** The internal motions this provider carries in two stages rather than one. */
+  const ROUTED_MOTIONS: readonly string[] = ['HANDHELD_DRIFT', 'CONTROLLED_PUSH_IN'];
+
   const manifestPath = join(
     __dirname,
     '..',
@@ -923,15 +926,15 @@ describe('the committed campaign manifest against the LTX vocabulary', () => {
     return parseSceneManifest(JSON.parse(await readFile(manifestPath, 'utf8')));
   }
 
-  it('routes the two HANDHELD_DRIFT scenes to a locked-off frame plus post-motion', async () => {
+  it('routes the three two-stage scenes to a locked-off frame plus post-motion', async () => {
     const manifest = await campaign();
     const routed = manifest.scenes
       .filter((scene) => modeReachesGenerationProvider(scene.generationMode))
       .filter((scene) => routeLtxCameraMotion(scene.cameraMotion).deterministicPostMotionRequired);
 
-    expect(routed.map((scene) => scene.sceneNumber)).toEqual([8, 9]);
+    expect(routed.map((scene) => scene.sceneNumber)).toEqual([1, 8, 9]);
     for (const scene of routed) {
-      expect(scene.cameraMotion).toBe('HANDHELD_DRIFT');
+      expect(ROUTED_MOTIONS).toContain(scene.cameraMotion);
       expect(routeLtxCameraMotion(scene.cameraMotion).providerValue).toBe('static');
       // The authored second stage exists, or the manifest would not parse.
       expect(scene.postMotion).toBeDefined();
@@ -959,11 +962,13 @@ describe('the committed campaign manifest against the LTX vocabulary', () => {
     expect(nine?.postMotion?.prohibitions.join(' ')).toMatch(/no random shake/i);
   });
 
-  it('never substitutes another LTX camera move for the authored drift', async () => {
+  it('never substitutes another LTX camera move for a routed motion', async () => {
     const manifest = await campaign();
-    for (const scene of manifest.scenes.filter(
-      (candidate) => candidate.cameraMotion === 'HANDHELD_DRIFT',
-    )) {
+    const routed = manifest.scenes.filter((candidate) =>
+      ROUTED_MOTIONS.includes(candidate.cameraMotion),
+    );
+    expect(routed.length).toBeGreaterThan(0);
+    for (const scene of routed) {
       const value = routeLtxCameraMotion(scene.cameraMotion).providerValue;
       expect(value).toBe('static');
       for (const forbidden of [
@@ -983,7 +988,7 @@ describe('the committed campaign manifest against the LTX vocabulary', () => {
     const manifest = await campaign();
     const native = manifest.scenes
       .filter((scene) => modeReachesGenerationProvider(scene.generationMode))
-      .filter((scene) => scene.cameraMotion !== 'HANDHELD_DRIFT');
+      .filter((scene) => !ROUTED_MOTIONS.includes(scene.cameraMotion));
 
     expect(native.length).toBeGreaterThan(0);
     for (const scene of native) {
@@ -992,11 +997,31 @@ describe('the committed campaign manifest against the LTX vocabulary', () => {
     }
   });
 
-  it('binds Scene 1 to the move that was actually generated', async () => {
+  it('routes Scene 1 rather than asking the provider for a magnitude it cannot carry', async () => {
+    // The first paid take asked for `dolly_in` with the magnitude in prose and
+    // came back at roughly 1.75x, ending with the subject's eyes outside
+    // frame. The push is still a push; what changed is which stage owns the
+    // number.
     const manifest = await campaign();
     const scene = manifest.scenes.find((candidate) => candidate.sceneNumber === 1);
-    expect(scene?.cameraMotion).toBe('SLOW_PUSH_IN');
-    expect(toLtxCameraMotion(scene?.cameraMotion as string)).toBe('dolly_in');
+    expect(scene?.cameraMotion).toBe('CONTROLLED_PUSH_IN');
+    expect(routeLtxCameraMotion(scene?.cameraMotion as string).providerValue).toBe('static');
+    expect(scene?.postMotion?.treatment).toBe('SMOOTH_PUSH');
+    expect(scene?.postMotion?.magnitudePercent).toBe(3);
+    // The provider value is unreachable without the second stage.
+    expect(() => toLtxCameraMotion(scene?.cameraMotion as string)).toThrow(/two stages/i);
+  });
+
+  it('asks the provider for a locked-off frame on every scene that reaches it', async () => {
+    // Every paid submission in this campaign carries `static`: the moves that
+    // matter are either in the subject or supplied deterministically.
+    const manifest = await campaign();
+    const generating = manifest.scenes.filter((scene) =>
+      modeReachesGenerationProvider(scene.generationMode),
+    );
+    for (const scene of generating) {
+      expect(routeLtxCameraMotion(scene.cameraMotion).providerValue).toBe('static');
+    }
   });
 });
 

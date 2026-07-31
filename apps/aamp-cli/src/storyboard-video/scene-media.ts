@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, relative, resolve } from 'node:path';
 
 import type { CommandRunner, FfmpegBinaries } from '@combat/media';
 import {
@@ -115,12 +115,44 @@ export interface GenerateSceneClipOptions {
 }
 
 /**
+ * The cache key for one scene, computed the same way everywhere.
+ *
+ * Extracted because two callers need it and the two must never disagree: the
+ * generation stage uses it to decide whether to buy, and the **cost estimate**
+ * uses it to decide whether to say a scene will be bought. When the estimate
+ * computed its own answer — "this scene requires generation" — while the
+ * generation stage consulted the cache, the printed maximum and both ceilings
+ * described a run that was not the one about to happen.
+ */
+export function sceneCacheKey(input: {
+  readonly scene: SceneManifestEntry;
+  readonly keyframe: ResolvedKeyframe;
+  readonly lastFrame?: ResolvedKeyframe;
+  readonly model: LtxModel;
+  readonly generateAudio: boolean;
+  readonly requiredSourceSeconds: number;
+}): string {
+  return computeGenerationCacheKey({
+    inputFrameChecksumSha256: input.keyframe.checksumSha256,
+    ...(input.lastFrame ? { lastFrameChecksumSha256: input.lastFrame.checksumSha256 } : {}),
+    motionPromptSha256: createHash('sha256').update(input.scene.motionPrompt, 'utf8').digest('hex'),
+    model: input.model,
+    durationSeconds: smallestCoveringDuration(input.requiredSourceSeconds),
+    resolution: LTX_SUPPORTED_RESOLUTION,
+    fps: LTX_SUPPORTED_FPS,
+    generateAudio: input.generateAudio,
+    cameraMotion: input.scene.cameraMotion,
+  });
+}
+
+/**
  * Obtains one generated clip: from the cache when a byte-verified one exists,
  * otherwise from the provider.
  *
  * A cache hit makes **no** network call at all — not a status check, not a
  * re-download. That is the property that makes a second run of the same
- * storyboard free.
+ * storyboard free, and it is only true if the entry's recorded path actually
+ * resolves; see `cacheRelativePath`.
  */
 export async function generateSceneClip(
   options: GenerateSceneClipOptions,
@@ -129,16 +161,13 @@ export async function generateSceneClip(
   const requestedDurationSeconds = smallestCoveringDuration(options.requiredSourceSeconds);
   const promptSha256 = createHash('sha256').update(scene.motionPrompt, 'utf8').digest('hex');
 
-  const cacheKey = computeGenerationCacheKey({
-    inputFrameChecksumSha256: keyframe.checksumSha256,
-    ...(options.lastFrame ? { lastFrameChecksumSha256: options.lastFrame.checksumSha256 } : {}),
-    motionPromptSha256: promptSha256,
+  const cacheKey = sceneCacheKey({
+    scene,
+    keyframe,
+    ...(options.lastFrame ? { lastFrame: options.lastFrame } : {}),
     model: options.model,
-    durationSeconds: requestedDurationSeconds,
-    resolution: LTX_SUPPORTED_RESOLUTION,
-    fps: LTX_SUPPORTED_FPS,
     generateAudio: options.generateAudio,
-    cameraMotion: scene.cameraMotion,
+    requiredSourceSeconds: options.requiredSourceSeconds,
   });
 
   const cached = options.bypassCache ? null : await options.cache.lookup(cacheKey);
@@ -286,7 +315,11 @@ export async function generateSceneClip(
   await options.cache.record({
     cacheKey,
     sceneNumber: scene.sceneNumber,
-    relativePath: `originals/scene-${String(scene.sceneNumber).padStart(2, '0')}-${checksumSha256.slice(0, 16)}.mp4`,
+    // Computed from where the bytes actually landed, never composed from a
+    // second guess at the layout. A recorded path that did not resolve made
+    // every lookup a miss and every re-run re-buy the whole storyboard — found
+    // after ten paid requests had been made for five scenes.
+    relativePath: cacheRelativePath(options.cache, originalPath),
     checksumSha256,
     sizeBytes: bytes.byteLength,
     durationSeconds: measured.durationSeconds,
@@ -315,6 +348,25 @@ export async function generateSceneClip(
     model: options.model,
     promptSha256,
   };
+}
+
+/**
+ * Where a cached clip lives, expressed the way the cache resolves it.
+ *
+ * The cache joins `relativePath` onto its own directory, so the path recorded
+ * has to be relative *to the cache*, not to the run. Composing it by hand from
+ * an assumed layout is what broke: the entry said `originals/scene-01-….mp4`
+ * while the bytes were written to a sibling `generated-originals/` folder, so
+ * every lookup read a file that was not there, treated the miss as "no usable
+ * cached clip", and bought the scene again. Ten paid requests were made for
+ * five scenes before anyone looked at a checksum.
+ *
+ * Deriving it with `relative` means the recorded path is a fact about where
+ * the file went rather than a second description of it. Separators are
+ * normalised to `/` so a cache written on Windows resolves on any platform.
+ */
+export function cacheRelativePath(cache: GenerationCache, absolutePath: string): string {
+  return relative(resolve(cache.directory), resolve(absolutePath)).split('\\').join('/');
 }
 
 /**

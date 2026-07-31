@@ -3983,6 +3983,104 @@ post-LTX compositing, and the factual headline.
 
 ---
 
+### Full-length storyboard motion review candidate (2026-07-31)
+
+The first fifteen-second cut assembled from real generated motion. `pnpm
+aamp:full-review` stages the ten authoritative plates, generates the five scenes
+that need it, executes the authored deterministic second stage, and hands the
+result to the existing flagship render path unchanged.
+
+**Why a second command rather than a flag.** `aamp:storyboard-video` refuses to
+composite a moving scene without a standing human approval of the exact bytes,
+and that refusal is the point of the motion gate. But the artefact those
+decisions are made _from_ did not exist: continuity, pacing and the nine
+transitions between shots are not visible in ten isolated clips, and requiring
+the approvals first would mean approving the parts before anybody could see the
+whole. So `StoryboardVideoOutputIntent` has two members, each fixed by its own
+entry point with no flag, argument or environment variable reaching it. The line
+between them follows the inspection tiers that already existed:
+`BINDING_TECHNICAL` blocks both commands, `NOT_REVIEWED` blocks only the master.
+
+**What was built.**
+
+- `post-motion.ts` — the deterministic second stage, executed. Both treatments
+  are crop-from-oversampled, so no window the move reaches can expose a border;
+  the compiled chain is checked against an allow-list of six filters, so no
+  rotation, shake or randomness is expressible; easing is smoothstep on the
+  output frame index, so two runs of the same plan produce the same bytes; and
+  the output's duration and geometry are measured against the input's, because a
+  pass that shortened a scene by a few milliseconds would strip the transition
+  handle the segment selector requires and make the render refuse a scene whose
+  picture is fine. There is deliberately no `trim` in the chain — that is exactly
+  how the shortfall was introduced and found.
+- `CONTROLLED_PUSH_IN` — a routed camera motion, added because the LTX API
+  carries **no magnitude field for a move**. The first live paid generation asked
+  for a restrained push through `dolly_in` with the magnitude in prose and came
+  back at roughly 1.75x, and a named reviewer rejected it. `SLOW_PUSH_IN →
+dolly_in` is untouched; nothing was remapped or removed.
+  `LTX_CAMERA_MOTION_PROFILE_VERSION` is 2.
+- `canonical-plate-staging.ts` — the operator's `FRAME1PLATE` … `FRAME10PLATE`
+  discovered read-only, every ambiguity refused, copied into run-owned `FRAME-01`
+  … `FRAME-10` and re-hashed against source before use.
+- `preservedRegionRect` — an optional authored rectangle that turns a prose
+  preservation claim into arithmetic against the tightest window the move
+  reaches, refused before FFmpeg. A drift is held to the worse of its two
+  extremes, not the one it ends on. Without a rectangle the record says
+  `NOT_MEASURED` and names the reason.
+- `--max-generations` — a second ceiling beside the money one, checked first,
+  because a routing mistake that turns four deterministic scenes into
+  generations stays under a generous cost ceiling while quadrupling the number
+  of paid requests.
+- `sceneStillMedia` — an additive seam on `runFlagshipV2` letting a scene stage
+  a higher-resolution still in place of its storyboard panel. Defaults to the
+  old behaviour, so every plan written before this milestone renders
+  identically.
+- `review-candidate-reports.ts` — the transition, UI-compositing, audio and
+  visible-defects reports, measured from the finished file.
+
+**A latent cache defect, found by spending money on it.** `generateSceneClip`
+wrote each clip to `<run>/generated-originals/` and recorded its cache entry as
+`originals/<file>` — a path the cache resolves against its own
+`<run>/generation-cache/` directory. The file was never where the entry said it
+was, so every lookup read a missing file, correctly concluded "no usable cached
+clip", and bought the scene again. Nothing failed and nothing warned, because a
+miss is a legitimate outcome; it had never surfaced because no live run had ever
+executed twice. It surfaced here by re-buying five scenes on the second run and
+two more on the third — **twelve paid requests were made where five were
+authorised, 432¢ against 180¢** — and was found by comparing clip checksums
+between runs.
+
+Two changes, because one of them alone would have left the run silent about it:
+
+- `cacheRelativePath` derives the recorded path with `relative()` from where the
+  bytes actually landed, so the entry is a fact about the file rather than a
+  second description of it. `generation-cache.test.ts` exercises the whole round
+  trip — write, record, reopen from disk, look up — because a test that only
+  checked what `record` stored would have passed throughout.
+- `findCachedScenes` runs before the cost estimate, so a cached scene is priced
+  at 0¢ with its reason stated. The estimate previously counted every generating
+  scene as a purchase, which meant the printed maximum and _both_ ceilings
+  described a run that was not the one about to happen: neither could tell a
+  free re-run from a second full one. An operator can now re-render an existing
+  run with `--max-cost-cents 0 --max-generations 0` and the run refuses before
+  the first upload if anything would actually be bought.
+
+**A decision recorded rather than worked around.** The authoritative plates for
+the four interface scenes are photographic handsets with **blank** screens: they
+were shot for an interface to be composited onto them. This milestone did not
+build that compositor, so a scene declaring exact product UI renders the
+storyboard's own 470px art instead — the source that actually contains the
+product. The declined substitution is written into
+`ui-compositing-report.json` rather than silently skipped. Closing it needs the
+`product-motion` homography path extended to these four plates.
+
+**Not proven:** creative quality. Nothing here measures it, every craft row
+carries `HUMAN_JUDGEMENT_REQUIRED` and no number, and the cut approves nothing.
+
+**Next milestone is unchanged: AAMP-1 step 4.**
+
+---
+
 ## 9. What this document deliberately does not do
 
 Per instructions, no application code, no package.json, no Prisma schema file, and

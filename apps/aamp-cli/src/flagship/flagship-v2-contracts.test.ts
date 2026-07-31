@@ -320,7 +320,18 @@ describe('the committed flagship-02 campaign', () => {
     const plan = await loadPlan();
     const kinds = plan.beats.slice(1).map((beat) => beat.transitionIn?.kind);
     expect(kinds).toHaveLength(9);
-    expect(new Set(kinds).size).toBeGreaterThanOrEqual(5);
+    // Four, not five. The floor was five when this cut could draw on all six
+    // catalogue kinds; the full-length review candidate then refused two of
+    // them by name — `CROSSFADE` says two shots are interchangeable, and
+    // `DIP_TO_BLACK` puts a black seam between two lit scenes — which leaves
+    // four to vary across nine seams. Both rules are about the same thing, so
+    // the count moved to the number the stricter one permits rather than the
+    // refusal being softened to satisfy an arithmetic that predated it.
+    expect(new Set(kinds).size).toBeGreaterThanOrEqual(4);
+    // The point the floor exists to make: no single kind carries the cut.
+    const counts = new Map<string, number>();
+    for (const kind of kinds) counts.set(String(kind), (counts.get(String(kind)) ?? 0) + 1);
+    expect(Math.max(...counts.values())).toBeLessThanOrEqual(3);
   });
 
   it('puts no prohibited claim in the plan or the treatment', async () => {

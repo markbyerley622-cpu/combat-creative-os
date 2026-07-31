@@ -130,7 +130,8 @@ export const DELIVERY_HEIGHT_PX = 1920;
 export const MOTION_SAMPLE_FPS = 8;
 export const MOTION_SAMPLE_WIDTH_PX = 192;
 export const MOTION_NOISE_CUTOFF = 16;
-export const MOTION_REQUIREMENT_PROFILE_VERSION = 1 as const;
+/** v2 added a floor for `CONTROLLED_PUSH_IN`. No existing floor was changed. */
+export const MOTION_REQUIREMENT_PROFILE_VERSION = 2 as const;
 
 /**
  * Floors by declared camera motion, all far below the slowest real movement
@@ -139,10 +140,19 @@ export const MOTION_REQUIREMENT_PROFILE_VERSION = 1 as const;
  * `STATIC` is the lowest but is deliberately not zero: a locked-off frame is
  * still a frame in which the subject moves, and a scene declared `STATIC`
  * whose picture does not change at all is a still.
+ *
+ * `CONTROLLED_PUSH_IN` sits at the `STATIC` floor, and that is not leniency.
+ * This measurement is taken on the clip the *provider* returned, and a routed
+ * motion asks the provider for `static` — the push is supplied afterwards by
+ * `post-motion.ts`. Holding the returned plate to a push-in's floor would
+ * refuse it for not containing a move it was deliberately not asked to make.
+ * What this floor still catches is the thing it exists for: a returned clip
+ * with no subject movement at all is a still, whatever is applied to it later.
  */
 export const MOTION_ENERGY_FLOOR_BY_CAMERA_MOTION: Readonly<Record<CameraMotion, number>> = {
   STATIC: 0.15,
   SLOW_PUSH_IN: 0.3,
+  CONTROLLED_PUSH_IN: 0.15,
   SLOW_PULL_OUT: 0.3,
   TILT_UP: 0.3,
   TILT_DOWN: 0.3,

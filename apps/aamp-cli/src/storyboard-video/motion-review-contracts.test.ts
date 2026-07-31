@@ -19,6 +19,8 @@ import {
   MOTION_CHECK_IDS,
   MOTION_CHECK_TIERS,
   MOTION_ENERGY_FLOOR_BY_CAMERA_MOTION,
+  MOTION_INSPECTION_PROFILE_VERSION,
+  MOTION_REQUIREMENT_PROFILE_VERSION,
   type MotionCheck,
   type SceneMotionInspection,
 } from './motion-inspection';
@@ -116,7 +118,7 @@ function inspection(overrides: Partial<SceneMotionInspection> = {}): SceneMotion
     observed: 'x',
   }));
   const base = {
-    profileVersion: 1 as const,
+    profileVersion: MOTION_INSPECTION_PROFILE_VERSION,
     sceneNumber: 1,
     sceneRole: 'NOTIFICATION_HOOK',
     sourceType: 'LTX_GENERATED',
@@ -139,7 +141,7 @@ function inspection(overrides: Partial<SceneMotionInspection> = {}): SceneMotion
     blackRegions: [],
     freezeRegions: [],
     motion: {
-      profileVersion: 1 as const,
+      profileVersion: MOTION_REQUIREMENT_PROFILE_VERSION,
       declaredCameraMotion: 'SLOW_PUSH_IN' as const,
       floor: 0.3,
       measuredEnergy: 1.72,

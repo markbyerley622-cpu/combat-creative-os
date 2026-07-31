@@ -355,13 +355,123 @@ creative quality — nine rows carry `HUMAN_JUDGEMENT_REQUIRED` and no number, a
 the picture underneath remains the rejected take. See the "Scene-1 notification
 treatment" rules below and `docs/runbooks/ltx-scene-01-acceptance.md` §10.
 
-**Scenes 8 and 9 carry their authored `HANDHELD_DRIFT` in two stages.** The
-provider has no handheld value, so it is asked for `static` and AAMP supplies
-the drift deterministically afterwards — scene 8 a smooth 2% push preserving the
+**The full-length review candidate is done.** `pnpm aamp:full-review` stages the
+ten authoritative plates as run-owned `FRAME-01` … `FRAME-10`, generates the five
+scenes that need it on capped `ltx-2-3-fast` requests, executes the authored
+deterministic second stage, and assembles one fifteen-second internal-review cut
+through the existing flagship render path unchanged. **Every moving scene in it
+is `PENDING_HUMAN_REVIEW`: the run approves nothing and cannot.** See the
+"Full-length review candidate" rules below and
+`docs/runbooks/full-length-review-candidate.md`.
+
+**Scenes 1, 8 and 9 carry their authored move in two stages, and the second
+stage is now executed.** The provider has no handheld value and no magnitude
+field at all, so those scenes are asked for `static` and AAMP supplies the move
+deterministically afterwards — scene 1 a smooth 3% push preserving the subject
+and the notification band, scene 8 a smooth 2% push preserving the
 predictor-rank interface space, scene 9 a smooth 1% leftward drift preserving
-the phone geometry and discussion-interface region. Neither is substituted with
-`dolly_in`, `dolly_out` or any other LTX move. **The FFmpeg execution of the
-second stage is not implemented yet and neither scene has been generated.**
+the phone geometry and discussion-interface region. None is substituted with
+`dolly_in`, `dolly_out` or any other LTX move.
+
+## Full-length review candidate — permanent rules
+
+- **Two output intents, fixed by the entry point, with no flag reaching
+  either.** `aamp:storyboard-video` produces a `PRODUCTION_MASTER` and refuses
+  to composite a moving scene without a standing human approval of the exact
+  bytes; `aamp:full-review` produces a `FULL_LENGTH_REVIEW_CANDIDATE` and
+  renders unreviewed motion because that cut is the artefact those decisions are
+  made _from_. Never add a flag, argument or environment variable that changes
+  an intent — that is the bypass the gate exists to prevent, wearing a different
+  name.
+- **The split follows the inspection tiers, and nothing else.**
+  `BINDING_TECHNICAL` blocks _both_ commands: a reviewer looking at a broken
+  clip is being asked the wrong question. `NOT_REVIEWED` blocks only the master.
+  Never promote a fidelity finding to binding to make the review candidate
+  stricter — that removes the human decision the finding exists to force.
+- **A review candidate approves nothing, and says so everywhere.**
+  `pending-human-review-ledger.json` lists every moving scene with a null
+  reviewer and a null verdict, `productionUseAuthorised: false` is written
+  explicitly, and no command on this path can write an approval.
+- **`CONTROLLED_PUSH_IN` is routed because the API carries no magnitude.** No
+  speed, strength or distance field exists, and a fabricated one would be a
+  guess with a number in it — so a push whose magnitude is part of the art
+  direction is asked for as `static` and performed deterministically.
+  `SLOW_PUSH_IN → dolly_in` is untouched: nothing was remapped and nothing was
+  removed. This was learned the expensive way, and the reason belongs in the
+  routing table rather than in a commit message.
+- **The second stage may move the picture; it may never shorten the scene.**
+  There is deliberately no `trim` in the compiled chain. Trimming to a nominal
+  duration quantises onto the frame grid and can come back a few milliseconds
+  short, which strips the transition handle the segment selector requires and
+  makes the render refuse a scene whose picture is fine — a failure two stages
+  from its cause. The output duration and geometry are **measured** against the
+  input's and a shortfall is refused by name.
+- **No border can be exposed, structurally.** Both treatments are
+  crop-from-oversampled, never translate-the-frame. There is no `pad`, no
+  `fillborders` and no negative `overlay` offset in anything `post-motion.ts`
+  compiles, and the chain is checked against an allow-list of filters — so a
+  future edit reaching for `rotate` or `noise` fails a test rather than shipping
+  a shake into an advertisement.
+- **A drift's magnification is constant, and that is proven about the
+  grammar.** `assertNoZoomOverTime` refuses a zoom expression containing `on` or
+  `t`. A prohibition checked against a comment claiming it is not a check.
+- **A preserved region is prose until somebody writes the rectangle.**
+  `preservedRegionRect` turns "must not crop the rankings region" into
+  arithmetic against the tightest window the move reaches, refused before FFmpeg.
+  Without it the record says `NOT_MEASURED` and names the reason; an unmeasured
+  check is never a pass. A drift is held to the **worse of its two extremes**,
+  not the one it ends on.
+- **The operator's plate folder is read-only, and the run owns its inputs.**
+  Plates are discovered, every ambiguity refused, copied out, and the copy
+  re-hashed against its source before anything uses it. Nothing is written,
+  renamed, moved or deleted outside the run directory, and no operator path is
+  hardcoded.
+- **A still scene renders the source that contains the product.** The
+  authoritative plates for the interface scenes are photographic handsets with
+  _blank_ screens — shot for an interface to be composited onto — so a scene
+  declaring exact product UI renders the storyboard's own art instead, even
+  though it is lower resolution. A beautiful empty handset is not a
+  demonstration of an application. The declined substitution is **recorded**,
+  never silently skipped.
+- **Two ceilings, because they fail differently.** `--max-cost-cents` and
+  `--max-generations` are both checked before the first upload. A routing
+  mistake that turns four deterministic scenes into generations stays under a
+  generous cost ceiling while quadrupling the number of paid requests; only a
+  ceiling denominated in requests notices. The request ceiling is checked first,
+  because an operator who has mis-routed four scenes needs to be told that
+  rather than told the price.
+- **The cost estimate consults the cache, and this was learned expensively.**
+  A cached scene is priced at 0¢ with its reason stated, because the estimate
+  exists to say what the run will _spend_. When it counted every generating
+  scene as a purchase, both ceilings described a run that was not the one about
+  to happen — so neither could tell a free re-run from a second full one, and a
+  broken cache bought the same storyboard three times before anyone compared a
+  checksum. `findCachedScenes` uses the same key the generation stage uses, so
+  the two cannot disagree. **Re-render an existing run with
+  `--max-cost-cents 0 --max-generations 0`**: if any scene would actually be
+  bought, the run refuses before the first upload.
+- **A cache entry's path is derived from where the bytes landed, never composed
+  from an assumed layout.** `cacheRelativePath` computes it with `relative()`.
+  The entry said `originals/…` while the file was written to a sibling
+  `generated-originals/…`, so every lookup read a missing file, correctly
+  called it a miss, and re-bought — silently, because a miss is a legitimate
+  outcome. Any test of the cache must exercise the **whole** round trip: write
+  the bytes where the run writes them, record, reopen from disk, look up. A
+  test that asserts what `record` stored passes while the cache is useless.
+- **Benchmark audio needs three yeses**: the pack exists, its final report says
+  the chain finished, and its mixes directory holds audio. Anything else is
+  `AUDIO_TEMPORARY`. A benchmark still marked `IN PROGRESS` has not finished, and
+  putting its intermediate material into a cut labelled as the reviewable one
+  would misrepresent both.
+- **The reports measure two things about the picture and claim nothing else** —
+  whether an inspected frame reads as black, and how much luma variation it
+  carries. Everything a person has to judge is listed separately and carries no
+  number. No function may be added to `review-candidate-reports.ts` that scores
+  creative quality.
+- **A visible change of predictor rank is not rendered, and the reason is
+  recorded.** No source shows two ranking states, and drawing them would be this
+  pipeline inventing product UI. It needs a real capture of both states or the
+  screen compositor, not a caption.
 
 ## Scene-1 notification art direction — permanent rules (treatment v3)
 

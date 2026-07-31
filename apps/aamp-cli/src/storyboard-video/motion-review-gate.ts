@@ -243,6 +243,50 @@ export function describeChange(before: SceneReviewIdentity, after: SceneReviewId
  * `MOTION_INSPECTION_FAILED`. When both are present the technical one wins,
  * because reviewing a clip that is about to be replaced is wasted attention.
  */
+/**
+ * The half of the gate an internal review candidate must still clear.
+ *
+ * The two inspection tiers already draw exactly this line, and it is worth
+ * being explicit about why the split is legitimate rather than a bypass with a
+ * different name.
+ *
+ * `BINDING_TECHNICAL` means the file is *unusable* — wrong geometry, no
+ * motion, a broken download. No approval clears it, and it cannot be in a
+ * review candidate either, because a reviewer looking at a broken clip is
+ * being asked the wrong question.
+ *
+ * `NOT_REVIEWED` means nobody has decided yet. A full-length review candidate
+ * is the artefact that decision is made *from*: scene-to-scene continuity,
+ * pacing and the transitions between shots are not visible in ten isolated
+ * clips, and requiring the approval first would mean approving the parts
+ * before anyone could see the whole. So the review candidate proceeds and
+ * records every scene as pending, while the production master
+ * (`assertMotionGateClears`) still refuses without a standing approval.
+ *
+ * The distinction is enforced by which entry point the operator ran, never by
+ * a flag: there is no option on either command that changes its intent.
+ */
+export function assertReviewCandidateTechnicallySound(report: MotionGateReport): void {
+  if (report.technicallyInvalidScenes.length === 0) return;
+
+  const blocked = report.rows.filter(
+    (row) => row.status === 'TECHNICALLY_INVALID' || row.status === 'MISSING_SOURCE',
+  );
+  const lines = blocked.map(
+    (row) => `  - scene ${row.sceneNumber} (${row.sceneRole}) — ${row.status}\n      ${row.remedy}`,
+  );
+
+  throw new StoryboardVideoError(
+    'MOTION_INSPECTION_FAILED',
+    `${blocked.length} moving scene(s) failed local technical inspection and cannot be put in front of a reviewer: ${blocked
+      .map((row) => row.sceneNumber)
+      .join(
+        ', ',
+      )}. No FFmpeg composition has started.\n\n${lines.join('\n')}\n\nA review candidate may carry unreviewed motion — that is what it is for — but it may not carry a clip that is technically broken, because a reviewer looking at one is being asked the wrong question.`,
+    blocked[0]?.sceneNumber,
+  );
+}
+
 export function assertMotionGateClears(report: MotionGateReport): void {
   if (report.clears) return;
 

@@ -46,7 +46,7 @@
       "id": "notification-hook",
       "index": 0,
       "role": "HOOK",
-      "description": "Panel one, contained at full width over a backplate built from its own pixels. A slow cinematic push carries the frame toward the face and the phone while a red accent ring pulses once around the notification card, which is the focal point the panel already designed.",
+      "description": "The hook, on real generated footage of a fan lit only by the device. The locked notification treatment is composited over it after the motion — one laid-out document rasterised to a transparent sheet, never drawn by the filter graph — so the model never saw a card and the push underneath does not scale the type.",
       "durationSeconds": 1.1,
       "source": {
         "assetId": "storyboard-panel-01",
@@ -66,24 +66,12 @@
           "widthPx": 1080,
           "heightPx": 1920,
           "thicknessPx": 6
-        },
-        {
-          "key": "ACCENT_OUTLINE",
-          "colour": "ACCENT",
-          "opacity": 0.8,
-          "xPx": 170,
-          "yPx": 1028,
-          "widthPx": 612,
-          "heightPx": 238,
-          "thicknessPx": 4,
-          "startOffsetSeconds": 0.24,
-          "durationSeconds": 0.46
         }
       ],
       "audioCues": [
         {
           "role": "IMPACT",
-          "atOffsetSeconds": 0.0,
+          "atOffsetSeconds": 0,
           "gainDb": -8,
           "ducksMusic": true
         },
@@ -140,7 +128,7 @@
       "id": "event-discovery",
       "index": 2,
       "role": "EVENT_DETAIL",
-      "description": "Panel three. The backplate drifts at its own rate behind the contained panel, separating the arena from the phone into two planes, and a focus dim holds the eye on the events interface so the screen stays the thing being read.",
+      "description": "The events screen, contained at full width over a backplate built from its own pixels, under one restrained push. The schedule region is held undimmed for the whole readable interval so a viewer can actually read what is on the day; nothing about the interface is redrawn.",
       "durationSeconds": 1.8,
       "source": {
         "assetId": "storyboard-panel-03",
@@ -148,7 +136,7 @@
       },
       "motion": {
         "treatment": "STORYBOARD_PANEL_2_5D",
-        "intensity": 0.85
+        "intensity": 0.5
       },
       "transitionIn": {
         "kind": "MASKED_UI_REVEAL",
@@ -168,20 +156,20 @@
         {
           "key": "FOCUS_DIM",
           "colour": "PRIMARY",
-          "opacity": 0.34,
+          "opacity": 0.3,
           "xPx": 78,
-          "yPx": 578,
-          "widthPx": 346,
-          "heightPx": 742,
+          "yPx": 520,
+          "widthPx": 924,
+          "heightPx": 900,
           "thicknessPx": 6,
-          "startOffsetSeconds": 0.42,
-          "durationSeconds": 0.85
+          "startOffsetSeconds": 0.2,
+          "durationSeconds": 1.5
         }
       ],
       "audioCues": [
         {
           "role": "CROWD",
-          "atOffsetSeconds": 0.0,
+          "atOffsetSeconds": 0,
           "gainDb": -22,
           "ducksMusic": false
         },
@@ -198,7 +186,7 @@
       "id": "rankings-research",
       "index": 3,
       "role": "INFORMATION",
-      "description": "Panel four. A restrained push settles on the rankings phone and a focus dim isolates the ordered list, so the movement reads as research rather than decoration.",
+      "description": "The rankings screen on the same handset in the same place, under a push of the same magnitude, entered on a screen-position match cut. Two beats, one move: the cut lands mid-push so the eye reads it as one continuous look at one device rather than two independent zooms.",
       "durationSeconds": 1.5,
       "source": {
         "assetId": "storyboard-panel-04",
@@ -206,10 +194,10 @@
       },
       "motion": {
         "treatment": "STORYBOARD_PANEL_2_5D",
-        "intensity": 0.55
+        "intensity": 0.5
       },
       "transitionIn": {
-        "kind": "WHIP_PAN",
+        "kind": "CUT",
         "durationSeconds": 0.2
       },
       "decorations": [
@@ -227,13 +215,13 @@
           "key": "FOCUS_DIM",
           "colour": "PRIMARY",
           "opacity": 0.3,
-          "xPx": 582,
-          "yPx": 578,
-          "widthPx": 392,
-          "heightPx": 742,
+          "xPx": 78,
+          "yPx": 520,
+          "widthPx": 924,
+          "heightPx": 900,
           "thicknessPx": 6,
-          "startOffsetSeconds": 0.3,
-          "durationSeconds": 0.75
+          "startOffsetSeconds": 0.25,
+          "durationSeconds": 1
         }
       ],
       "audioCues": [
@@ -261,7 +249,7 @@
         "intensity": 0.7
       },
       "transitionIn": {
-        "kind": "CROSSFADE",
+        "kind": "WHIP_PAN",
         "durationSeconds": 0.3
       },
       "decorations": [
@@ -283,14 +271,14 @@
       "id": "free-prediction",
       "index": 5,
       "role": "PREDICTION",
-      "description": "Panel six. The push is deliberately restrained so the interface stays legible, and a tap indicator lands on the free-prediction button at the moment the finger reaches it, synchronised to the selection sound.",
+      "description": "The free prediction, revealed as vertical slices rather than pushed, so this beat does not repeat the move the two before it made. The tap indicator lands on the chosen card and is gone inside nine tenths of a second, then the chosen row outlines: a selection that lingers reads as a loading state rather than a choice.",
       "durationSeconds": 1.666667,
       "source": {
         "assetId": "storyboard-panel-06",
         "requiredTags": []
       },
       "motion": {
-        "treatment": "STORYBOARD_PANEL_2_5D",
+        "treatment": "STORYBOARD_SLICE_REVEAL",
         "intensity": 0.5
       },
       "transitionIn": {
@@ -317,8 +305,20 @@
           "widthPx": 168,
           "heightPx": 168,
           "thicknessPx": 8,
-          "startOffsetSeconds": 0.54,
-          "durationSeconds": 0.38
+          "startOffsetSeconds": 0.2,
+          "durationSeconds": 0.55
+        },
+        {
+          "key": "ACCENT_OUTLINE",
+          "colour": "ACCENT",
+          "opacity": 0.9,
+          "xPx": 96,
+          "yPx": 1040,
+          "widthPx": 888,
+          "heightPx": 250,
+          "thicknessPx": 5,
+          "startOffsetSeconds": 0.75,
+          "durationSeconds": 0.7
         }
       ],
       "audioCues": [
@@ -343,7 +343,7 @@
       },
       "motion": {
         "treatment": "STORYBOARD_PANEL_2_5D",
-        "intensity": 1.0
+        "intensity": 1
       },
       "transitionIn": {
         "kind": "IMPACT_CUT",
@@ -359,7 +359,7 @@
           "widthPx": 1080,
           "heightPx": 1920,
           "thicknessPx": 6,
-          "startOffsetSeconds": 0.0,
+          "startOffsetSeconds": 0,
           "durationSeconds": 0.2
         },
         {
@@ -432,7 +432,7 @@
       "audioCues": [
         {
           "role": "CROWD",
-          "atOffsetSeconds": 0.0,
+          "atOffsetSeconds": 0,
           "gainDb": -18,
           "ducksMusic": false
         },
@@ -460,7 +460,7 @@
         "intensity": 0.45
       },
       "transitionIn": {
-        "kind": "CROSSFADE",
+        "kind": "CUT",
         "durationSeconds": 0.3
       },
       "decorations": [
@@ -490,7 +490,7 @@
       "audioCues": [
         {
           "role": "CROWD",
-          "atOffsetSeconds": 0.0,
+          "atOffsetSeconds": 0,
           "gainDb": -24,
           "ducksMusic": false
         }
@@ -501,7 +501,7 @@
       "id": "brand-cta",
       "index": 9,
       "role": "CTA",
-      "description": "Panel ten, entered on a dip to black. The move is almost imperceptible so the end card settles early, the call-to-action button illuminates once, and the last stretch of the cut is a clean, stable hold.",
+      "description": "The brand and call-to-action frame, held as close to still as the treatment allows so the last two and a third seconds are the steadiest thing in the film. No dip to black on the way in: the cut arrives on a directional smear out of the community beat and then stops.",
       "durationSeconds": 2.633333,
       "source": {
         "assetId": "storyboard-panel-10",
@@ -509,10 +509,10 @@
       },
       "motion": {
         "treatment": "STORYBOARD_PANEL_2_5D",
-        "intensity": 0.2
+        "intensity": 0.12
       },
       "transitionIn": {
-        "kind": "DIP_TO_BLACK",
+        "kind": "WHIP_PAN",
         "durationSeconds": 0.333333
       },
       "decorations": [

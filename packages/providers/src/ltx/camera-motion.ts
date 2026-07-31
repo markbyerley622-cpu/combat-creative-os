@@ -62,8 +62,14 @@
  * same path as any unrecognised value: a typed refusal.
  */
 
-/** Bumped whenever a mapping is added, removed or changed. Travels in the refusal. */
-export const LTX_CAMERA_MOTION_PROFILE_VERSION = 1 as const;
+/**
+ * Bumped whenever a mapping is added, removed or changed. Travels in the
+ * refusal.
+ *
+ * v2 added `CONTROLLED_PUSH_IN` as a routed motion. Nothing was remapped and
+ * nothing was removed: `SLOW_PUSH_IN` still resolves to `dolly_in`.
+ */
+export const LTX_CAMERA_MOTION_PROFILE_VERSION = 2 as const;
 
 /**
  * The only values `camera_motion` may carry on the wire.
@@ -144,6 +150,10 @@ export const LTX_POST_MOTION_ROUTED_MOTIONS: ReadonlyMap<string, string> = new M
   [
     'HANDHELD_DRIFT',
     'the LTX vocabulary has no handheld quality, so the provider is asked for a locked-off frame and the restrained drift is applied deterministically afterwards',
+  ],
+  [
+    'CONTROLLED_PUSH_IN',
+    'the API carries no magnitude for a move — no speed, strength or distance field exists, and a fabricated one would be a guess with a number in it — so a push whose magnitude is part of the art direction is routed: the provider is asked for a locked-off frame and the stated percentage is applied deterministically afterwards. Recorded because it was learned the expensive way: the first live Scene-1 generation asked for a restrained push through dolly_in and came back at roughly 1.75x, ending with the subject out of frame',
   ],
 ]);
 

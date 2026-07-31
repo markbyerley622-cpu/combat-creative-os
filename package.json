@@ -27,6 +27,7 @@
     "aamp:flagship": "pnpm --filter aamp-cli run build && node --env-file-if-exists=.env apps/aamp-cli/dist/flagship/flagship-main.js",
     "aamp:flagship2": "pnpm --filter aamp-cli run build && node --env-file-if-exists=.env apps/aamp-cli/dist/flagship/flagship2-main.js",
     "aamp:storyboard-video": "pnpm --filter aamp-cli run build && node --env-file-if-exists=.env apps/aamp-cli/dist/storyboard-video/storyboard-video-main.js",
+    "aamp:full-review": "pnpm --filter aamp-cli run build && node --env-file-if-exists=.env apps/aamp-cli/dist/storyboard-video/full-review-main.js",
     "aamp:motion-review": "pnpm --filter aamp-cli run build && node apps/aamp-cli/dist/storyboard-video/motion-review-main.js",
     "aamp:ltx-scene-01": "pnpm --filter aamp-cli run build && node apps/aamp-cli/dist/scene-acceptance/scene-acceptance-main.js",
     "aamp:notification-proof": "pnpm --filter aamp-cli run build && node apps/aamp-cli/dist/scene-acceptance/notification-proof-main.js",

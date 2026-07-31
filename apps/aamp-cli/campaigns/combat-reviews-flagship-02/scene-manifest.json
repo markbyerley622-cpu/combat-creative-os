@@ -9,12 +9,31 @@
       "outputStartSeconds": 0.0,
       "outputEndSeconds": 1.1,
       "generationMode": "LTX_IMAGE_TO_VIDEO",
-      "motionPrompt": "A young man stands in near-darkness, head lowered toward the device in his hands. He breathes once and his eyes flick down as the screen light catches his face. Behind him, soft city bokeh drifts slowly out of focus and a faint red glow breathes around the device. The camera pushes in slowly and steadily toward his face and hands, never crossing into a close-up. Focus stays locked on his eyes and the near edge of the device; the background stays soft throughout. Lighting is low-key and cold, keyed almost entirely from below by the screen, with a thin warm rim on the left of his jaw. The intended audio event is a single low impact on the first frame, then a rising tension bed. Do not alter, redraw, add or remove any on-screen graphic, notification card, glyph, badge, mark, wordmark, number, date or written element anywhere in frame; every such element is composited afterwards from approved material and must remain exactly as supplied.",
-      "cameraMotion": "SLOW_PUSH_IN",
+      "motionPrompt": "A young man stands in near-darkness, head lowered toward the device in his hands. He breathes once and his eyes flick down as the screen light catches his face; his gaze stays on the device and never lifts toward the viewer. Behind him, soft city bokeh drifts slowly out of focus and a faint red glow breathes around the device. The camera is locked off and does not move: the framing at the last frame is the framing at the first, and his head, shoulders and hands stay exactly where they begin. Focus stays locked on his eyes and the near edge of the device; the background stays soft throughout. Lighting is low-key and cold, keyed almost entirely from below by the screen, with a thin warm rim on the left of his jaw. The intended audio event is a single low impact on the first frame, then a rising tension bed. Do not alter, redraw, add or remove any on-screen graphic, notification card, glyph, badge, mark, wordmark, number, date or written element anywhere in frame; every such element is composited afterwards from approved material and must remain exactly as supplied.",
+      "cameraMotion": "CONTROLLED_PUSH_IN",
       "preserveExactTypography": false,
       "preserveExactProductUi": false,
       "acceptableFootageRoles": ["TALENT_PHONE_NOTIFICATION"],
-      "intent": "The hook. A fan finding out first, lit only by the device. The notification card itself is composited, never generated."
+      "intent": "The hook. A fan finding out first, lit only by the device. The notification card itself is composited, never generated. The push is three percent and is applied deterministically: the first paid take asked the provider for a push and came back at roughly 1.75x with the subject's eyes outside frame, so the magnitude belongs to a stage that has a number for it.",
+      "postMotion": {
+        "treatment": "SMOOTH_PUSH",
+        "magnitudePercent": 3,
+        "preservedRegion": "the subject's head, hands and the device, and the clean band above them where the notification card is composited",
+        "prohibitions": [
+          "no rotation",
+          "no random shake",
+          "no horizontal or vertical drift",
+          "must not crop the subject's head or hands",
+          "must not crop the clean band the notification card occupies"
+        ],
+        "preservedRegionRect": {
+          "xFraction": 0.08,
+          "yFraction": 0.12,
+          "widthFraction": 0.84,
+          "heightFraction": 0.76
+        },
+        "rationale": "The API carries no magnitude for a move, so dolly_in leaves the number in prose — and the first paid take came back at roughly 1.75x. The provider is asked for a locked-off frame and the three percent applied deterministically, the only way the stated magnitude is the delivered one."
+      }
     },
     {
       "sceneNumber": 2,
@@ -61,12 +80,12 @@
       "outputStartSeconds": 5.1,
       "outputEndSeconds": 6.6,
       "generationMode": "LTX_IMAGE_TO_VIDEO",
-      "motionPrompt": "Two athletes face each other from opposite edges of frame, each holding their stance and breathing hard. Their shoulders settle and each leans a fraction toward the other; heads stay level and neither crosses the centre. Haze drifts through the beam between them. The camera pushes in a very small amount and stops. Focus holds both figures; the centre of frame stays clear and unobstructed for the card that will be composited there. Lighting is hard top-back key, deep shadow, a red edge on the left figure and a cool edge on the right. The intended audio event is a low tension bed with a soft data texture underneath. Do not alter, redraw, add or remove the centre comparison card or any name, numeral, record, rank, marker, badge, mark or written element anywhere in frame, and do not move either figure into the centre; all of that is composited afterwards from approved material.",
-      "cameraMotion": "SLOW_PUSH_IN",
+      "motionPrompt": "Two athletes face each other from opposite edges of frame, each holding their stance and breathing hard. Their shoulders settle and each leans a fraction toward the other; heads stay level and neither crosses the centre. Haze drifts through the beam between them. The camera is locked off and does not move: the framing at the last frame is the framing at the first. Focus holds both figures; the centre of frame stays clear and unobstructed for the card that will be composited there. Lighting is hard top-back key, deep shadow, a red edge on the left figure and a cool edge on the right. The intended audio event is a low tension bed with a soft data texture underneath. Do not alter, redraw, add or remove the centre comparison card or any name, numeral, record, rank, marker, badge, mark or written element anywhere in frame, and do not move either figure into the centre; all of that is composited afterwards from approved material.",
+      "cameraMotion": "STATIC",
       "preserveExactTypography": false,
       "preserveExactProductUi": false,
       "acceptableFootageRoles": ["FIGHTER_FACE_OFF", "BOXING_ACTION"],
-      "intent": "The face-off. The centre of frame is deliberately protected so the comparison card lands on clean plate."
+      "intent": "The face-off. The centre of frame is deliberately protected so the comparison card lands on clean plate, and a locked-off camera is what keeps that protected region in the same place for the whole shot — a move would walk the card's clean plate out from under it."
     },
     {
       "sceneNumber": 6,
@@ -116,6 +135,12 @@
           "no horizontal or vertical drift",
           "must not crop or obscure the predictor-rank interface region"
         ],
+        "preservedRegionRect": {
+          "xFraction": 0.5,
+          "yFraction": 0.28,
+          "widthFraction": 0.44,
+          "heightFraction": 0.36
+        },
         "rationale": "The authored move is a restrained handheld drift, which ltx-hosted has no value for. The provider is asked for a locked-off frame and the drift is applied deterministically, so the intention survives without asking a model for a move it cannot make."
       }
     },
@@ -143,6 +168,12 @@
           "must not distort the phone geometry",
           "must not crop or obscure the discussion-interface region"
         ],
+        "preservedRegionRect": {
+          "xFraction": 0.52,
+          "yFraction": 0.3,
+          "widthFraction": 0.42,
+          "heightFraction": 0.36
+        },
         "rationale": "The authored move is a restrained handheld drift, which ltx-hosted has no value for. The provider is asked for a locked-off frame and a one percent lateral drift is applied deterministically, preserving the phone's geometry."
       }
     },

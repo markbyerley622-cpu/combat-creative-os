@@ -65,6 +65,24 @@ export function modeReachesGenerationProvider(mode: GenerationMode): boolean {
 export const CAMERA_MOTIONS = [
   'STATIC',
   'SLOW_PUSH_IN',
+  /**
+   * A push held to a stated percentage, carried in two stages.
+   *
+   * Distinct from `SLOW_PUSH_IN`, and the distinction is evidence rather than
+   * taste. `SLOW_PUSH_IN` maps to the provider's own `dolly_in`, which is a
+   * push and is honestly named — but the first live Scene-1 generation asked
+   * for a restrained push and came back at roughly 1.75x, ending with the
+   * subject's eyes outside frame. "Slow" lives in the prose prompt and the
+   * model is free to read it as it likes; there is no magnitude field on the
+   * wire, and a fabricated one would be a guess with a number in it.
+   *
+   * So a push whose *magnitude is part of the art direction* is routed: the
+   * provider is asked for a locked-off frame and AAMP performs the push
+   * deterministically, to the exact percentage a person wrote down. This is
+   * not a substitution — the shot is still a push — it is a decision about
+   * which stage owns the number.
+   */
+  'CONTROLLED_PUSH_IN',
   'SLOW_PULL_OUT',
   'HANDHELD_DRIFT',
   'LATERAL_TRACK_LEFT',
@@ -117,6 +135,25 @@ const PostMotionSchema = z
      * transform itself cannot detect.
      */
     preservedRegion: z.string().min(1).max(200),
+    /**
+     * The same region as a rectangle, so the claim can be checked.
+     *
+     * Optional, and its absence is honest rather than convenient: prose cannot
+     * be measured, and a run whose scene declares only prose records the
+     * geometric check as `NOT_MEASURED` with that reason rather than reporting
+     * a pass it never took. Supplying it turns "must not crop the rankings
+     * region" into arithmetic against the tightest window the move reaches,
+     * refused before FFmpeg is invoked.
+     */
+    preservedRegionRect: z
+      .object({
+        xFraction: z.number().min(0).max(1),
+        yFraction: z.number().min(0).max(1),
+        widthFraction: z.number().positive().max(1),
+        heightFraction: z.number().positive().max(1),
+      })
+      .strict()
+      .optional(),
     /** What this treatment may never do. Stated so a reviewer can check it. */
     prohibitions: z.array(z.string().min(1).max(120)).min(1).max(8),
     /** Why the provider cannot carry this move itself, in the author's words. */

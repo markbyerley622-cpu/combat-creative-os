@@ -66,6 +66,26 @@ export const STORYBOARD_VIDEO_EXIT_CODES = {
    * different clip is needed; no approval can clear this.
    */
   MOTION_INSPECTION_FAILED: 39,
+  /**
+   * A routed scene's authored second stage cannot be executed as written —
+   * too few frames to move across, a frame size that is not one, or a
+   * compiled chain reaching for a filter this treatment may not emit.
+   *
+   * Distinct from a render failure because the fix is different: this is a
+   * plan that has to be edited, not a pipeline that has to be rerun.
+   */
+  POST_MOTION_NOT_EXECUTABLE: 40,
+  /**
+   * The authored move at the authored magnitude would crop the region the
+   * scene says must survive. Refused before FFmpeg; nothing was rendered.
+   */
+  POST_MOTION_WOULD_CROP_PRESERVED_REGION: 41,
+  /**
+   * The ten authoritative plates could not be staged as run-owned
+   * `FRAME-01` … `FRAME-10` copies — missing, ambiguous, landscape, or a
+   * copy that did not hash to its source.
+   */
+  PLATE_STAGING_FAILED: 42,
 } as const;
 
 export type StoryboardVideoExitCode =
@@ -93,6 +113,9 @@ export const STORYBOARD_VIDEO_FAILURE_KINDS = [
   'QA_FAILURE',
   'MOTION_REVIEW_BLOCKED',
   'MOTION_INSPECTION_FAILED',
+  'POST_MOTION_NOT_EXECUTABLE',
+  'POST_MOTION_WOULD_CROP_PRESERVED_REGION',
+  'PLATE_STAGING_FAILED',
 ] as const;
 export type StoryboardVideoFailureKind = (typeof STORYBOARD_VIDEO_FAILURE_KINDS)[number];
 

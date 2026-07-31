@@ -58,14 +58,40 @@ export interface BuildCostEstimateInput {
   readonly resolution: string;
   readonly ceilingCents: number;
   readonly requiredSourceSecondsForScene: (sceneNumber: number) => number;
+  /**
+   * Scenes a byte-verified cached generation already covers.
+   *
+   * The estimate exists to say what the run will *spend*, and a scene served
+   * from cache spends nothing — it makes no request at all, not even a status
+   * check. Counting it anyway was not a conservative over-estimate: it made
+   * both ceilings describe a run that was not the one about to happen, so
+   * neither could notice when a broken cache turned a free re-run into a
+   * second full purchase. The set is computed from the same key the generation
+   * stage uses, so the two cannot disagree.
+   */
+  readonly alreadyCachedScenes?: ReadonlySet<number>;
 }
 
 export function buildCostEstimate(input: BuildCostEstimateInput): CostEstimate {
   const centsPerGeneratedSecond = ltxCentsPerGeneratedSecond(input.model, input.resolution);
+  const cached = input.alreadyCachedScenes ?? new Set<number>();
   const lines: SceneCostLine[] = [];
 
   for (const decision of [...input.decisions].sort((a, b) => a.sceneNumber - b.sceneNumber)) {
     const requiredSourceSeconds = input.requiredSourceSecondsForScene(decision.sceneNumber);
+    if (decision.requiresGeneration && cached.has(decision.sceneNumber)) {
+      lines.push({
+        sceneNumber: decision.sceneNumber,
+        sceneRole: decision.sceneRole,
+        willGenerate: false,
+        requiredSourceSeconds,
+        requestedDurationSeconds: null,
+        costCents: 0,
+        reason:
+          'a byte-verified cached generation already covers this scene — no upload, no request, no charge',
+      });
+      continue;
+    }
     if (!decision.requiresGeneration) {
       lines.push({
         sceneNumber: decision.sceneNumber,
@@ -124,6 +150,32 @@ export function assertWithinCostCeiling(estimate: CostEstimate): void {
   throw new StoryboardVideoError(
     'COST_CEILING_EXCEEDED',
     `this run would cost up to ${estimate.maximumTotalCostCents}¢ (${estimate.generatedSceneCount} generated scene(s), ${estimate.totalGeneratedSeconds}s at ${estimate.centsPerGeneratedSecond}¢/s for ${estimate.model}) but --max-cost-cents is ${estimate.ceilingCents}¢. Nothing has been uploaded and nothing has been spent. Raise the ceiling to at least ${estimate.maximumTotalCostCents} or reduce the number of generated scenes.`,
+  );
+}
+
+/**
+ * Refuses a run that would make more billable submissions than authorised.
+ *
+ * A second ceiling beside the money one, and it exists because the two fail
+ * differently. A routing mistake that turns four deterministic scenes into
+ * generations stays under a generous cost ceiling while quadrupling the number
+ * of paid requests; only a ceiling denominated in requests notices. Checked
+ * before the first upload, and it names both numbers rather than saying "too
+ * many".
+ */
+export function assertWithinGenerationCeiling(
+  estimate: CostEstimate,
+  maxGenerations: number | undefined,
+): void {
+  if (maxGenerations === undefined) return;
+  if (estimate.generatedSceneCount <= maxGenerations) return;
+  const scenes = estimate.lines
+    .filter((line) => line.willGenerate)
+    .map((line) => line.sceneNumber)
+    .join(', ');
+  throw new StoryboardVideoError(
+    'COST_CEILING_EXCEEDED',
+    `this run would make ${estimate.generatedSceneCount} billable submission(s) (scenes ${scenes}) but --max-generations is ${maxGenerations}. Nothing has been uploaded and nothing has been spent. Either the routing is wrong — check which scenes resolved to LTX_GENERATED in source-decision-report.json — or raise the ceiling deliberately.`,
   );
 }
 

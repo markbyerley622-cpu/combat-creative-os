@@ -14,6 +14,7 @@ import {
   LTX_RESPONSE_CONTRACT_STATUS,
   LTX_SUPPORTED_FPS,
   LTX_SUPPORTED_RESOLUTION,
+  routeLtxCameraMotion,
   type LtxModel,
   type VideoGenerationProvider,
 } from '@combat/providers';
@@ -25,10 +26,22 @@ import {
   V2_IS_REAL_CAMPAIGN_RUN,
   V2_OUTPUT_USE,
   type GeneratedSceneMedia,
+  type SceneStillMedia,
 } from '../flagship/run-flagship-v2';
+import { loadAcceptanceBrief } from '../scene-acceptance/acceptance-brief';
+import {
+  compositeNotification,
+  type NotificationCompositeResult,
+} from '../scene-acceptance/notification-composite';
 import { assertStoryboardVideoArtefactSafe } from './artefact-safety';
 import {
+  describeStagedPlates,
+  stageCanonicalPlates,
+  type StagedPlateLibrary,
+} from './canonical-plate-staging';
+import {
   assertWithinCostCeiling,
+  assertWithinGenerationCeiling,
   buildCostEstimate,
   describeCostEstimate,
   type CostEstimate,
@@ -42,9 +55,23 @@ import {
 import { GenerationCache } from './generation-cache';
 import {
   assertMotionGateClears,
+  assertReviewCandidateTechnicallySound,
   sceneNeedsMotionReview,
   type MotionGateReport,
 } from './motion-review-gate';
+import {
+  applyPostMotion,
+  buildPostMotionReport,
+  POST_MOTION_DIRECTORY,
+  type AppliedPostMotion,
+} from './post-motion';
+import {
+  buildAudioReport,
+  buildTransitionReport,
+  buildUiCompositingReport,
+  buildVisibleDefectsReport,
+  findBenchmarkAudio,
+} from './review-candidate-reports';
 import { runMotionReview, type MotionReviewOutcome } from './motion-review-run';
 import { DEFAULT_MOTION_REVIEW_DIRECTORY, MotionReviewLedger } from './motion-review-store';
 import { MANUAL_GENERATION_PROVENANCE, type PreGeneratedClipLibrary } from './pre-generated-clips';
@@ -52,10 +79,12 @@ import {
   generateSceneClip,
   prepareSceneClip,
   probeClip,
+  sceneCacheKey,
   type GeneratedSceneClip,
   type PreparedSceneClip,
 } from './scene-media';
 import { modeReachesGenerationProvider, type SceneManifest } from './scene-manifest';
+import type { KeyframeLibrary } from './keyframe-library';
 import {
   movingSourcePathFor,
   resolveStoryboardVideoContext,
@@ -90,14 +119,81 @@ import type { FootagePack } from './footage-pack';
 
 export const STORYBOARD_VIDEO_RUN_VERSION = 1 as const;
 
+/**
+ * What the run is producing, and therefore which half of the motion gate binds.
+ *
+ * Two genuinely different artefacts, not two strictnesses of one:
+ *
+ * - `PRODUCTION_MASTER` is a file somebody could publish. Every moving scene
+ *   carries a standing human approval of the exact bytes, or nothing is
+ *   composited.
+ * - `FULL_LENGTH_REVIEW_CANDIDATE` is the cut a reviewer watches *in order to*
+ *   make those decisions. Continuity, pacing and the nine transitions between
+ *   shots are not visible in ten isolated clips, so requiring the approvals
+ *   first would mean approving the parts before anyone could see the whole. It
+ *   still refuses a technically broken clip, and every scene it contains is
+ *   recorded as `PENDING_HUMAN_REVIEW` in every artefact it writes.
+ *
+ * The value is fixed by the entry point the operator ran. Neither CLI exposes
+ * a flag, an environment variable or an argument that changes it — a gate with
+ * a switch is a gate that gets switched off on the afternoon somebody needs
+ * the file quickly.
+ */
+export const STORYBOARD_VIDEO_OUTPUT_INTENTS = [
+  'PRODUCTION_MASTER',
+  'FULL_LENGTH_REVIEW_CANDIDATE',
+] as const;
+export type StoryboardVideoOutputIntent = (typeof STORYBOARD_VIDEO_OUTPUT_INTENTS)[number];
+
 export interface StoryboardVideoOptions {
   readonly storyboardRoot: string;
   readonly framesDirectory: string;
+  /**
+   * The operator's read-only authoritative plate folder, when the run should
+   * stage its own canonical keyframes from it.
+   *
+   * When supplied it *replaces* `framesDirectory`: the ten `FRAME1PLATE` …
+   * `FRAME10PLATE` files are discovered, verified and copied into a run-owned
+   * `FRAME-01` … `FRAME-10` directory, and the run reads from that. The
+   * operator's folder is never written to.
+   */
+  readonly platesDirectory?: string;
+  /** Fixed by the entry point. There is no flag for this. */
+  readonly outputIntent?: StoryboardVideoOutputIntent;
+  /**
+   * The completed audio benchmark, when one exists.
+   *
+   * Checked rather than trusted: the run uses it only if its final report says
+   * the model chain finished *and* it holds selected mixes. Anything else and
+   * the cut is marked `AUDIO_TEMPORARY`, because putting a benchmark's
+   * intermediate material into a reviewable cut would misrepresent both.
+   */
+  readonly audioBenchmarkDirectory?: string;
+  /**
+   * The authored brief carrying the locked notification treatment.
+   *
+   * Optional, and absent means no card is composited at all rather than a
+   * default one being invented. The treatment is applied to the scene the
+   * brief itself names, after the motion, so the model never sees a card and
+   * the push underneath does not scale the type.
+   */
+  readonly notificationBriefPath?: string;
   readonly outputDirectory: string;
   readonly workPackRoot: string;
   readonly campaignDirectory: string;
   readonly model: LtxModel;
   readonly maxCostCents: number;
+  /**
+   * A hard ceiling on billable submissions, checked beside the cost ceiling and
+   * before the first upload.
+   *
+   * The two fail differently and that is why there are two. A routing mistake
+   * that turns four deterministic scenes into generations stays comfortably
+   * under a generous cost ceiling while quietly quadrupling the number of paid
+   * requests; a ceiling denominated in requests catches exactly that. Absent
+   * means only the cost ceiling binds.
+   */
+  readonly maxGenerations?: number;
   readonly footagePackRoot?: string;
   readonly preGeneratedClipsDirectory?: string;
   readonly sceneManifestPath?: string;
@@ -132,6 +228,24 @@ export interface StoryboardVideoOptions {
   readonly onProgress?: (message: string) => void;
 }
 
+/**
+ * A scene whose generated clip failed inspection and was demoted to its still.
+ *
+ * Only ever produced for a `FULL_LENGTH_REVIEW_CANDIDATE`, and never silent:
+ * it is written to its own artefact, into the provenance record and into the
+ * pending-review ledger, because a scene that quietly became a held frame is
+ * the exact failure the source precedence exists to prevent.
+ */
+export interface DefectSubstitution {
+  readonly sceneNumber: number;
+  readonly sceneRole: string;
+  readonly rejectedClipChecksumSha256: string | null;
+  readonly failedBindingChecks: readonly string[];
+  readonly substitutedWith: 'DETERMINISTIC_MOTION_GRAPHICS';
+  /** What buying a replacement would cost, so the decision has a number on it. */
+  readonly costOfARetryCents: number | null;
+}
+
 export interface StoryboardVideoResult {
   readonly exitCode: StoryboardVideoExitCode;
   readonly runDirectory: string;
@@ -154,6 +268,13 @@ export interface StoryboardVideoResult {
   readonly motionReviewGalleryPath?: string;
   /** Scenes regenerated because a reviewer had rejected them. */
   readonly regeneratedRejectedScenes?: readonly number[];
+  readonly outputIntent: StoryboardVideoOutputIntent;
+  /** The ten canonical plates this run staged for itself, when it staged any. */
+  readonly stagedPlates?: StagedPlateLibrary;
+  /** Scenes whose authored second stage was executed. */
+  readonly postMotion?: readonly AppliedPostMotion[];
+  /** Scenes demoted to their still because the generated clip failed inspection. */
+  readonly defectSubstitutions?: readonly DefectSubstitution[];
 }
 
 async function writeArtefact(runDirectory: string, name: string, value: unknown): Promise<string> {
@@ -170,6 +291,7 @@ export async function runStoryboardVideo(
   const runner = options.runner ?? new NodeCommandRunner();
   const runDirectory = resolve(options.outputDirectory);
   const onProgress = options.onProgress;
+  const outputIntent: StoryboardVideoOutputIntent = options.outputIntent ?? 'PRODUCTION_MASTER';
   const artefacts: string[] = [];
   await mkdir(runDirectory, { recursive: true });
 
@@ -177,6 +299,7 @@ export async function runStoryboardVideo(
   // to act on. A refusal that will not say which scenes blocked it is a
   // refusal an operator has to reproduce before they can fix anything.
   let motionReview: MotionReviewOutcome | null = null;
+  let stagedPlates: StagedPlateLibrary | null = null;
 
   const fail = (error: unknown): StoryboardVideoResult => {
     const typed =
@@ -196,12 +319,30 @@ export async function runStoryboardVideo(
       artefacts,
       failure: typed.message,
       failureKind: typed.kind,
+      outputIntent,
+      ...(stagedPlates ? { stagedPlates } : {}),
       ...(motionReview ? { motionGate: motionReview.gate } : {}),
       ...(motionReview?.galleryPath ? { motionReviewGalleryPath: motionReview.galleryPath } : {}),
     };
   };
 
   try {
+    // --- 0. the run's own canonical keyframes -------------------------------
+    // Before anything else, because every later stage — the prompts, the
+    // review identity, the cost, the uploads — is bound to these exact bytes.
+    let framesDirectory = options.framesDirectory;
+    if (options.platesDirectory) {
+      stagedPlates = await stageCanonicalPlates({
+        platesDirectory: options.platesDirectory,
+        outputDirectory: runDirectory,
+        runner,
+        binaries: options.binaries,
+        ...(onProgress ? { onProgress } : {}),
+      });
+      framesDirectory = stagedPlates.stagedDirectory;
+      onProgress?.(`ten authoritative plates staged:\n${describeStagedPlates(stagedPlates)}`);
+    }
+
     // --- 1–6. the storyboard, the plan, the keyframes, the sources ----------
     // One shared resolution stage, so the review command and this run always
     // decide over identical inputs. A second implementation would eventually
@@ -216,7 +357,7 @@ export async function runStoryboardVideo(
     ): Promise<StoryboardVideoContext> =>
       resolveStoryboardVideoContext({
         storyboardRoot: options.storyboardRoot,
-        framesDirectory: options.framesDirectory,
+        framesDirectory,
         workPackRoot: options.workPackRoot,
         campaignDirectory: options.campaignDirectory,
         ...(options.footagePackRoot ? { footagePackRoot: options.footagePackRoot } : {}),
@@ -294,12 +435,36 @@ export async function runStoryboardVideo(
     const approvedChecksumsBefore = collectApprovedClipChecksums(context, ledger);
 
     // --- 7. cost, before any upload ----------------------------------------
+    //
+    // The cache is consulted *here*, before the estimate, so the printed
+    // maximum and both ceilings describe the run that is about to happen. An
+    // estimate that counted a cached scene as a purchase could not tell a free
+    // re-run from a second full one — which is exactly how a broken cache
+    // bought the same storyboard twice without either ceiling noticing.
+    const cache = await GenerationCache.open(join(runDirectory, 'generation-cache'));
+    const alreadyCachedScenes = await findCachedScenes({
+      decisions,
+      sceneManifest,
+      keyframes,
+      cache,
+      model: options.model,
+      generateAudio: options.generateAudio,
+      regenerateScenes,
+      requiredFor,
+    });
+    if (alreadyCachedScenes.size > 0) {
+      onProgress?.(
+        `${alreadyCachedScenes.size} scene(s) are already covered by a byte-verified cached generation (${[...alreadyCachedScenes].sort((a, b) => a - b).join(', ')}) — they cost nothing and make no request`,
+      );
+    }
+
     const costEstimate = buildCostEstimate({
       decisions,
       model: options.model,
       resolution: LTX_SUPPORTED_RESOLUTION,
       ceilingCents: options.maxCostCents,
       requiredSourceSecondsForScene: requiredFor,
+      alreadyCachedScenes,
     });
     onProgress?.(describeCostEstimate(costEstimate));
 
@@ -311,10 +476,13 @@ export async function runStoryboardVideo(
         sceneManifestPath,
         sceneManifestAuthoredBy: sceneManifest.authoredBy,
         planAuthoredBy: basePlan.authoredBy,
+        outputIntent,
         model: options.model,
         resolution: LTX_SUPPORTED_RESOLUTION,
         fps: LTX_SUPPORTED_FPS,
         generateAudio: options.generateAudio,
+        maxCostCents: options.maxCostCents,
+        maxGenerations: options.maxGenerations ?? null,
         dryRun: options.dryRun,
         reuseGenerated: options.reuseGenerated,
         regenerateScenes: [...regenerateScenes].sort((a, b) => a - b),
@@ -362,6 +530,10 @@ export async function runStoryboardVideo(
     );
     artefacts.push(await writeArtefact(runDirectory, 'cost-estimate.json', costEstimate));
 
+    // Both ceilings, before anything is uploaded. The request ceiling is
+    // checked first: an operator who has mis-routed four scenes needs to be
+    // told that rather than told the price.
+    assertWithinGenerationCeiling(costEstimate, options.maxGenerations);
     assertWithinCostCeiling(costEstimate);
 
     const nextScene = nextRequiredGenerationScene(decisions);
@@ -393,6 +565,8 @@ export async function runStoryboardVideo(
         ltxCallCount: 0,
         actualCostCents: 0,
         artefacts,
+        outputIntent,
+        ...(stagedPlates ? { stagedPlates } : {}),
       };
     }
 
@@ -420,7 +594,8 @@ export async function runStoryboardVideo(
       });
     }
 
-    const cache = await GenerationCache.open(join(runDirectory, 'generation-cache'));
+    // The same cache instance the estimate consulted. Reopening it would let
+    // the run buy a scene the estimate had already promised was free.
     const generated = new Map<number, GeneratedSceneClip>();
     const sleep = options.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
 
@@ -493,6 +668,7 @@ export async function runStoryboardVideo(
         await writeArtefact(runDirectory, 'motion-gate-blocked.json', {
           runVersion: STORYBOARD_VIDEO_RUN_VERSION,
           workflowRunId: options.workflowRunId,
+          outputIntent,
           reviewDirectory,
           galleryPath: review.galleryPath,
           renderStarted: false,
@@ -501,10 +677,91 @@ export async function runStoryboardVideo(
         }),
       );
     }
-    assertMotionGateClears(review.gate);
-    onProgress?.(
-      `motion gate cleared — ${review.gate.rows.length} moving scene(s) carry a standing approval`,
-    );
+
+    const defectSubstitutions: DefectSubstitution[] = [];
+    if (outputIntent === 'FULL_LENGTH_REVIEW_CANDIDATE') {
+      // A review candidate may carry unreviewed motion — that is what it is
+      // for — but never a technically broken clip.
+      //
+      // What it does instead of refusing outright is **demote** that scene to
+      // its still and say so. The reviewer then sees the whole cut with one
+      // clearly-labelled hole rather than nothing at all, and the alternative
+      // — buying a replacement — is a decision about money that belongs to a
+      // person, not to a run that has already spent its authorised budget.
+      //
+      // This is emphatically not the silent still fallback the source
+      // precedence forbids. It is recorded in its own artefact, in the gate,
+      // in the provenance and in the pending-review ledger; it happens only
+      // for a `FULL_LENGTH_REVIEW_CANDIDATE`; and the production path still
+      // refuses the scene outright.
+      for (const row of review.gate.rows) {
+        if (row.status !== 'TECHNICALLY_INVALID') continue;
+        if (row.sourceType !== 'LTX_GENERATED') continue;
+        const inspection = review.inspectionsByScene.get(row.sceneNumber);
+        const failed = (inspection?.checks ?? [])
+          .filter((check) => check.tier === 'BINDING_TECHNICAL')
+          .filter((check) => check.status === 'FAIL' || check.status === 'NOT_MEASURED')
+          .map((check) => `${check.id}: expected ${check.expected}, observed ${check.observed}`);
+        defectSubstitutions.push({
+          sceneNumber: row.sceneNumber,
+          sceneRole: row.sceneRole,
+          rejectedClipChecksumSha256: row.clipChecksumSha256,
+          failedBindingChecks: failed,
+          substitutedWith: 'DETERMINISTIC_MOTION_GRAPHICS',
+          costOfARetryCents:
+            costEstimate.lines.find((line) => line.sceneNumber === row.sceneNumber)?.costCents ??
+            null,
+        });
+        generated.delete(row.sceneNumber);
+        onProgress?.(
+          `scene ${row.sceneNumber}: the generated clip failed local inspection, so this candidate renders its still under deterministic motion instead. No retry was purchased — that is a person's decision.`,
+        );
+      }
+
+      if (defectSubstitutions.length > 0) {
+        artefacts.push(
+          await writeArtefact(runDirectory, 'technical-defect-substitutions.json', {
+            notice:
+              'Each scene below had a generated clip that failed local technical inspection. This candidate renders its still under deterministic motion so the whole cut can be watched; the scene is NOT what the storyboard approved, and no production master may be built from this state.',
+            noRetryWasPurchased: true,
+            whatToDoNext:
+              'Decide whether the scene is worth regenerating. If it is: "pnpm aamp:storyboard-video --regenerate-scene <n>", which prices the retry into the ceiling you authorise.',
+            substitutions: defectSubstitutions,
+          }),
+        );
+      }
+
+      // Re-asserted after the demotion, so the guard stays live: a scene that
+      // could be neither used nor demoted still refuses the run.
+      assertReviewCandidateTechnicallySound({
+        ...review.gate,
+        technicallyInvalidScenes: review.gate.technicallyInvalidScenes.filter(
+          (sceneNumber) =>
+            !defectSubstitutions.some((substitution) => substitution.sceneNumber === sceneNumber),
+        ),
+      });
+      const pending = review.gate.rows.filter((row) => row.status !== 'APPROVED');
+      artefacts.push(
+        await writeArtefact(
+          runDirectory,
+          'pending-human-review-ledger.json',
+          buildPendingReviewLedger({
+            gate: review.gate,
+            reviewDirectory,
+            galleryPath: review.galleryPath ?? null,
+            defectSubstitutions,
+          }),
+        ),
+      );
+      onProgress?.(
+        `review candidate: ${pending.length} of ${review.gate.rows.length} moving scene(s) are PENDING_HUMAN_REVIEW and nothing here approves any of them`,
+      );
+    } else {
+      assertMotionGateClears(review.gate);
+      onProgress?.(
+        `motion gate cleared — ${review.gate.rows.length} moving scene(s) carry a standing approval`,
+      );
+    }
 
     // --- 10. prepare every moving source -----------------------------------
     const prepared = new Map<number, PreparedSceneClip>();
@@ -536,6 +793,112 @@ export async function runStoryboardVideo(
       prepared.set(decision.sceneNumber, clip);
     }
 
+    // --- 10b. the authored second stage, executed ---------------------------
+    //
+    // A routed scene asked the provider for a locked-off frame; this is where
+    // the move it was promised actually happens. It runs on the trimmed clip,
+    // so the magnitude spans the shot rather than the material the cut throws
+    // away, and it writes a new file rather than overwriting the input — the
+    // pre-motion clip stays on disk so the two can be compared.
+    const applied: AppliedPostMotion[] = [];
+    const routedScenes = sceneManifest.scenes
+      .filter((scene) => scene.postMotion)
+      .map((scene) => ({
+        sceneNumber: scene.sceneNumber,
+        cameraMotion: scene.cameraMotion,
+        providerValue: routeLtxCameraMotion(scene.cameraMotion).providerValue,
+        postMotion: scene.postMotion as NonNullable<typeof scene.postMotion>,
+      }));
+
+    for (const routed of routedScenes) {
+      const clip = prepared.get(routed.sceneNumber);
+      if (!clip) {
+        // A routed scene with no moving clip means the source precedence chose
+        // a still for it, which `assertNoSilentStillFallback` has already
+        // refused for a generative scene. Recorded rather than silently
+        // skipped, so the report can say the second stage did not run.
+        continue;
+      }
+      // eslint-disable-next-line no-await-in-loop -- deterministic order
+      const result = await applyPostMotion({
+        sceneNumber: routed.sceneNumber,
+        sourcePath: clip.absolutePath,
+        sourceChecksumSha256: clip.checksumSha256,
+        durationSeconds: clip.usedDurationSeconds,
+        widthPx: clip.widthPx,
+        heightPx: clip.heightPx,
+        postMotion: routed.postMotion,
+        ...(routed.postMotion.preservedRegionRect
+          ? { preservedRegionRect: routed.postMotion.preservedRegionRect }
+          : {}),
+        outputDirectory: join(runDirectory, POST_MOTION_DIRECTORY),
+        runner,
+        binaries: options.binaries,
+        ...(onProgress ? { onProgress } : {}),
+      });
+      applied.push(result);
+      prepared.set(routed.sceneNumber, {
+        ...clip,
+        absolutePath: result.outputPath,
+        checksumSha256: result.outputChecksumSha256,
+      });
+    }
+
+    artefacts.push(
+      await writeArtefact(
+        runDirectory,
+        'post-motion-report.json',
+        buildPostMotionReport({ applied, routedScenes }),
+      ),
+    );
+
+    // --- 10c. the locked notification, composited after the motion ----------
+    //
+    // Last, deliberately. The model was asked for a clean plate and never saw
+    // a card, a mark or lettering; the treatment is laid out as one document,
+    // rasterised, and composited over the finished picture — so it cannot have
+    // been generated, and the push underneath it does not scale the type.
+    let notification: AppliedNotification | null = null;
+    if (options.notificationBriefPath) {
+      notification = await compositeSceneNotification({
+        briefPath: options.notificationBriefPath,
+        prepared,
+        workPackRoot,
+        outputDirectory: join(runDirectory, NOTIFICATION_DIRECTORY),
+        runner,
+        binaries: options.binaries,
+        ...(onProgress ? { onProgress } : {}),
+      });
+      if (notification) {
+        const base = prepared.get(notification.sceneNumber) as PreparedSceneClip;
+        prepared.set(notification.sceneNumber, {
+          ...base,
+          absolutePath: notification.outputPath,
+          checksumSha256: notification.result.checksumSha256,
+        });
+        artefacts.push(
+          await writeArtefact(runDirectory, 'notification-composite-report.json', {
+            notice:
+              'The notification is composited after the generated motion and could not have been generated. The model was asked for a clean plate and never saw a card, a mark or lettering; no authored string reaches FFmpeg at all, because the copy becomes pixels before the compositor is invoked.',
+            sceneNumber: notification.sceneNumber,
+            compositeVersion: notification.result.compositeVersion,
+            treatmentVersion: notification.result.treatmentVersion,
+            treatment: notification.result.treatment,
+            headline: notification.result.headline,
+            cardRect: notification.result.cardRect,
+            occupiedRect: notification.result.occupiedRect,
+            withinSafeBounds: notification.result.withinSafeBounds,
+            inputChecksumSha256: notification.inputChecksumSha256,
+            outputChecksumSha256: notification.result.checksumSha256,
+            logoChecksumSha256: notification.result.logoChecksumSha256,
+            notes: notification.result.notes,
+            humanJudgementRequired:
+              "Whether the card sits in clean space over this particular take, and whether it reads at delivery size, are a person's judgement. The placement measurement that proves clearance belongs to the notification proof, not to this run.",
+          }),
+        );
+      }
+    }
+
     artefacts.push(
       await writeArtefact(
         runDirectory,
@@ -563,6 +926,58 @@ export async function runStoryboardVideo(
       });
     }
 
+    // A scene with no moving source renders a still, and there are two
+    // candidates: the storyboard package's own 470px contact-sheet crop, and
+    // the operator's finished portrait plate for the same scene.
+    //
+    // The plate is the better picture and it is **not** always the better
+    // source. On this campaign the plates for the interface scenes are
+    // photographic handsets with *blank* screens — they were shot for an
+    // interface to be composited onto, and this milestone does not build that
+    // compositor. The storyboard panel for the same scene carries the actual
+    // Combat Reviews screen. A scene that declares exact product UI must
+    // therefore render the source that contains the product, even though it is
+    // the lower-resolution one: a beautiful empty handset is not a
+    // demonstration of an application.
+    //
+    // Stated as a rule rather than a per-scene exception, so the next campaign
+    // gets the same answer for the same reason.
+    const sceneStillMedia = new Map<number, SceneStillMedia>();
+    const plateSubstitutionsDeclined: {
+      sceneNumber: number;
+      frameId: string;
+      reason: string;
+    }[] = [];
+    if (stagedPlates) {
+      for (const decision of decisions) {
+        if (prepared.has(decision.sceneNumber)) continue;
+        const plate = stagedPlates.plates.find(
+          (candidate) => candidate.sceneNumber === decision.sceneNumber,
+        );
+        if (!plate) continue;
+        const scene = sceneManifest.scenes.find(
+          (candidate) => candidate.sceneNumber === decision.sceneNumber,
+        );
+        if (scene?.preserveExactProductUi || scene?.preserveExactTypography) {
+          plateSubstitutionsDeclined.push({
+            sceneNumber: decision.sceneNumber,
+            frameId: plate.frameId,
+            reason:
+              'this scene declares exact product UI or exact typography, and the authoritative plate for it is a photographic handset with a blank screen. The storyboard panel is rendered instead, because it carries the interface the scene is about.',
+          });
+          continue;
+        }
+        sceneStillMedia.set(decision.sceneNumber, {
+          absolutePath: plate.stagedAbsolutePath,
+          widthPx: plate.widthPx,
+          heightPx: plate.heightPx,
+          checksumSha256: plate.checksumSha256,
+          provenance: 'OPERATOR_AUTHORITATIVE_PLATE',
+          description: `Scene ${decision.sceneNumber} still source — the operator's own finished ${plate.widthPx}x${plate.heightPx} plate (${plate.sourceFileName}), staged read-only as ${plate.frameId}. Storyboard art direction, internal review only.`,
+        });
+      }
+    }
+
     onProgress?.('handing the prepared scenes to the existing flagship render path');
     const flagship = await runFlagshipV2({
       storyboardRoot: options.storyboardRoot,
@@ -571,6 +986,7 @@ export async function runStoryboardVideo(
       campaignDirectory,
       planPath: derivedPlanPath,
       generatedSceneMedia,
+      sceneStillMedia,
       outputDirectory: runDirectory,
       binaries: options.binaries,
       workflowRunId: options.workflowRunId,
@@ -580,6 +996,60 @@ export async function runStoryboardVideo(
     });
 
     // --- 12. the reports ----------------------------------------------------
+    //
+    // Measured from the finished file wherever a measurement exists, and
+    // written even when the render failed — a report that says what could not
+    // be measured is more use than no report at all.
+    const benchmark = await findBenchmarkAudio(options.audioBenchmarkDirectory);
+    artefacts.push(
+      await writeArtefact(
+        runDirectory,
+        'transition-report.json',
+        await buildTransitionReport({
+          plan: derived.plan,
+          moviePath: flagship.outputPath ?? null,
+          runner,
+          binaries: options.binaries,
+        }),
+      ),
+    );
+    artefacts.push(
+      await writeArtefact(
+        runDirectory,
+        'ui-compositing-report.json',
+        buildUiCompositingReport({
+          sceneManifest,
+          decisions,
+          stillSceneNumbers: new Set(sceneStillMedia.keys()),
+          plateSubstitutionsDeclined,
+        }),
+      ),
+    );
+    artefacts.push(
+      await writeArtefact(
+        runDirectory,
+        'audio-report.json',
+        buildAudioReport({
+          plan: derived.plan,
+          benchmark,
+          measured: (flagship.measured as Record<string, unknown> | undefined) ?? null,
+        }),
+      ),
+    );
+    artefacts.push(
+      await writeArtefact(
+        runDirectory,
+        'visible-defects-report.json',
+        await buildVisibleDefectsReport({
+          plan: derived.plan,
+          moviePath: flagship.outputPath ?? null,
+          framesDirectory: join(runDirectory, 'review-frames'),
+          runner,
+          binaries: options.binaries,
+        }),
+      ),
+    );
+
     const finalManifestSourceByScene = await readFinalManifestSources(runDirectory, decisions);
     const outcomes = new Map<number, GenerationOutcomeForReport>();
     for (const decision of decisions) {
@@ -651,6 +1121,28 @@ export async function runStoryboardVideo(
           galleryPath: review.galleryPath,
           notice: review.gate.notice,
         },
+        outputIntent,
+        productionUseAuthorised: false,
+        stagedPlates: stagedPlates
+          ? {
+              sourceDirectory: stagedPlates.sourceDirectory,
+              plates: stagedPlates.plates.map((plate) => ({
+                frameId: plate.frameId,
+                sourceFileName: plate.sourceFileName,
+                checksumSha256: plate.checksumSha256,
+                widthPx: plate.widthPx,
+                heightPx: plate.heightPx,
+              })),
+            }
+          : null,
+        defectSubstitutions,
+        postMotionScenes: applied.map((result) => ({
+          sceneNumber: result.sceneNumber,
+          treatment: result.compiled.treatment,
+          magnitudePercent: result.compiled.magnitudePercent,
+          direction: result.compiled.direction,
+          outputChecksumSha256: result.outputChecksumSha256,
+        })),
         regeneratedBecauseRejected: [...regeneratedRejectedScenes].sort((a, b) => a - b),
         manualClipNotice:
           preGeneratedClips.clips.length > 0
@@ -662,7 +1154,9 @@ export async function runStoryboardVideo(
           measured: flagship.measured ?? null,
         },
         caveat:
-          'HUMAN_ASSISTED_PREVIEW — a locked storyboard supplied by the operator, animated from approved production keyframes and real acquired footage. Creative quality is not assessed and human approval is required before publication.',
+          outputIntent === 'FULL_LENGTH_REVIEW_CANDIDATE'
+            ? 'FULL_LENGTH_REVIEW_CANDIDATE — a locked storyboard supplied by the operator, animated from approved production keyframes and real acquired footage, assembled so a person can judge the whole cut. Every moving scene in it is PENDING_HUMAN_REVIEW: nothing here approves anything, creative quality is not assessed, and this file is not a production master.'
+            : 'HUMAN_ASSISTED_PREVIEW — a locked storyboard supplied by the operator, animated from approved production keyframes and real acquired footage. Creative quality is not assessed and human approval is required before publication.',
       }),
     );
 
@@ -686,6 +1180,10 @@ export async function runStoryboardVideo(
         motionGate: review.gate,
         ...(review.galleryPath ? { motionReviewGalleryPath: review.galleryPath } : {}),
         regeneratedRejectedScenes,
+        outputIntent,
+        ...(stagedPlates ? { stagedPlates } : {}),
+        postMotion: applied,
+        defectSubstitutions,
         failure: flagship.failure ?? 'the render path failed',
       };
     }
@@ -708,10 +1206,185 @@ export async function runStoryboardVideo(
       motionGate: review.gate,
       ...(review.galleryPath ? { motionReviewGalleryPath: review.galleryPath } : {}),
       regeneratedRejectedScenes,
+      outputIntent,
+      ...(stagedPlates ? { stagedPlates } : {}),
+      postMotion: applied,
+      defectSubstitutions,
     };
   } catch (error) {
     return fail(error);
   }
+}
+
+/**
+ * Which generating scenes a byte-verified cached clip already covers.
+ *
+ * Consulted before the cost estimate so both ceilings bind on real spend. A
+ * scene the operator named with `--regenerate-scene` is excluded whatever the
+ * cache holds: it is going to be bought again on purpose, and an estimate that
+ * called it free would understate exactly the request the operator asked for.
+ *
+ * A lookup failure is a miss, not an error — the same rule the cache itself
+ * follows — so a corrupt cache produces an honest "this will be bought" rather
+ * than a refusal.
+ */
+export async function findCachedScenes(input: {
+  readonly decisions: readonly SceneSourceDecision[];
+  readonly sceneManifest: SceneManifest;
+  readonly keyframes: KeyframeLibrary;
+  readonly cache: GenerationCache;
+  readonly model: LtxModel;
+  readonly generateAudio: boolean;
+  readonly regenerateScenes: ReadonlySet<number>;
+  readonly requiredFor: (sceneNumber: number) => number;
+}): Promise<Set<number>> {
+  const cached = new Set<number>();
+  for (const decision of input.decisions) {
+    if (!decision.requiresGeneration) continue;
+    if (input.regenerateScenes.has(decision.sceneNumber)) continue;
+    const scene = input.sceneManifest.scenes.find(
+      (candidate) => candidate.sceneNumber === decision.sceneNumber,
+    );
+    const keyframe = input.keyframes.frames.find(
+      (frame) => frame.frameId === decision.generationInputFrameId,
+    );
+    if (!scene || !keyframe) continue;
+    const lastFrame = scene.lastFrame
+      ? input.keyframes.frames.find((frame) => frame.frameId === scene.lastFrame)
+      : undefined;
+    const key = sceneCacheKey({
+      scene,
+      keyframe,
+      ...(lastFrame ? { lastFrame } : {}),
+      model: input.model,
+      generateAudio: input.generateAudio,
+      requiredSourceSeconds: input.requiredFor(decision.sceneNumber),
+    });
+    // eslint-disable-next-line no-await-in-loop -- deterministic order
+    if (await input.cache.lookup(key)) cached.add(decision.sceneNumber);
+  }
+  return cached;
+}
+
+export const NOTIFICATION_DIRECTORY = 'notification-composite';
+
+export interface AppliedNotification {
+  readonly sceneNumber: number;
+  readonly inputChecksumSha256: string;
+  readonly outputPath: string;
+  readonly result: NotificationCompositeResult;
+}
+
+/**
+ * Composites the locked notification treatment onto the scene the brief names.
+ *
+ * Returns `null` — rather than throwing — when that scene has no moving clip
+ * in this cut, because the honest reading of "the scene the notification
+ * belongs to is not moving picture here" is that there is nothing to composite
+ * onto, not that the run is broken. Every other failure is the compositor's own
+ * typed refusal and propagates.
+ */
+export async function compositeSceneNotification(input: {
+  readonly briefPath: string;
+  readonly prepared: ReadonlyMap<number, PreparedSceneClip>;
+  readonly workPackRoot: string;
+  readonly outputDirectory: string;
+  readonly runner: CommandRunner;
+  readonly binaries: FfmpegBinaries;
+  readonly onProgress?: (message: string) => void;
+}): Promise<AppliedNotification | null> {
+  const brief = await loadAcceptanceBrief(input.briefPath);
+  const sceneNumber = brief.scene.sceneNumber;
+  const clip = input.prepared.get(sceneNumber);
+  if (!clip) {
+    input.onProgress?.(
+      `scene ${sceneNumber} has no moving clip in this cut, so the notification treatment has nothing to composite onto`,
+    );
+    return null;
+  }
+
+  const outputPath = join(
+    input.outputDirectory,
+    `scene-${String(sceneNumber).padStart(2, '0')}-notification.mp4`,
+  );
+  input.onProgress?.(
+    `scene ${sceneNumber}: compositing the locked notification treatment (surface design v${brief.notification.surfaceDesignVersion}) after the motion`,
+  );
+
+  const result = await compositeNotification({
+    sourceClipPath: clip.absolutePath,
+    outputPath,
+    notification: brief.notification,
+    logoPath: join(input.workPackRoot, 'asset-root', 'brand', 'logo.png'),
+    outputDurationSeconds: clip.usedDurationSeconds,
+    runner: input.runner,
+    binaries: input.binaries,
+    ...(input.onProgress ? { onProgress: input.onProgress } : {}),
+  });
+
+  return {
+    sceneNumber,
+    inputChecksumSha256: clip.checksumSha256,
+    outputPath,
+    result,
+  };
+}
+
+/**
+ * Every moving scene in a review candidate, and what a person still has to
+ * decide about it.
+ *
+ * Written as its own artefact rather than left inside the gate report, because
+ * the two answer different questions: the gate says whether the run may
+ * proceed, and this says what is outstanding. It records no verdict and no
+ * reviewer — a run cannot approve anything, and there is no flag that writes
+ * one.
+ */
+export function buildPendingReviewLedger(input: {
+  readonly gate: MotionGateReport;
+  readonly reviewDirectory: string;
+  readonly galleryPath: string | null;
+  readonly defectSubstitutions?: readonly DefectSubstitution[];
+}): unknown {
+  const substituted = new Set(
+    (input.defectSubstitutions ?? []).map((substitution) => substitution.sceneNumber),
+  );
+  const rows = input.gate.rows.map((row) => ({
+    sceneNumber: row.sceneNumber,
+    sceneRole: row.sceneRole,
+    sourceType: row.sourceType,
+    // A demoted scene has no generated motion in the cut, so there is nothing
+    // for a reviewer to approve about it — what it needs is a decision about
+    // whether to pay for a replacement.
+    reviewStatus: substituted.has(row.sceneNumber)
+      ? 'NOT_IN_THIS_CUT — the generated clip failed inspection and its still was rendered instead'
+      : row.status === 'APPROVED'
+        ? 'APPROVED'
+        : 'PENDING_HUMAN_REVIEW',
+    gateStatus: row.status,
+    clipChecksumSha256: row.clipChecksumSha256,
+    reviewIdentitySha256: row.identitySha256,
+    inspectionVerdict: row.inspectionVerdict,
+    openFidelityFindings: row.openFidelityFindings,
+    decidedBy: row.decidedBy,
+    decidedAt: row.decidedAt,
+    decisionId: row.decisionId,
+    nextAction: row.remedy,
+  }));
+  return {
+    notice:
+      'This run approved nothing and cannot. Every row below is a decision a named person still has to make about specific bytes, and no flag on any command writes one on their behalf.',
+    outputIntent: 'FULL_LENGTH_REVIEW_CANDIDATE',
+    productionUseAuthorised: false,
+    evaluatedAt: input.gate.evaluatedAt,
+    reviewDirectory: input.reviewDirectory,
+    motionReviewGalleryPath: input.galleryPath,
+    pendingSceneCount: rows.filter((row) => row.reviewStatus === 'PENDING_HUMAN_REVIEW').length,
+    defectSubstitutions: input.defectSubstitutions ?? [],
+    rows,
+    howToDecide:
+      'Open the motion-review gallery, then record each decision with "pnpm aamp:motion-review approve --scene <n>" or "… reject --scene <n>". An approval binds to the clip bytes, the authoritative keyframe, the generation prompt and the scene contract, so it stops applying if any of the four moves.',
+  };
 }
 
 // ---------------------------------------------------------------------------

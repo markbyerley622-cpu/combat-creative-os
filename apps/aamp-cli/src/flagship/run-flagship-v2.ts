@@ -3,6 +3,7 @@ import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 
 import {
+  evenPx as evenDimension,
   NodeCommandRunner,
   parseRenderManifest,
   type CommandRunner,
@@ -97,6 +98,24 @@ export interface GeneratedSceneMedia {
   readonly description: string;
 }
 
+/**
+ * The operator's own finished still for a scene, staged in place of the
+ * storyboard panel.
+ *
+ * Deliberately a different type from `GeneratedSceneMedia`: one is footage a
+ * model or a camera produced and the other is a plate a person made, and the
+ * artefacts have to be able to tell them apart. A still carries no duration.
+ */
+export interface SceneStillMedia {
+  readonly absolutePath: string;
+  readonly widthPx: number;
+  readonly heightPx: number;
+  /** Where the plate came from. Travels into provenance verbatim. */
+  readonly provenance: string;
+  readonly checksumSha256: string;
+  readonly description: string;
+}
+
 export interface FlagshipV2Options {
   readonly storyboardRoot: string;
   readonly workPackRoot: string;
@@ -110,6 +129,22 @@ export interface FlagshipV2Options {
   readonly planPath?: string;
   /** Moving footage per scene sequence (1-based). Absent scenes stage their panel. */
   readonly generatedSceneMedia?: ReadonlyMap<number, GeneratedSceneMedia>;
+  /**
+   * A higher-resolution still to stage in place of a scene's storyboard panel.
+   *
+   * The storyboard package's frames are 470px crops out of a contact sheet —
+   * they are the locked *art direction*, and at delivery size a 470x378
+   * landscape crop can only be contained inside a vertical frame over a blurred
+   * backplate. When the operator's own finished portrait plate for that scene
+   * exists, staging it instead renders the same composition at the resolution
+   * it was designed at.
+   *
+   * This is a change of *source*, not of cut: the asset id, the beat binding,
+   * the slot and the rights position are all unchanged, and the scene's own
+   * declared checksums still travel into the artefacts. Absent, every scene
+   * stages its panel exactly as before.
+   */
+  readonly sceneStillMedia?: ReadonlyMap<number, SceneStillMedia>;
   readonly outputDirectory: string;
   readonly binaries: FfmpegBinaries;
   readonly workflowRunId: string;
@@ -228,6 +263,7 @@ export async function runFlagshipV2(options: FlagshipV2Options): Promise<Flagshi
   const runDirectory = resolve(options.outputDirectory);
   const onProgress = options.onProgress;
   const generatedSceneMedia = options.generatedSceneMedia ?? new Map<number, GeneratedSceneMedia>();
+  const sceneStillMedia = options.sceneStillMedia ?? new Map<number, SceneStillMedia>();
   await mkdir(runDirectory, { recursive: true });
 
   const labels = {
@@ -382,8 +418,18 @@ export async function runFlagshipV2(options: FlagshipV2Options): Promise<Flagshi
       continue;
     }
 
-    const widthPx = frame.widthPx * PANEL_STAGE_SCALE;
-    const heightPx = frame.heightPx * PANEL_STAGE_SCALE;
+    // The operator's own finished plate, when one exists for this scene. It
+    // supersedes the contact-sheet crop as the *source*; everything else about
+    // the scene — its id, its beat, its slot, its rights — is unchanged.
+    const still = sceneStillMedia.get(frame.sequence);
+    const stillWidthPx = still
+      ? Math.max(still.widthPx, frame.widthPx * PANEL_STAGE_SCALE)
+      : frame.widthPx * PANEL_STAGE_SCALE;
+    const stillHeightPx = still
+      ? Math.round((stillWidthPx * still.heightPx) / still.widthPx)
+      : frame.heightPx * PANEL_STAGE_SCALE;
+    const widthPx = evenDimension(stillWidthPx);
+    const heightPx = evenDimension(stillHeightPx);
     // Staged above the delivery width the panel treatment will ask for, so the
     // renderer resamples *down* into the frame rather than up. The asset root's
     // own minimum-dimension guard is respected rather than relaxed: a panel
@@ -396,7 +442,7 @@ export async function runFlagshipV2(options: FlagshipV2Options): Promise<Flagshi
         '-v',
         'error',
         '-i',
-        panel.absolutePath,
+        still ? still.absolutePath : panel.absolutePath,
         '-vf',
         `scale=${widthPx}:${heightPx}:flags=lanczos,format=rgb24`,
         '-frames:v',
@@ -417,7 +463,24 @@ export async function runFlagshipV2(options: FlagshipV2Options): Promise<Flagshi
       );
     }
     stagedPanels.push({
-      asset: { ...panel.asset, declaredWidthPx: widthPx, declaredHeightPx: heightPx },
+      asset: {
+        ...panel.asset,
+        declaredWidthPx: widthPx,
+        declaredHeightPx: heightPx,
+        ...(still
+          ? {
+              description: still.description.slice(0, 300),
+              rights: {
+                ...panel.asset.rights,
+                restrictions: [
+                  ...panel.asset.rights.restrictions,
+                  `still-source provenance: ${still.provenance}`,
+                  `staged from the operator's own finished plate, sha256 ${still.checksumSha256}`,
+                ],
+              },
+            }
+          : {}),
+      },
       widthPx,
       heightPx,
     });
