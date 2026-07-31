@@ -373,6 +373,99 @@ predictor-rank interface space, scene 9 a smooth 1% leftward drift preserving
 the phone geometry and discussion-interface region. None is substituted with
 `dolly_in`, `dolly_out` or any other LTX move.
 
+**The full-frame product story is done, at zero cost.** `pnpm aamp:full-review
+--product-story <plan>` renders `FULL_LENGTH_UI_COMPOSITED_REVIEW`: the same
+fifteen-second cut with every scene full-frame and the four product-interface
+scenes carrying the real Combat Reviews mobile interface warped onto
+photographed handsets. **Proven live, 0¢, no request:** an ffprobe-verified
+1080x1920 h264 High/yuv420p MP4 at exactly 15.000 s, 30 fps, AAC LC stereo
+48 kHz, faststart, actual-media QA `PASS`; four screen calibrations all convex,
+inside their plates and within the mappability limits, with mapping uniformity
+0.9996–0.9999; all ten scenes passing their exposure profile; 3,760 kbps against
+the rejected cut's 2,504 kbps; and all eleven rejection criteria clearing with
+zero unmeasured. **Not proven:** creative quality — nothing here measures it,
+the interfaces are `PRODUCT_MOCKUP`s authorised by Riki Taylor for internal
+review only, and the audio is still `AUDIO_TEMPORARY`. See the "Full-frame
+product story" rules below and `docs/runbooks/full-frame-product-story.md`.
+
+## Full-frame product story — permanent rules
+
+- **Nothing falls back to a storyboard panel, ever.** An unmappable screen, an
+  interface that would not fit its glass, a reserved region with nothing in it
+  and an unreadable scene are each a named refusal with no repair path. The
+  silent return to the 470px landscape card is the defect this whole path
+  corrects, and a cut carrying one still passes every technical gate.
+- **The CSS viewport width is the canonical 393px on every plate**, and only the
+  height follows the calibrated screen. Handing a _device_ width to the browser
+  as a viewport lays the product out at a desktop breakpoint and leaves the
+  phone-width body in the corner of a black field — which is what it did until
+  `SheetSequenceRequest` carried the CSS size and the scale factor separately.
+  Device pixels are a fidelity multiplication and may never affect layout.
+- **The interface canvas must cover the delivery frame in both axes.**
+  `perspective` maps the whole input rectangle onto the destination quad and the
+  composite crops the frame out of the result, so a smaller canvas is cropped
+  into nothing. Checked in the calibration and again in the compositor.
+- **Every mark on screen is a design, rasterised before FFmpeg is invoked.** The
+  interface and each treatment are laid out by a real engine, one frame at a
+  time, from a driver that reads no clock and holds no state. No authored string
+  reaches the compositor. The rejected cut's red rectangle and opaque red bar
+  were `drawbox`, because `drawbox` is the only mark a filter can make.
+- **A reveal never starts at zero opacity.** "Never expose an empty display" is
+  a rejection criterion, and a card that fades up from nothing leaves the
+  handset showing an ink-coloured rectangle on its opening frame —
+  indistinguishable from an interface that failed to map.
+- **A grade is `curves` with its endpoints pinned, and it may only lift.** A
+  `brightness` offset raises the black floor, which is the grey blacks the
+  correction refuses; a control point below the diagonal is refused by name.
+  Saturation is bounded, because a grade is not a look change.
+- **Exposure is measured against two profiles, both binding.** A live-action
+  scene fails when the subject is lost in the shadows; a product-interface scene
+  fails when the handset is showing _nothing_. The live-action gate is the
+  subject region's 90th percentile and readable fraction — **not** its median or
+  crushed fraction, which measure the black set behind the subject and refused a
+  correctly-exposed fighter outright. An unmeasurable scene is never a passing
+  one.
+- **Samples are taken over a scene's own beat window, never its handles.** The
+  handles are transition material the cut blends _through_; measuring them
+  reports the incoming shot's exposure as this one's, and it produced a real
+  false failure.
+- **A video-sourced scene is never excluded from the frozen-frame walk.**
+  `STATIC_HOLD` means "add no synthetic camera move", which is exactly what a
+  scene carrying real footage asks for. Reading it as "the picture does not
+  move" excused every moving scene, and a cut whose scenes are all moving
+  sources then had nothing left to sample at all.
+- **A `CUT` must be a cut.** Every join is an `xfade`, so the _overlap_ decides
+  whether it reads as a cut or as a short dissolve — 0.2s is six frames of
+  ghosting. And a beat is `slot + overlap`: shortening a transition without
+  shortening its beat slides every later scene off its locked slot.
+- **The composites are tail-padded by cloning, never by running past the
+  source.** The trimmed sources arrive at the provider's 24 fps, so a 1.733s
+  window quantises 25ms short and the segment selector refuses a scene whose
+  picture is fine. Padding with black instead of a clone puts an empty frame in
+  the handle — found the hard way.
+- **`HANDSET_WIPE` exists because the alternatives were a crossfade, a dip to
+  black and a white flash.** All three are things a product story should not do,
+  and the fidelity report requires four distinct transition kinds. Adding it was
+  a `MOTION_TREATMENT_CATALOGUE_VERSION` bump; it is 5 as of this milestone.
+- **`output.qualityCrf` is v2-only and absent means unchanged.** Every manifest
+  written before it renders byte-identically at the renderer's own default.
+- **The composited scenes are rerouted before the cost estimate**, so they can
+  never reach a ceiling, an upload or a provider. Nothing on
+  `apps/aamp-cli/src/product-story/` constructs a provider, reads a credential,
+  makes a request or opens a database — asserted over the modules by name in
+  `product-story-source-hygiene.test.ts`.
+- **Scene 1's rejected take is not reused.** A named reviewer rejected those
+  bytes for composition drift and a gaze lift; the scene's picture is its own
+  plate under an authored 2% push, and the rerouting is recorded scene by scene
+  rather than left to be inferred from what is missing.
+- **Application code owns no word, colour, timing or magnitude.** Every one of
+  them lives in `campaigns/combat-reviews-flagship-02/product-story.json` with a
+  named author, and the calibration overlays exist only in the gallery — the
+  compositor has no filter that could draw one.
+- **Nothing here scores creative quality**, and no function may be added that
+  does. A compositor can prove an interface is on a handset; it cannot prove the
+  advertisement is any good.
+
 ## Full-length review candidate — permanent rules
 
 - **Two output intents, fixed by the entry point, with no flag reaching

@@ -50,7 +50,7 @@ import {
  * frame; leaving the number behind would make two different catalogues
  * indistinguishable in the artefacts that cite them.
  */
-export const MOTION_TREATMENT_CATALOGUE_VERSION = 4 as const;
+export const MOTION_TREATMENT_CATALOGUE_VERSION = 5 as const;
 
 export class MotionTreatmentError extends Error {
   constructor(message: string) {
@@ -796,6 +796,19 @@ export const TRANSITION_TREATMENT_KEYS = [
   'IMPACT_CUT',
   /** Masked UI reveal: the incoming app-interface scene wipes in behind a moving edge. */
   'MASKED_UI_REVEAL',
+  /**
+   * Handset wipe: the incoming shot pushes the outgoing one off behind a hard
+   * edge.
+   *
+   * Added at catalogue v5 to give a cut a fourth kind of join that is not a
+   * blend. The set previously offered a crossfade, a dip to black and a white
+   * flash as its only alternatives to a hard cut, and all three are things a
+   * product story should not do: two of them say the shots are
+   * interchangeable, and the third blows the picture out at the moment the
+   * viewer is meant to be reading it. A wipe carries the eye across without
+   * ever mixing the two images.
+   */
+  'HANDSET_WIPE',
 ] as const;
 export type TransitionTreatmentKey = (typeof TRANSITION_TREATMENT_KEYS)[number];
 
@@ -813,6 +826,7 @@ const TRANSITION_TREATMENTS: Readonly<Record<TransitionTreatmentKey, TransitionD
   WHIP_PAN: { xfade: 'smoothleft', summary: 'directional smear, left to right' },
   IMPACT_CUT: { xfade: 'fadewhite', summary: 'white flash on the cut' },
   MASKED_UI_REVEAL: { xfade: 'circleopen', summary: 'masked reveal of the incoming interface' },
+  HANDSET_WIPE: { xfade: 'wipeleft', summary: 'hard-edged wipe; the two images never mix' },
 };
 
 export interface CompiledTransition {

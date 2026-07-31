@@ -56,6 +56,8 @@ interface Options {
   reviewDir?: string;
   audioBenchmark?: string;
   notificationBrief?: string;
+  productStory?: string;
+  compareWith?: string;
   provider?: string;
   model?: string;
   maxCostCents?: string;
@@ -99,6 +101,12 @@ const USAGE = `aamp:full-review — assemble the whole 15-second cut so a person
                                    is marked AUDIO_TEMPORARY
   --notification-brief <file>      the authored brief carrying the locked notification treatment;
                                    composited after the motion onto the scene the brief names
+  --product-story <file>           the authored product story; composites the corrected full-frame
+                                   cut — plates full-frame, product interfaces mapped onto the
+                                   calibrated handset screens, screen-space treatments and grades.
+                                   The scenes it composites never buy a moving source.
+  --compare-with <file>            an earlier master, read only to fill the "before" column of the
+                                   old-versus-new gallery. Never written to.
   --dry-run                        plan and price it; reads no API key, makes no request, spends nothing
   --json                           print the machine-readable result
   --help
@@ -162,6 +170,14 @@ export function parseFullReviewArgs(argv: readonly string[]): Options {
         break;
       case '--notification-brief':
         options.notificationBrief = value;
+        index += 1;
+        break;
+      case '--product-story':
+        options.productStory = value;
+        index += 1;
+        break;
+      case '--compare-with':
+        options.compareWith = value;
         index += 1;
         break;
       case '--provider':
@@ -339,6 +355,12 @@ export async function runFullReviewCli(
       : {}),
     ...(options.notificationBrief
       ? { notificationBriefPath: resolve(context.cwd, options.notificationBrief) }
+      : {}),
+    ...(options.productStory
+      ? { productStoryPath: resolve(context.cwd, options.productStory) }
+      : {}),
+    ...(options.compareWith
+      ? { compareWithMasterPath: resolve(context.cwd, options.compareWith) }
       : {}),
     binaries: resolveFfmpegBinaries(context.env),
     workflowRunId: context.workflowRunId ?? randomUUID(),

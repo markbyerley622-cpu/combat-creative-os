@@ -108,7 +108,13 @@ function generateMedia(directory: string): void {
     '-f',
     'lavfi',
     '-i',
-    'color=c=0x101418:s=1080x1920:r=30:d=12',
+    // An animated field rather than a flat colour with one small box on it.
+    // The box alone changed about 0.2% of the frame, which is below the
+    // frozen-frame walk's 0.75/255 floor — so this fixture only passed while
+    // its scenes were being *excluded* from that walk for declaring
+    // stillness. A fixture standing in for footage has to move like footage,
+    // or it is asserting a PASS that the check never actually took.
+    'gradients=s=1080x1920:r=30:d=12:speed=0.06:n=3:c0=0x101418:c1=0x2A303D:c2=0x1A2030',
     '-vf',
     "drawbox=x='120+420*abs(sin(t))':y=420:w=320:h=320:color=0xFF3B30:t=fill,drawbox=x=120:y=980:w=760:h=180:color=0x2A303D:t=fill",
     '-pix_fmt',

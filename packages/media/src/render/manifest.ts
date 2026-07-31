@@ -120,6 +120,8 @@ export const SCENE_TRANSITIONS = [
   'IMPACT_CUT',
   /** Masked UI reveal: the incoming app-interface scene wipes in behind a moving edge. */
   'MASKED_UI_REVEAL',
+  /** Hard-edged wipe: the incoming shot pushes the outgoing one off, never mixing the two. */
+  'HANDSET_WIPE',
 ] as const;
 export const SceneTransitionSchema = z.enum(SCENE_TRANSITIONS);
 export type SceneTransition = z.infer<typeof SceneTransitionSchema>;
@@ -543,6 +545,19 @@ export const OutputSpecificationSchema = z
     /** Null renders a deliberately silent master with no audio stream at all. */
     audioCodec: z.literal('aac').nullable(),
     pixelFormat: z.literal('yuv420p'),
+    /**
+     * The x264 rate factor this cut is encoded at. **v2 only.**
+     *
+     * Left absent it is `DEFAULT_QUALITY_CRF`, which is what every manifest
+     * written before this field rendered at. It exists because the default is
+     * a compromise struck for throughput, and a delivery master carrying
+     * photographed low-light footage and fine interface typography needs the
+     * bits: the same cut at 20 came back around 2.5 Mbps, which is where a
+     * gradient on a dark set starts to band and small type starts to smear.
+     * Lower is higher quality; the band is bounded at both ends because a
+     * number outside it is a mistake rather than a decision.
+     */
+    qualityCrf: z.number().int().min(14).max(28).optional(),
     /** Duration tolerance for actual-media QA, in frames. */
     durationToleranceFrames: z.number().int().min(0).max(15).default(2),
     /** Delivery profile this manifest was cut against, for provenance. */
@@ -613,6 +628,9 @@ export const RenderManifestSchema = RenderManifestObjectSchema.superRefine((mani
       requiresV2('cta.holdSeconds', ['cta', 'holdSeconds']);
     }
     if (manifest.audio?.design) requiresV2('audio.design', ['audio', 'design']);
+    if (manifest.output.qualityCrf !== undefined) {
+      requiresV2('output.qualityCrf', ['output', 'qualityCrf']);
+    }
   }
 
   const sourceIds = new Set<string>();

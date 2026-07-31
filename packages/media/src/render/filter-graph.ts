@@ -66,6 +66,15 @@ const V1_MOTION_TO_TREATMENT: Readonly<Record<SceneMotion, SceneTreatmentKeyValu
 export const CAPTION_ASS_FILENAME = 'typography.ass';
 export const OUTPUT_TEMP_FILENAME = 'render.mp4';
 
+/**
+ * The rate factor a manifest gets when it does not ask for one.
+ *
+ * Unchanged from what every manifest written before `output.qualityCrf`
+ * rendered at, so adding the field moved nothing: a cut that wants more bits
+ * has to say so.
+ */
+export const DEFAULT_QUALITY_CRF = 20;
+
 export interface JobFile {
   /** Relative to the job directory; the graph references it by this name. */
   readonly name: string;
@@ -626,7 +635,7 @@ export function buildRenderPlan(input: BuildRenderPlanInput): RenderPlan {
     '-preset',
     'medium',
     '-crf',
-    '20',
+    num(output.qualityCrf ?? DEFAULT_QUALITY_CRF),
     '-pix_fmt',
     output.pixelFormat,
     '-r',

@@ -1,0 +1,690 @@
+{
+  "storyVersion": 1,
+  "authoredBy": "Riki Taylor",
+  "brief": "The fifteen-second cut is one continuous product story: a notification arrives, the breadth of the sport opens up, the schedule is there, the rankings are there, two fighters are compared, a prediction is made in one action, it is submitted on the bell, it comes back correct and the predictor rank moves, the room is arguing about it, and the call to action closes. Every scene is full-frame. The four product-interface scenes are the operator's own photographed handsets with the Combat Reviews mobile interface mapped onto their calibrated screens — not the 470px landscape storyboard cards the previous cut floated inside a portrait frame. The picture is graded so faces, gloves, torsos and phone edges read on an ordinary phone screen while the blacks stay black. Nothing in this cut is bought.",
+  "authorisation": {
+    "reviewer": "Riki Taylor",
+    "recordedAt": "2026-07-31",
+    "grant": "Riki Taylor authorises deterministic Combat Reviews PRODUCT_MOCKUP interfaces for INTERNAL_REVIEW_ONLY. These mockups represent approved product direction.",
+    "coveredSurfaces": [
+      "event discovery and schedule",
+      "rankings",
+      "fighter comparison",
+      "prediction selection",
+      "prediction submission",
+      "prediction result",
+      "predictor-rank movement #27 to #18",
+      "discussion",
+      "final CTA"
+    ],
+    "notAsserted": "They are not asserted as live user data or publication-ready factual data. No screen here is a capture, no figure on them is a record of anything that happened, and nothing in this cut is public-release ready."
+  },
+  "output": {
+    "widthPx": 1080,
+    "heightPx": 1920,
+    "frameRate": 30,
+    "qualityCrf": 17
+  },
+  "scenes": [
+    {
+      "kind": "PLATE_DETERMINISTIC_MOTION",
+      "sceneNumber": 1,
+      "frameId": "FRAME-01",
+      "plateWidthPx": 941,
+      "plateHeightPx": 1672,
+      "move": {
+        "startZoom": 1,
+        "endZoom": 1.02,
+        "offsetU": 0,
+        "offsetV": 0,
+        "intent": "A 2% push, and no more. The action here is the notification arriving, not the camera moving — the generated take bought for this scene pushed about 1.75x and lifted the subject's gaze to the lens, which is what it was rejected for. His gaze stays on the phone."
+      },
+      "plateGrade": {
+        "midtonePoints": [
+          {
+            "x": 0.06,
+            "y": 0.145
+          },
+          {
+            "x": 0.22,
+            "y": 0.4
+          },
+          {
+            "x": 0.55,
+            "y": 0.72
+          }
+        ],
+        "saturation": 1.05,
+        "intent": "The darkest plate in the cut: subject-region median 7, 90th percentile 64. The lift brings his face and the phone's rim into a readable midtone while the endpoints stay pinned, so the room behind him stays black rather than going grey."
+      },
+      "subjectRegion": {
+        "xPx": 160,
+        "yPx": 130,
+        "widthPx": 760,
+        "heightPx": 960
+      },
+      "intent": "The hook. A person already looking at their phone, and the thing that matters arriving on it."
+    },
+    {
+      "kind": "FOOTAGE_TREATMENT",
+      "sceneNumber": 2,
+      "companionFrameId": "FRAME-02",
+      "companionClipRect": {
+        "xPx": 0,
+        "yPx": 860,
+        "widthPx": 1080,
+        "heightPx": 1060
+      },
+      "treatment": {
+        "key": "SPORT_STRIP_REVEAL",
+        "copy": {
+          "strips": ["BOXING", "MMA", "MUAY THAI", "KICKBOXING", "GRAPPLING"]
+        },
+        "timing": {
+          "enterAtSeconds": 0.2,
+          "settleSeconds": 0.4,
+          "eventAtSeconds": 0.2
+        },
+        "intent": "Five disciplines named once, arriving as one composition off a single entrance offset by a fraction of the settle. Five separately-animated slides is the slideshow reading this cut was rejected for."
+      },
+      "grade": {
+        "midtonePoints": [
+          {
+            "x": 0.09,
+            "y": 0.16
+          },
+          {
+            "x": 0.3,
+            "y": 0.45
+          },
+          {
+            "x": 0.6,
+            "y": 0.75
+          }
+        ],
+        "saturation": 1.02,
+        "intent": "The plate montage and the moving clip share one curve so the two layers read as one exposure. Measured over the clip's own subject the material is darker than the whole-frame figures suggested, so the lift is a full three-point curve rather than the slight one it started as."
+      },
+      "subjectRegion": {
+        "xPx": 170,
+        "yPx": 950,
+        "widthPx": 740,
+        "heightPx": 600
+      },
+      "intent": "Breadth. The acquired combat footage carries the action across the lower two-thirds; the scene's own plate supplies the montage above it; the sport names arrive across both."
+    },
+    {
+      "kind": "PLATE_UI_COMPOSITE",
+      "sceneNumber": 3,
+      "frameId": "FRAME-03",
+      "plateWidthPx": 941,
+      "plateHeightPx": 1672,
+      "screen": {
+        "topLeft": {
+          "xPx": 114,
+          "yPx": 464
+        },
+        "topRight": {
+          "xPx": 408,
+          "yPx": 499
+        },
+        "bottomLeft": {
+          "xPx": 115,
+          "yPx": 1336
+        },
+        "bottomRight": {
+          "xPx": 415,
+          "yPx": 1304
+        }
+      },
+      "surface": "EVENTS_AND_SCHEDULE",
+      "uiTimeline": {
+        "scroll": {
+          "fromPx": 0,
+          "toPx": 300,
+          "startSeconds": 0.55,
+          "endSeconds": 2.05,
+          "easing": "EASE_IN_OUT_CUBIC"
+        },
+        "reveal": {
+          "count": 8,
+          "firstAtSeconds": 0.1,
+          "intervalSeconds": 0.07,
+          "settleSeconds": 0.3
+        }
+      },
+      "move": {
+        "startZoom": 1,
+        "endZoom": 1.025,
+        "offsetU": 0,
+        "offsetV": 0,
+        "intent": "A slow push toward the handset while the schedule scrolls under it, so the camera and the interface are moving together rather than competing."
+      },
+      "plateGrade": {
+        "midtonePoints": [
+          {
+            "x": 0.08,
+            "y": 0.165
+          },
+          {
+            "x": 0.28,
+            "y": 0.44
+          },
+          {
+            "x": 0.6,
+            "y": 0.75
+          }
+        ],
+        "saturation": 1,
+        "intent": "A three-point lift that brings the room the handset is standing in out of the shadow, so the phone reads as an object on a set rather than as a screen floating in black. The endpoints stay pinned, so the set still goes to black at its darkest."
+      },
+      "subjectRegion": {
+        "xPx": 110,
+        "yPx": 510,
+        "widthPx": 390,
+        "heightPx": 1050
+      },
+      "intent": "The schedule. Compact cards carrying sport, both names, the date and the start time — readable for the whole interval, with no large empty image placeholders."
+    },
+    {
+      "kind": "PLATE_UI_COMPOSITE",
+      "sceneNumber": 4,
+      "frameId": "FRAME-04",
+      "plateWidthPx": 941,
+      "plateHeightPx": 1672,
+      "screen": {
+        "topLeft": {
+          "xPx": 572,
+          "yPx": 379
+        },
+        "topRight": {
+          "xPx": 828,
+          "yPx": 346
+        },
+        "bottomLeft": {
+          "xPx": 496,
+          "yPx": 1337
+        },
+        "bottomRight": {
+          "xPx": 795,
+          "yPx": 1359
+        }
+      },
+      "surface": "FIGHTER_RANKINGS",
+      "uiTimeline": {
+        "scroll": {
+          "fromPx": 0,
+          "toPx": 150,
+          "startSeconds": 1.1,
+          "endSeconds": 2.1,
+          "easing": "EASE_OUT_CUBIC"
+        },
+        "reveal": {
+          "count": 8,
+          "firstAtSeconds": 0.15,
+          "intervalSeconds": 0.12,
+          "settleSeconds": 0.34
+        }
+      },
+      "move": {
+        "startZoom": 1,
+        "endZoom": 1.02,
+        "offsetU": 0,
+        "offsetV": 0,
+        "intent": "A restrained push. The rows arriving one after another is the movement in this beat; the camera only has to stay out of its way."
+      },
+      "plateGrade": {
+        "midtonePoints": [
+          {
+            "x": 0.08,
+            "y": 0.165
+          },
+          {
+            "x": 0.28,
+            "y": 0.44
+          },
+          {
+            "x": 0.6,
+            "y": 0.75
+          }
+        ],
+        "saturation": 1,
+        "intent": "A three-point lift that brings the room the handset is standing in out of the shadow, so the phone reads as an object on a set rather than as a screen floating in black. The endpoints stay pinned, so the set still goes to black at its darkest."
+      },
+      "subjectRegion": {
+        "xPx": 560,
+        "yPx": 390,
+        "widthPx": 400,
+        "heightPx": 1180
+      },
+      "intent": "The rankings. Rows revealing in order, with the division, the record and recent form on each — all typography sharp and inside the glass."
+    },
+    {
+      "kind": "FOOTAGE_TREATMENT",
+      "sceneNumber": 5,
+      "treatment": {
+        "key": "FIGHTER_COMPARISON_PANEL",
+        "copy": {
+          "supporting": "HEAD TO HEAD",
+          "leftName": "Richardson Hitchins",
+          "leftRecord": "19–1",
+          "leftForm": "W W W L W",
+          "rightName": "Ricardo Salinas",
+          "rightRecord": "17–3",
+          "rightForm": "W L W W W",
+          "headline": "READ THE FIGHT."
+        },
+        "timing": {
+          "enterAtSeconds": 0.45,
+          "settleSeconds": 0.4,
+          "eventAtSeconds": 0.45
+        },
+        "region": {
+          "xPx": 90,
+          "yPx": 1120,
+          "widthPx": 900,
+          "heightPx": 620
+        },
+        "intent": "The comparison lives in the centre of the frame between the two men, laid out at delivery resolution and independent of the generated footage underneath it. Positions, records and recent form, and one line saying what the product is for."
+      },
+      "grade": {
+        "midtonePoints": [
+          {
+            "x": 0.08,
+            "y": 0.155
+          },
+          {
+            "x": 0.28,
+            "y": 0.44
+          },
+          {
+            "x": 0.6,
+            "y": 0.74
+          }
+        ],
+        "saturation": 1.04,
+        "intent": "Faces and torsos out of the shadow — subject median 14, 90th percentile 83 before this — without lifting the black background behind them into grey. The endpoints are pinned, so the set stays where it was."
+      },
+      "subjectRegion": {
+        "xPx": 60,
+        "yPx": 140,
+        "widthPx": 960,
+        "heightPx": 640
+      },
+      "intent": "The face-off. Only the strongest interval of the cached clip is used; nothing was regenerated for it."
+    },
+    {
+      "kind": "PLATE_UI_COMPOSITE",
+      "sceneNumber": 6,
+      "frameId": "FRAME-06",
+      "plateWidthPx": 941,
+      "plateHeightPx": 1672,
+      "screen": {
+        "topLeft": {
+          "xPx": 529,
+          "yPx": 487
+        },
+        "topRight": {
+          "xPx": 801,
+          "yPx": 462
+        },
+        "bottomLeft": {
+          "xPx": 425,
+          "yPx": 1207
+        },
+        "bottomRight": {
+          "xPx": 715,
+          "yPx": 1229
+        }
+      },
+      "surface": "PREDICTION",
+      "uiTimeline": {
+        "interaction": {
+          "contactAtSeconds": 0.85,
+          "selectedAtSeconds": 1.05,
+          "pressAtSeconds": 1.45,
+          "releasedAtSeconds": 1.6
+        }
+      },
+      "move": {
+        "startZoom": 1,
+        "endZoom": 1.015,
+        "offsetU": 0,
+        "offsetV": 0,
+        "intent": "Almost still. The plate is already a pair of hands about to tap, and a push over an interaction pulls the eye away from the thing being done."
+      },
+      "plateGrade": {
+        "midtonePoints": [
+          {
+            "x": 0.08,
+            "y": 0.165
+          },
+          {
+            "x": 0.28,
+            "y": 0.44
+          },
+          {
+            "x": 0.6,
+            "y": 0.75
+          }
+        ],
+        "saturation": 1,
+        "intent": "A three-point lift that brings the room the handset is standing in out of the shadow, so the phone reads as an object on a set rather than as a screen floating in black. The endpoints stay pinned, so the set still goes to black at its darkest."
+      },
+      "subjectRegion": {
+        "xPx": 480,
+        "yPx": 520,
+        "widthPx": 450,
+        "heightPx": 900
+      },
+      "intent": "The prediction, in one action: unselected card, finger contact, selected card, button press and release — 0.75s from contact to release. Every mark of it is inside the interface, at native resolution. There is no outline drawn over the frame."
+    },
+    {
+      "kind": "FOOTAGE_TREATMENT",
+      "sceneNumber": 7,
+      "treatment": {
+        "key": "SUBMISSION_CONFIRMATION",
+        "copy": {
+          "supporting": "LOCKED IN",
+          "headline": "PREDICTION SUBMITTED"
+        },
+        "timing": {
+          "enterAtSeconds": 0.55,
+          "settleSeconds": 0.28,
+          "eventAtSeconds": 0.55
+        },
+        "region": {
+          "xPx": 90,
+          "yPx": 1230,
+          "widthPx": 900,
+          "heightPx": 300
+        },
+        "intent": "Immediately after the bell, and restrained: one red edge on a dark surface. The full-frame red flash this replaces blew the picture out for two-tenths of a second and said nothing."
+      },
+      "grade": {
+        "midtonePoints": [
+          {
+            "x": 0.12,
+            "y": 0.185
+          },
+          {
+            "x": 0.4,
+            "y": 0.52
+          }
+        ],
+        "saturation": 1.02,
+        "intent": "Already the best-exposed of the live-action scenes at subject median 25, so the lift is light and mostly there for continuity with scene 8."
+      },
+      "subjectRegion": {
+        "xPx": 60,
+        "yPx": 380,
+        "widthPx": 960,
+        "heightPx": 810
+      },
+      "intent": "The submission, landing on the bell. The confirmation is the product answering."
+    },
+    {
+      "kind": "FOOTAGE_TREATMENT",
+      "sceneNumber": 8,
+      "treatment": {
+        "key": "PREDICTOR_RANK_RESULT",
+        "copy": {
+          "headline": "PREDICTION CORRECT",
+          "supporting": "YOUR PREDICTOR RANK",
+          "rankFrom": "#27",
+          "rankTo": "#18"
+        },
+        "timing": {
+          "enterAtSeconds": 0.3,
+          "settleSeconds": 0.45,
+          "eventAtSeconds": 1.1
+        },
+        "region": {
+          "xPx": 706,
+          "yPx": 520,
+          "widthPx": 330,
+          "heightPx": 880
+        },
+        "intent": "The fighter stays on the left where he was shot; the region reserved on the right is filled. #27 leaves upward and #18 settles into its place, because the movement is the reward."
+      },
+      "protectedRegion": {
+        "xPx": 706,
+        "yPx": 520,
+        "widthPx": 330,
+        "heightPx": 880
+      },
+      "grade": {
+        "midtonePoints": [
+          {
+            "x": 0.07,
+            "y": 0.15
+          },
+          {
+            "x": 0.25,
+            "y": 0.42
+          },
+          {
+            "x": 0.6,
+            "y": 0.74
+          }
+        ],
+        "saturation": 1.04,
+        "intent": "Subject median 9 and 61% of the region crushed before this. The lift brings the raised arm, the torso and the face back without touching the cage lights behind him."
+      },
+      "subjectRegion": {
+        "xPx": 108,
+        "yPx": 300,
+        "widthPx": 600,
+        "heightPx": 1400
+      },
+      "intent": "The result and the reward, in one frame: the fighter's arm going up on the left, the rank moving on the right."
+    },
+    {
+      "kind": "FOOTAGE_TREATMENT",
+      "sceneNumber": 9,
+      "treatment": {
+        "key": "DISCUSSION_GLASS_PANEL",
+        "copy": {
+          "headline": "JOIN THE DEBATE.",
+          "rows": [
+            "Hitchins by decision — nobody is stopping him",
+            "Salinas has the better body work",
+            "Round 7 is where this gets decided"
+          ]
+        },
+        "timing": {
+          "enterAtSeconds": 0.35,
+          "settleSeconds": 0.45,
+          "eventAtSeconds": 0.9
+        },
+        "region": {
+          "xPx": 80,
+          "yPx": 1250,
+          "widthPx": 920,
+          "heightPx": 560
+        },
+        "intent": "A restrained discussion preview in the clean region below both faces, and a feathered masked sweep that crosses once and disappears. The opaque red bar this replaces was a filled rectangle, which is the only mark a filter graph can make."
+      },
+      "protectedRegion": {
+        "xPx": 80,
+        "yPx": 1250,
+        "widthPx": 920,
+        "heightPx": 560
+      },
+      "grade": {
+        "midtonePoints": [
+          {
+            "x": 0.05,
+            "y": 0.14
+          },
+          {
+            "x": 0.2,
+            "y": 0.4
+          },
+          {
+            "x": 0.55,
+            "y": 0.73
+          }
+        ],
+        "saturation": 1.05,
+        "intent": "Two faces at night, subject median 9 before this and 13 after the first attempt — a miss against the floor, not a pass. The shadow end of the curve is steepened while the endpoints stay pinned, so the street behind them still goes to black."
+      },
+      "subjectRegion": {
+        "xPx": 60,
+        "yPx": 170,
+        "widthPx": 960,
+        "heightPx": 710
+      },
+      "intent": "The room, arguing. Two people and a phone, and the product's own conversation beside them."
+    },
+    {
+      "kind": "PLATE_UI_COMPOSITE",
+      "sceneNumber": 10,
+      "frameId": "FRAME-10",
+      "plateWidthPx": 941,
+      "plateHeightPx": 1672,
+      "screen": {
+        "topLeft": {
+          "xPx": 611,
+          "yPx": 634
+        },
+        "topRight": {
+          "xPx": 806,
+          "yPx": 616
+        },
+        "bottomLeft": {
+          "xPx": 593,
+          "yPx": 1316
+        },
+        "bottomRight": {
+          "xPx": 808,
+          "yPx": 1354
+        }
+      },
+      "surface": "EVENTS_AND_SCHEDULE",
+      "uiTimeline": {
+        "scroll": {
+          "fromPx": 0,
+          "toPx": 220,
+          "startSeconds": 0.4,
+          "endSeconds": 2.4,
+          "easing": "EASE_IN_OUT_CUBIC"
+        },
+        "reveal": {
+          "count": 8,
+          "firstAtSeconds": 0.05,
+          "intervalSeconds": 0.06,
+          "settleSeconds": 0.28
+        }
+      },
+      "move": {
+        "startZoom": 1,
+        "endZoom": 1.015,
+        "offsetU": 0,
+        "offsetV": 0,
+        "intent": "One restrained 1.5% product push that settles and holds. The last beat of a fifteen-second cut has to come to rest, not still be arriving when it ends."
+      },
+      "plateGrade": {
+        "midtonePoints": [
+          {
+            "x": 0.08,
+            "y": 0.165
+          },
+          {
+            "x": 0.28,
+            "y": 0.44
+          },
+          {
+            "x": 0.6,
+            "y": 0.75
+          }
+        ],
+        "saturation": 1,
+        "intent": "A three-point lift that brings the room the handset is standing in out of the shadow, so the phone reads as an object on a set rather than as a screen floating in black. The endpoints stay pinned, so the set still goes to black at its darkest."
+      },
+      "treatment": {
+        "key": "CTA_BRAND_LOCKUP",
+        "copy": {
+          "ctaHeadline": "NEVER MISS FIGHT NIGHT.",
+          "ctaAction": "EXPLORE EVENTS",
+          "supporting": "Every combat sport. One place."
+        },
+        "timing": {
+          "enterAtSeconds": 0.5,
+          "settleSeconds": 0.45,
+          "eventAtSeconds": 1.6
+        },
+        "region": {
+          "xPx": 80,
+          "yPx": 430,
+          "widthPx": 560,
+          "heightPx": 1000
+        },
+        "intent": "The real Combat Reviews mark, the accent rule and the approved call-to-action typography, laid out at delivery resolution and rendered separately from the interface on the handset beside them. The rule illuminates once as the lockup settles."
+      },
+      "subjectRegion": {
+        "xPx": 670,
+        "yPx": 700,
+        "widthPx": 270,
+        "heightPx": 860
+      },
+      "intent": "The close. The product on screen, the mark beside it, and the call to action holding cleanly to fifteen seconds."
+    }
+  ],
+  "transitions": [
+    {
+      "fromScene": 1,
+      "toScene": 2,
+      "kind": "ACTION_MATCHED_CUT",
+      "note": "Cut on the notification settling. What it is about is what the next shot is."
+    },
+    {
+      "fromScene": 2,
+      "toScene": 3,
+      "kind": "UI_MOTION_CONTINUES",
+      "note": "The sport strips are still settling as the schedule begins to scroll, so the interface motion carries across the cut rather than restarting on the other side."
+    },
+    {
+      "fromScene": 3,
+      "toScene": 4,
+      "kind": "HANDSET_WIPE",
+      "note": "Both shots are a handset in the same third of the frame, so the incoming one sweeps the outgoing one off rather than blending with it — the eye stays on the screen across the join."
+    },
+    {
+      "fromScene": 4,
+      "toScene": 5,
+      "kind": "ACTION_MATCHED_CUT",
+      "note": "The rankings name two fighters and the next shot is the two of them."
+    },
+    {
+      "fromScene": 5,
+      "toScene": 6,
+      "kind": "SCREEN_POSITION_MATCH_CUT",
+      "note": "The comparison panel is in the centre of the frame and the prediction card arrives in the same place, on a handset."
+    },
+    {
+      "fromScene": 6,
+      "toScene": 7,
+      "kind": "TAP_CUT",
+      "note": "The cut is the press. The button goes down and the bell is already ringing."
+    },
+    {
+      "fromScene": 7,
+      "toScene": 8,
+      "kind": "IMPACT_CUT",
+      "note": "Straight off the impact into the result, with no gap for the viewer to leave in."
+    },
+    {
+      "fromScene": 8,
+      "toScene": 9,
+      "kind": "HANDSET_WIPE",
+      "note": "The rank settles and the frame moves to the people talking about it; the handset in the incoming shot carries the eye across."
+    },
+    {
+      "fromScene": 9,
+      "toScene": 10,
+      "kind": "SCREEN_POSITION_MATCH_CUT",
+      "note": "The discussion panel sits low-centre and the closing handset comes up in the same part of the frame, so the last cut is the quietest one."
+    }
+  ]
+}

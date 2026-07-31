@@ -60,7 +60,7 @@
         {
           "key": "EDGE_VIGNETTE",
           "colour": "PRIMARY",
-          "opacity": 0.5,
+          "opacity": 0.26,
           "xPx": 0,
           "yPx": 0,
           "widthPx": 1080,
@@ -89,7 +89,7 @@
       "index": 1,
       "role": "INFORMATION",
       "description": "Panel two, revealed as its own five vertical discipline slices in rhythmic sequence from left to right, so the breadth of the sport assembles rather than simply appearing. The headline resolves with the final slice.",
-      "durationSeconds": 1.4,
+      "durationSeconds": 1.24,
       "source": {
         "assetId": "storyboard-panel-02",
         "requiredTags": []
@@ -99,14 +99,14 @@
         "intensity": 0.5
       },
       "transitionIn": {
-        "kind": "IMPACT_CUT",
-        "durationSeconds": 0.2
+        "kind": "CUT",
+        "durationSeconds": 0.04
       },
       "decorations": [
         {
           "key": "EDGE_VIGNETTE",
           "colour": "PRIMARY",
-          "opacity": 0.45,
+          "opacity": 0.24,
           "xPx": 0,
           "yPx": 0,
           "widthPx": 1080,
@@ -146,24 +146,12 @@
         {
           "key": "EDGE_VIGNETTE",
           "colour": "PRIMARY",
-          "opacity": 0.4,
+          "opacity": 0.22,
           "xPx": 0,
           "yPx": 0,
           "widthPx": 1080,
           "heightPx": 1920,
           "thicknessPx": 6
-        },
-        {
-          "key": "FOCUS_DIM",
-          "colour": "PRIMARY",
-          "opacity": 0.3,
-          "xPx": 78,
-          "yPx": 520,
-          "widthPx": 924,
-          "heightPx": 900,
-          "thicknessPx": 6,
-          "startOffsetSeconds": 0.2,
-          "durationSeconds": 1.5
         }
       ],
       "audioCues": [
@@ -187,7 +175,7 @@
       "index": 3,
       "role": "INFORMATION",
       "description": "The rankings screen on the same handset in the same place, under a push of the same magnitude, entered on a screen-position match cut. Two beats, one move: the cut lands mid-push so the eye reads it as one continuous look at one device rather than two independent zooms.",
-      "durationSeconds": 1.5,
+      "durationSeconds": 1.6,
       "source": {
         "assetId": "storyboard-panel-04",
         "requiredTags": []
@@ -197,31 +185,19 @@
         "intensity": 0.5
       },
       "transitionIn": {
-        "kind": "CUT",
-        "durationSeconds": 0.2
+        "kind": "HANDSET_WIPE",
+        "durationSeconds": 0.3
       },
       "decorations": [
         {
           "key": "EDGE_VIGNETTE",
           "colour": "PRIMARY",
-          "opacity": 0.4,
+          "opacity": 0.22,
           "xPx": 0,
           "yPx": 0,
           "widthPx": 1080,
           "heightPx": 1920,
           "thicknessPx": 6
-        },
-        {
-          "key": "FOCUS_DIM",
-          "colour": "PRIMARY",
-          "opacity": 0.3,
-          "xPx": 78,
-          "yPx": 520,
-          "widthPx": 924,
-          "heightPx": 900,
-          "thicknessPx": 6,
-          "startOffsetSeconds": 0.25,
-          "durationSeconds": 1
         }
       ],
       "audioCues": [
@@ -256,7 +232,7 @@
         {
           "key": "EDGE_VIGNETTE",
           "colour": "PRIMARY",
-          "opacity": 0.45,
+          "opacity": 0.24,
           "xPx": 0,
           "yPx": 0,
           "widthPx": 1080,
@@ -289,36 +265,12 @@
         {
           "key": "EDGE_VIGNETTE",
           "colour": "PRIMARY",
-          "opacity": 0.4,
+          "opacity": 0.22,
           "xPx": 0,
           "yPx": 0,
           "widthPx": 1080,
           "heightPx": 1920,
           "thicknessPx": 6
-        },
-        {
-          "key": "TAP_INDICATOR",
-          "colour": "ACCENT",
-          "opacity": 0.85,
-          "xPx": 688,
-          "yPx": 1082,
-          "widthPx": 168,
-          "heightPx": 168,
-          "thicknessPx": 8,
-          "startOffsetSeconds": 0.2,
-          "durationSeconds": 0.55
-        },
-        {
-          "key": "ACCENT_OUTLINE",
-          "colour": "ACCENT",
-          "opacity": 0.9,
-          "xPx": 96,
-          "yPx": 1040,
-          "widthPx": 888,
-          "heightPx": 250,
-          "thicknessPx": 5,
-          "startOffsetSeconds": 0.75,
-          "durationSeconds": 0.7
         }
       ],
       "audioCues": [
@@ -336,7 +288,7 @@
       "index": 6,
       "role": "PREDICTION",
       "description": "Panel seven, entered on an impact cut and pushed hard. A brand-red confirmation flash covers the frame for a fifth of a second on the bell, so the submission lands as a physical event rather than as another caption.",
-      "durationSeconds": 1.033333,
+      "durationSeconds": 0.94,
       "source": {
         "assetId": "storyboard-panel-07",
         "requiredTags": []
@@ -346,26 +298,14 @@
         "intensity": 1
       },
       "transitionIn": {
-        "kind": "IMPACT_CUT",
-        "durationSeconds": 0.133333
+        "kind": "CUT",
+        "durationSeconds": 0.04
       },
       "decorations": [
         {
-          "key": "BRAND_COLOUR_CALLOUT",
-          "colour": "ACCENT",
-          "opacity": 0.4,
-          "xPx": 0,
-          "yPx": 0,
-          "widthPx": 1080,
-          "heightPx": 1920,
-          "thicknessPx": 6,
-          "startOffsetSeconds": 0,
-          "durationSeconds": 0.2
-        },
-        {
           "key": "EDGE_VIGNETTE",
           "colour": "PRIMARY",
-          "opacity": 0.5,
+          "opacity": 0.26,
           "xPx": 0,
           "yPx": 0,
           "widthPx": 1080,
@@ -394,7 +334,7 @@
       "index": 7,
       "role": "DISCUSSION",
       "description": "Panel eight. The push lifts with the celebration while grain adds crowd energy, and the result card stays clear of any treatment so the record improvement remains readable.",
-      "durationSeconds": 1.9,
+      "durationSeconds": 1.84,
       "source": {
         "assetId": "storyboard-panel-08",
         "requiredTags": []
@@ -405,13 +345,13 @@
       },
       "transitionIn": {
         "kind": "CUT",
-        "durationSeconds": 0.1
+        "durationSeconds": 0.04
       },
       "decorations": [
         {
           "key": "EDGE_VIGNETTE",
           "colour": "PRIMARY",
-          "opacity": 0.42,
+          "opacity": 0.24,
           "xPx": 0,
           "yPx": 0,
           "widthPx": 1080,
@@ -421,7 +361,7 @@
         {
           "key": "FILM_GRAIN",
           "colour": "PRIMARY",
-          "opacity": 0.16,
+          "opacity": 0.1,
           "xPx": 0,
           "yPx": 0,
           "widthPx": 1080,
@@ -460,31 +400,19 @@
         "intensity": 0.45
       },
       "transitionIn": {
-        "kind": "CUT",
+        "kind": "HANDSET_WIPE",
         "durationSeconds": 0.3
       },
       "decorations": [
         {
           "key": "EDGE_VIGNETTE",
           "colour": "PRIMARY",
-          "opacity": 0.4,
+          "opacity": 0.22,
           "xPx": 0,
           "yPx": 0,
           "widthPx": 1080,
           "heightPx": 1920,
           "thicknessPx": 6
-        },
-        {
-          "key": "LIGHT_SWEEP",
-          "colour": "ACCENT",
-          "opacity": 0.22,
-          "xPx": 0,
-          "yPx": 520,
-          "widthPx": 1080,
-          "heightPx": 880,
-          "thicknessPx": 6,
-          "startOffsetSeconds": 0.5,
-          "durationSeconds": 0.9
         }
       ],
       "audioCues": [
@@ -519,24 +447,12 @@
         {
           "key": "EDGE_VIGNETTE",
           "colour": "PRIMARY",
-          "opacity": 0.35,
+          "opacity": 0.2,
           "xPx": 0,
           "yPx": 0,
           "widthPx": 1080,
           "heightPx": 1920,
           "thicknessPx": 6
-        },
-        {
-          "key": "BRAND_COLOUR_CALLOUT",
-          "colour": "ACCENT",
-          "opacity": 0.3,
-          "xPx": 94,
-          "yPx": 1148,
-          "widthPx": 388,
-          "heightPx": 92,
-          "thicknessPx": 6,
-          "startOffsetSeconds": 0.5,
-          "durationSeconds": 0.42
         }
       ],
       "audioCues": [
@@ -596,5 +512,6 @@
     "safeAreaBottomPx": 420,
     "logoWindows": [],
     "showLogoOverlay": false
-  }
+  },
+  "deliveryQualityCrf": 17
 }

@@ -28,6 +28,22 @@ import {
   type GeneratedSceneMedia,
   type SceneStillMedia,
 } from '../flagship/run-flagship-v2';
+import {
+  loadProductStoryPlan,
+  runProductStoryStage,
+  type ProductStoryStageResult,
+} from '../product-story/product-story-stage';
+import {
+  buildProductMockupProvenance,
+  buildStoryExposureReport,
+  buildStoryTransitionReport,
+  buildStoryVisibleDefectsReport,
+  buildUiCalibrationReport,
+  buildZeroCostExecutionRecord,
+} from '../product-story/story-reports';
+import { PRODUCT_STORY_LABEL } from '../product-story/story-contracts';
+import { writeOldVersusNewGallery } from '../product-story/story-gallery';
+import { applyProductStoryRouting } from '../product-story/story-routing';
 import { loadAcceptanceBrief } from '../scene-acceptance/acceptance-brief';
 import {
   compositeNotification,
@@ -79,6 +95,7 @@ import {
   generateSceneClip,
   prepareSceneClip,
   probeClip,
+  SCENE_TRIM_HANDLE_SECONDS,
   sceneCacheKey,
   type GeneratedSceneClip,
   type PreparedSceneClip,
@@ -178,6 +195,26 @@ export interface StoryboardVideoOptions {
    * the push underneath does not scale the type.
    */
   readonly notificationBriefPath?: string;
+  /**
+   * The authored product story, when the run should composite the corrected
+   * full-frame cut rather than render storyboard panels.
+   *
+   * Optional and absent by default, so every run written before this milestone
+   * behaves exactly as it did. Supplied, it reroutes the scenes it composites
+   * *before* the cost estimate — so those scenes can never reach a ceiling, an
+   * upload or a provider — and then replaces their pictures after the moving
+   * sources are prepared.
+   */
+  readonly productStoryPath?: string;
+  /**
+   * The cut this run is correcting, when there is one.
+   *
+   * Read only to sample frames for the old-versus-new gallery: a reviewer
+   * asked to judge a correction needs the thing it corrected beside it. Never
+   * written to, and absent simply leaves the "before" column empty rather than
+   * inventing one.
+   */
+  readonly compareWithMasterPath?: string;
   readonly outputDirectory: string;
   readonly workPackRoot: string;
   readonly campaignDirectory: string;
@@ -275,6 +312,39 @@ export interface StoryboardVideoResult {
   readonly postMotion?: readonly AppliedPostMotion[];
   /** Scenes demoted to their still because the generated clip failed inspection. */
   readonly defectSubstitutions?: readonly DefectSubstitution[];
+}
+
+/**
+ * The delivered bitrate, measured from the file.
+ *
+ * Reported rather than asserted: the rejected cut came back at roughly
+ * 2.5 Mbps, and "we raised the quality target" is a claim about the encoder
+ * settings while this is a fact about the master. A file that cannot be probed
+ * is `null`, which the report records as NOT_MEASURED rather than as a pass.
+ */
+async function measureBitrateKbps(
+  moviePath: string,
+  binaries: FfmpegBinaries,
+  runner: CommandRunner,
+): Promise<number | null> {
+  const result = await runner.run(
+    binaries.ffprobe,
+    [
+      '-v',
+      'error',
+      '-select_streams',
+      'v:0',
+      '-show_entries',
+      'format=bit_rate',
+      '-of',
+      'default=noprint_wrappers=1:nokey=1',
+      moviePath,
+    ],
+    { timeoutMs: 60_000 },
+  );
+  if (result.exitCode !== 0) return null;
+  const bits = Number(result.stdout.trim());
+  return Number.isFinite(bits) && bits > 0 ? Math.round(bits / 1000) : null;
 }
 
 async function writeArtefact(runDirectory: string, name: string, value: unknown): Promise<string> {
@@ -421,13 +491,44 @@ export async function runStoryboardVideo(
       keyframes,
       preGeneratedClips,
       footagePack,
-      decisions,
+      decisions: baseDecisions,
       checkedPrompts,
       campaignDirectory,
       workPackRoot,
     } = context;
     const requiredFor = (sceneNumber: number): number =>
       context.requiredSecondsByScene.get(sceneNumber) ?? 0;
+
+    // --- 6b. the product story reroutes what it composites -------------------
+    //
+    // Before the cost estimate, deliberately. A scene the story composites no
+    // longer requires generation, so it is priced at nothing and can never
+    // reach a ceiling, an upload or a provider. Doing this afterwards would
+    // leave the printed maximum describing a run that was not the one about to
+    // happen.
+    const productStory = options.productStoryPath
+      ? await loadProductStoryPlan(options.productStoryPath)
+      : null;
+    const routing = productStory
+      ? applyProductStoryRouting({ decisions: baseDecisions, plan: productStory })
+      : null;
+    const decisions = routing?.decisions ?? baseDecisions;
+    if (routing) {
+      onProgress?.(
+        `the product story composites ${routing.changes.length} scene(s) deterministically (${routing.changes
+          .map((change) => change.sceneNumber)
+          .join(', ')}); none of them buys a moving source`,
+      );
+      artefacts.push(
+        await writeArtefact(runDirectory, 'product-story-routing.json', {
+          notice:
+            'Every scene below is composited from material already on disk. None of them requires generation, so none can spend.',
+          label: PRODUCT_STORY_LABEL,
+          authoredBy: productStory?.authoredBy ?? null,
+          changes: routing.changes,
+        }),
+      );
+    }
 
     // Byte-identity of everything a reviewer already approved is a promise the
     // run keeps rather than states. The checksums are taken before generation
@@ -643,7 +744,11 @@ export async function runStoryboardVideo(
     // exact clip about to be used.
     onProgress?.('inspecting every resolved moving clip and evaluating the motion gate');
     const review = (motionReview = await runMotionReview({
-      context,
+      // The rerouted decisions, not the base ones. A scene the product story
+      // composites deterministically has no generated motion to review, and
+      // asking a reviewer to approve one would train them to approve without
+      // looking — the same rule that keeps stills out of the gate.
+      context: { ...context, decisions },
       generatedPathsByScene: new Map(
         [...generated.entries()].map(([sceneNumber, clip]) => [sceneNumber, clip.originalPath]),
       ),
@@ -852,6 +957,90 @@ export async function runStoryboardVideo(
       ),
     );
 
+    // --- 10b2. the product story, composited over the prepared pictures -----
+    //
+    // The only point at which all three inputs exist: the staged plates, the
+    // trimmed clips, and the beat durations the cut will actually use. Every
+    // scene it builds replaces an entry in `prepared`, so everything after it
+    // — the derived plan, the flagship staging, preflight, rights, segment
+    // selection, the filter graph and actual-media QA — runs unchanged.
+    let productStoryResult: ProductStoryStageResult | null = null;
+    if (productStory) {
+      if (!stagedPlates) {
+        throw new StoryboardVideoError(
+          'INVALID_STORYBOARD',
+          'the product story composites from the operator’s authoritative plates, so the run needs --plates-dir. Nothing falls back to the storyboard panel.',
+        );
+      }
+      const plates = new Map(
+        stagedPlates.plates.map((plate) => [
+          plate.frameId,
+          {
+            frameId: plate.frameId,
+            absolutePath: plate.stagedAbsolutePath,
+            widthPx: plate.widthPx,
+            heightPx: plate.heightPx,
+            checksumSha256: plate.checksumSha256,
+          },
+        ]),
+      );
+      const beatDurations = new Map<number, number>();
+      const handleSeconds = new Map<number, { head: number; tail: number }>();
+      basePlan.beats.forEach((beat, index) => {
+        beatDurations.set(index + 1, beat.durationSeconds);
+        handleSeconds.set(index + 1, {
+          head: beat.transitionIn ? SCENE_TRIM_HANDLE_SECONDS : 0,
+          tail: basePlan.beats[index + 1]?.transitionIn ? SCENE_TRIM_HANDLE_SECONDS : 0,
+        });
+      });
+
+      onProgress?.('compositing the corrected full-frame product story');
+      productStoryResult = await runProductStoryStage({
+        plan: productStory,
+        prepared,
+        plates,
+        beatDurations,
+        handleSeconds,
+        logoPath: join(workPackRoot, 'asset-root', 'brand', 'logo.png'),
+        outputDirectory: runDirectory,
+        runner,
+        binaries: options.binaries,
+        accentHex: basePlan.brandConstraints.accentColorHex,
+        ...(onProgress ? { onProgress } : {}),
+      });
+      for (const [sceneNumber, clip] of productStoryResult.replacements) {
+        prepared.set(sceneNumber, clip);
+      }
+      artefacts.push(
+        await writeArtefact(
+          runDirectory,
+          'ui-calibration-report.json',
+          buildUiCalibrationReport({ plan: productStory, built: productStoryResult.built }),
+        ),
+      );
+      artefacts.push(
+        await writeArtefact(
+          runDirectory,
+          'product-mockup-provenance.json',
+          buildProductMockupProvenance({ plan: productStory }),
+        ),
+      );
+      artefacts.push(
+        await writeArtefact(
+          runDirectory,
+          'exposure-report.json',
+          buildStoryExposureReport({ records: productStoryResult.exposure }),
+        ),
+      );
+      artefacts.push(
+        await writeArtefact(
+          runDirectory,
+          'product-story-transition-report.json',
+          buildStoryTransitionReport({ plan: productStory }),
+        ),
+      );
+    }
+
     // --- 10c. the locked notification, composited after the motion ----------
     //
     // Last, deliberately. The model was asked for a clean plate and never saw
@@ -1049,6 +1238,69 @@ export async function runStoryboardVideo(
         }),
       ),
     );
+
+    if (productStory && productStoryResult) {
+      const measured = (flagship.measured as Record<string, unknown> | undefined) ?? null;
+      if (flagship.outputPath) {
+        let cursor = 0;
+        const spans = basePlan.beats.map((beat, index) => {
+          const overlap = beat.transitionIn?.durationSeconds ?? 0;
+          const startSeconds = index === 0 ? 0 : cursor - overlap;
+          const endSeconds = startSeconds + beat.durationSeconds;
+          cursor = endSeconds;
+          return {
+            sceneNumber: index + 1,
+            sceneRole: storyboard.frames[index]?.sceneRole ?? beat.id,
+            startSeconds,
+            endSeconds,
+          };
+        });
+        artefacts.push(
+          await writeOldVersusNewGallery({
+            runDirectory,
+            plan: productStory,
+            previousMasterPath: options.compareWithMasterPath ?? null,
+            newMasterPath: flagship.outputPath,
+            spans,
+            exposure: productStoryResult.exposure,
+            runner,
+            binaries: options.binaries,
+          }),
+        );
+      }
+      const bitrateKbps = flagship.outputPath
+        ? await measureBitrateKbps(flagship.outputPath, options.binaries, runner)
+        : null;
+      artefacts.push(
+        await writeArtefact(
+          runDirectory,
+          'product-story-visible-defects-report.json',
+          buildStoryVisibleDefectsReport({
+            plan: productStory,
+            built: productStoryResult.built,
+            exposure: productStoryResult.exposure,
+            measuredMaster: measured,
+            bitrateKbps,
+            previousBitrateKbps: options.compareWithMasterPath
+              ? await measureBitrateKbps(options.compareWithMasterPath, options.binaries, runner)
+              : null,
+          }),
+        ),
+      );
+      artefacts.push(
+        await writeArtefact(
+          runDirectory,
+          'zero-cost-execution-record.json',
+          buildZeroCostExecutionRecord({
+            plan: productStory,
+            ltxCallCount: [...generated.values()].filter((clip) => clip.ltxCalled).length,
+            actualCostCents: [...generated.values()].reduce((sum, clip) => sum + clip.costCents, 0),
+            maxCostCents: options.maxCostCents,
+            maxGenerations: options.maxGenerations ?? 0,
+          }),
+        ),
+      );
+    }
 
     const finalManifestSourceByScene = await readFinalManifestSources(runDirectory, decisions);
     const outcomes = new Map<number, GenerationOutcomeForReport>();

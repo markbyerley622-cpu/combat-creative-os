@@ -265,6 +265,7 @@ export function buildPreviewEdit(options: BuildPreviewEditOptions): PreviewEdit 
       durationToleranceFrames: 2,
       deliveryProfileKey: 'VERTICAL_SHORT_FORM_V1',
       deliveryProfileVersion: 1,
+      ...(plan.deliveryQualityCrf === undefined ? {} : { qualityCrf: plan.deliveryQualityCrf }),
     },
     sources,
     scenes,

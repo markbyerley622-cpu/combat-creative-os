@@ -943,7 +943,7 @@ export function intentionallyStillWindows(manifest: RenderManifest): readonly Re
     // dropped source, a stalled zoompan, an encoder that repeated a frame —
     // not to argue with a manifest that deliberately holds a screenshot so a
     // viewer can read it.
-    if (declaresStillness(scene)) {
+    if (declaresStillness(scene, manifest)) {
       windows.push({ startSeconds, endSeconds: startSeconds + scene.durationSeconds });
     }
   });
@@ -959,8 +959,28 @@ interface Region0 {
   readonly endSeconds: number;
 }
 
-/** Whether a scene's own manifest entry says its picture does not move. */
-function declaresStillness(scene: RenderManifest['scenes'][number]): boolean {
+/**
+ * Whether a scene's own manifest entry says its picture does not move.
+ *
+ * **A scene whose source is a video is never still**, whatever treatment it
+ * declares, and that qualification is the whole of this function's value.
+ * `STATIC_HOLD` means "add no synthetic camera move" — which is exactly what a
+ * scene carrying real footage or a composited interface asks for, because the
+ * movement is already in the source. Reading it as "the picture does not move"
+ * excused every moving scene from the freeze walk, and a cut whose scenes are
+ * all moving sources then had *nothing* left to sample: the one check that
+ * catches a dropped source, a stalled `zoompan` or a repeated frame was
+ * switched off by the manifest describing itself correctly.
+ *
+ * A still image held so a viewer can read it is genuinely still, and that is
+ * the case the exclusion exists for.
+ */
+function declaresStillness(
+  scene: RenderManifest['scenes'][number],
+  manifest: RenderManifest,
+): boolean {
+  const source = manifest.sources.find((candidate) => candidate.id === scene.sourceId);
+  if (source && source.kind === 'VIDEO') return false;
   if (scene.treatment) {
     return (
       scene.treatment.key === 'STATIC_HOLD' ||

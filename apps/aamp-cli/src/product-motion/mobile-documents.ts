@@ -53,7 +53,12 @@ export interface MobileDocumentSpec {
   readonly html: string;
 }
 
-const CSS = (viewport: CanonicalMobileViewport): string => `
+/**
+ * The product's stylesheet, exported so every surface in the repository is laid
+ * out by one of them. Two stylesheets for one product is how two products end
+ * up on screen.
+ */
+export const mobileDocumentCss = (viewport: CanonicalMobileViewport): string => `
   *, *::before, *::after { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; }
   html { -webkit-text-size-adjust: 100%; }
@@ -275,7 +280,7 @@ export function buildMobileDocuments(options: {
   readonly markDataUri: string;
 }): readonly MobileDocumentSpec[] {
   const { viewport, markDataUri } = options;
-  const css = CSS(viewport);
+  const css = mobileDocumentCss(viewport);
   const page = (title: string, body: string, active: string): string =>
     `<!doctype html><html lang="en"><head><meta charset="utf-8">` +
     `<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">` +

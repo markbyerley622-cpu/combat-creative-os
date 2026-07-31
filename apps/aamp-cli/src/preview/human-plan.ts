@@ -294,6 +294,17 @@ const HumanCreativePlanObjectSchema = z
     campaignPromptSha256: Sha256Schema,
     /** The cut this plan is for. Checked against the request at load time. */
     targetDurationSeconds: z.number().positive().max(120),
+    /**
+     * The rate factor this cut is delivered at.
+     *
+     * Optional, and absent leaves the renderer's own default in place, so
+     * every plan written before this field renders byte-identically. A cut
+     * carrying photographed low-light footage and fine interface typography
+     * needs more bits than the default was chosen for, and asking for them is
+     * a delivery decision a person makes rather than something inferred from
+     * the material.
+     */
+    deliveryQualityCrf: z.number().int().min(14).max(20).optional(),
 
     strategy: PlanStrategySchema,
     creativeDirection: PlanCreativeDirectionSchema,
